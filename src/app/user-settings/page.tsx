@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Home } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
+import { User } from "@supabase/supabase-js";
 
 type FormValues = {
   firstName: string;
@@ -22,7 +23,7 @@ export default function UserSettings() {
   const router = useRouter();
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   useEffect(() => {
     const fetchUserInfo = async () => {
@@ -41,7 +42,7 @@ export default function UserSettings() {
 
   const onSubmit = async (data: FormValues) => {
     // Auth の user_metadata を更新
-    const { data: updatedUser, error } = await supabase.auth.updateUser({
+    const { error } = await supabase.auth.updateUser({
       data: { 
         firstName: data.firstName, 
         lastName: data.lastName, 

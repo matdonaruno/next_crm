@@ -38,10 +38,10 @@ export default function ReagentRegistration() {
   useRequireAuth();
   const { register, setValue, getValues } = useForm<FormValues>();
   const router = useRouter();
-  const [error, setError] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showCamera, setShowCamera] = useState(false);
-  const [scanning, setScanning] = useState(false);
+  const [error, setError] = useState<string>("");
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [showCamera, setShowCamera] = useState<boolean>(false);
+  const [scanning, setScanning] = useState<boolean>(false);
   const webcamRef = useRef<Webcam>(null);
   const [departments, setDepartments] = useState<string[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -82,7 +82,7 @@ export default function ReagentRegistration() {
         addDebugLog("商品CSV読み込み完了: " + JSON.stringify(prods));
       } catch (error) {
         console.error("CSV読み込みエラー", error);
-        addDebugLog("CSV読み込みエラー: " + error);
+        addDebugLog("CSV読み込みエラー: " + (error instanceof Error ? error.message : String(error)));
       }
     };
     fetchProducts();
@@ -118,7 +118,7 @@ export default function ReagentRegistration() {
           addDebugLog("テスト画像バーコード認識成功: " + testResultText);
           parseGS1Barcode(testResultText);
         })
-        .catch((e) => {
+        .catch((e: unknown) => {
           console.error("テスト画像解析エラー:", e);
           setError("テスト画像バーコード解析に失敗しました");
         });
@@ -186,9 +186,16 @@ export default function ReagentRegistration() {
           addDebugLog("ZXingバーコード認識成功: " + resultText);
           parseGS1Barcode(resultText);
           setShowCamera(false);
-        } catch (err: any) {
-          console.error("バーコード解析エラー:", err);
-          setError("バーコードの解析に失敗しました");
+        } catch (err: unknown) {
+          if (err instanceof Error) {
+            console.error("バーコード解析エラー:", err);
+            setError("バーコードの解析に失敗しました");
+            addDebugLog("バーコード解析エラー: " + err.message);
+          } else {
+            console.error("バーコード解析エラー:", err);
+            setError("バーコードの解析に失敗しました");
+            addDebugLog("バーコード解析エラー: " + String(err));
+          }
           // テスト用に、静的画像での解析を実施
           addDebugLog("静的テスト画像からバーコード解析開始");
           const testImage = new Image();
@@ -202,9 +209,16 @@ export default function ReagentRegistration() {
                 addDebugLog("テスト画像バーコード認識成功: " + testResultText);
                 parseGS1Barcode(testResultText);
               })
-              .catch((e) => {
-                console.error("テスト画像解析エラー:", e);
-                setError("テスト画像バーコード解析に失敗しました");
+              .catch((e: unknown) => {
+                if (e instanceof Error) {
+                  console.error("テスト画像解析エラー:", e);
+                  setError("テスト画像バーコード解析に失敗しました");
+                  addDebugLog("テスト画像解析エラー: " + e.message);
+                } else {
+                  console.error("テスト画像解析エラー:", e);
+                  setError("テスト画像バーコード解析に失敗しました");
+                  addDebugLog("テスト画像解析エラー: " + String(e));
+                }
               })
               .finally(() => {
                 setScanning(false);
@@ -240,13 +254,17 @@ export default function ReagentRegistration() {
   };
 
   // 現在のユーザーのプロフィールが存在するか確認し、存在しなければ作成する関数
-  const ensureUserProfile = async (user: any) => {
+  const ensureUserProfile = async (
+    user: { id: string; email?: string; user_metadata: { fullName?: string } }
+  ): Promise<boolean> => {
+    // email が undefined の場合は空文字や適切なデフォルト値を設定する
+    const userEmail = user.email ?? "";
     const { data, error } = await supabase
       .from("profiles")
       .select("id")
       .eq("id", user.id)
       .maybeSingle();
-
+  
     if (error) {
       console.error("Error checking profile:", error.message);
       return false;
@@ -255,7 +273,7 @@ export default function ReagentRegistration() {
       const { error: insertError } = await supabase.from("profiles").insert({
         id: user.id,
         fullname: user.user_metadata.fullName || "",
-        email: user.email,
+        email: userEmail,
       });
       if (insertError) {
         console.error("Error inserting profile:", insertError.message);
@@ -264,6 +282,7 @@ export default function ReagentRegistration() {
     }
     return true;
   };
+  
 
   // 試薬登録処理
   const registerReagent = async (startUsage: boolean) => {
@@ -285,23 +304,19 @@ export default function ReagentRegistration() {
       const registeredBy = currentUser.id;
       const formData = getValues();
 
-      const { data, error } = await supabase
-        .from("reagents")
-        .insert([
-          {
-            department: formData.department,
-            name: formData.reagentName,
-            specification: formData.specification,
-            lotNo: formData.lotNo,
-            expirationDate: formData.expirationDate,
-            registeredBy: registeredBy,
-            used: startUsage ? true : false,
-            used_at: startUsage ? new Date().toISOString() : null,
-            ended_at: null,
-          },
-        ])
-        .select()
-        .single();
+      const { error } = await supabase.from("reagents").insert([
+        {
+          department: formData.department,
+          name: formData.reagentName,
+          specification: formData.specification,
+          lotNo: formData.lotNo,
+          expirationDate: formData.expirationDate,
+          registeredBy: registeredBy,
+          used: startUsage ? true : false,
+          used_at: startUsage ? new Date().toISOString() : null,
+          ended_at: null,
+        },
+      ]);
 
       if (error) {
         setError(error.message);
@@ -310,8 +325,12 @@ export default function ReagentRegistration() {
       }
 
       router.push("/");
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError(String(err));
+      }
     }
     setIsSubmitting(false);
   };

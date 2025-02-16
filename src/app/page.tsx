@@ -108,10 +108,6 @@ export default function DashboardPage() {
   // フィルター用の状態
   const [selectedDepartment, setSelectedDepartment] = useState("all");
   const [showEnded, setShowEnded] = useState(false);
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-  };
 
   // 試薬データの取得（profiles との join で registeredBy, used_by, ended_by の fullname を取得）
   const fetchReagents = async () => {

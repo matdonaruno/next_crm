@@ -1,13 +1,12 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -23,13 +22,35 @@ type ReagentItemFormValues = {
   user: string;
 };
 
+interface Reagent {
+  id: number;
+  name: string;
+  department: string;
+  lotNo: string;
+  specification: string;
+  expirationDate: string;
+  registrationDate: string;
+  registeredBy: string;
+  used_at: string;
+  ended_at: string;
+  used: boolean;
+}
+
+interface ItemType {
+  id: number;
+  name: string;
+  usageStartDate: string;
+  user: string;
+  created_at: string;
+}
+
 export default function ReagentDetailPage() {
     useRequireAuth();
   const router = useRouter();
   const params = useParams();
   const reagentId = params.id;
-  const [reagent, setReagent] = useState<any>(null);
-  const [items, setItems] = useState<any[]>([]);
+  const [reagent, setReagent] = useState<Reagent | null>(null);
+  const [items, setItems] = useState<ItemType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const {
@@ -38,8 +59,7 @@ export default function ReagentDetailPage() {
     reset,
   } = useForm<ReagentItemFormValues>();
 
-  // 対象試薬パッケージの取得
-  const fetchReagent = async () => {
+  const fetchReagent = useCallback(async () => {
     setLoading(true);
     const { data, error } = await supabase
       .from("reagents")
@@ -53,10 +73,9 @@ export default function ReagentDetailPage() {
       setReagent(data);
       setLoading(false);
     }
-  };
+  }, [reagentId]);
 
-  // 試薬アイテム一覧の取得
-  const fetchItems = async () => {
+  const fetchItems = useCallback(async () => {
     const { data, error } = await supabase
       .from("reagent_items")
       .select("*")
@@ -66,14 +85,14 @@ export default function ReagentDetailPage() {
     } else {
       setItems(data || []);
     }
-  };
+  }, [reagentId]);
 
   useEffect(() => {
     if (reagentId) {
       fetchReagent();
       fetchItems();
     }
-  }, [reagentId]);
+  }, [reagentId, fetchReagent, fetchItems]);
 
   // 使用終了ボタン押下時の処理
   const handleUsageEnd = async () => {
