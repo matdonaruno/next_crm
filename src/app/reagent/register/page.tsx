@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import Webcam from "react-webcam";
 import { supabase } from "@/lib/supabaseClient";
@@ -38,8 +38,6 @@ interface Product {
   name: string;
 }
 
-const FAILURE_THRESHOLD = 3;
-
 export default function ReagentRegistration() {
   useRequireAuth();
   const { register, setValue, getValues, reset } = useForm<FormValues>();
@@ -49,7 +47,6 @@ export default function ReagentRegistration() {
   const [showCamera, setShowCamera] = useState<boolean>(false);
   const [scanning, setScanning] = useState<boolean>(false);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const [failureCount, setFailureCount] = useState<number>(0);
   const [registrationComplete, setRegistrationComplete] = useState<boolean>(false);
   const webcamRef = useRef<Webcam>(null);
   const [departments, setDepartments] = useState<string[]>([]);
@@ -110,17 +107,18 @@ export default function ReagentRegistration() {
   };
 
   // ZXing リーダーのヒント設定（GS1バーコード用）
-  const hints = new Map();
-  hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128]);
-  hints.set(DecodeHintType.TRY_HARDER, true);
-  const codeReader = new BrowserMultiFormatReader(hints);
+  const codeReader = useMemo(() => {
+    const hints = new Map();
+    hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128]);
+    hints.set(DecodeHintType.TRY_HARDER, true);
+    return new BrowserMultiFormatReader(hints);
+  }, []);
 
   // バーコード撮影ボタン（手動起動）
   const handleBarcodeScan = () => {
     addDebugLog("カメラ表示開始（手動）");
     setShowCamera(true);
     setError("");
-    setFailureCount(0);
   };
 
   // テスト画像での解析ボタン
@@ -145,27 +143,24 @@ export default function ReagentRegistration() {
   };
 
   // GS1バーコードのパース処理
-  const parseGS1Barcode = (barcode: string) => {
+  const parseGS1Barcode = useCallback((barcode: string) => {
     addDebugLog("GS1バーコード解析開始");
-    // 正規表現例: 01XXXXXXXXXXXXXX17XXXXXX10...30...
     const regex = /^01(\d{14})17(\d{6})10(\d+)(?:30(\d+))?$/;
     const match = barcode.match(regex);
     if (match) {
       addDebugLog("正規表現マッチ成功");
-      const gtin = match[1]; // 商品コード
+      const gtin = match[1];
       const expiryRaw = match[2];
       const lot = match[3];
       addDebugLog("GTIN: " + gtin);
       addDebugLog("生の有効期限: " + expiryRaw);
       addDebugLog("ロット番号: " + lot);
-      // 有効期限の変換（例：240427 → 2024-04-27）
       const yearPrefix = parseInt(expiryRaw.substring(0, 2)) >= 50 ? "19" : "20";
       const formattedExpiry = `${yearPrefix}${expiryRaw.substring(0, 2)}-${expiryRaw.substring(2, 4)}-${expiryRaw.substring(4, 6)}`;
       setValue("expirationDate", formattedExpiry);
       setValue("lotNo", lot);
       addDebugLog("有効期限変換: " + formattedExpiry);
 
-      // 商品名・規格ルックアップ：CSVから GTIN をキーに検索
       const product = products.find((p) => p.code === gtin);
       if (product) {
         setValue("reagentName", product.name);
@@ -176,25 +171,16 @@ export default function ReagentRegistration() {
       }
       setValue("specification", "規格未設定");
       addDebugLog("各フィールドに自動入力完了");
-      // 解析成功なら状態をクリアし、カメラを停止
       setError("");
-      setFailureCount(0);
       setShowCamera(false);
     } else {
       addDebugLog("正規表現マッチ失敗。バーコード内容: " + barcode);
-      // バーコードは読み取れたがパースに失敗した場合のみ failureCount を更新
-      setFailureCount((prev) => {
-        const newCount = prev + 1;
-        if (newCount >= FAILURE_THRESHOLD) {
-          setError("バーコードの解析に失敗しました");
-        }
-        return newCount;
-      });
+      setError("バーコードの解析に失敗しました");
     }
-  };
+  }, [products, setValue]);
 
   // 撮影してバーコード解析を実行（自動撮影ループから呼び出す）
-  const captureAndDecodeBarcode = async () => {
+  const captureAndDecodeBarcode = useCallback(async () => {
     if (webcamRef.current) {
       addDebugLog("ウェブカムからスクリーンショット取得開始");
       setScanning(true);
@@ -221,7 +207,6 @@ export default function ReagentRegistration() {
           } else {
             addDebugLog("バーコード解析エラー: " + String(err));
           }
-          // 失敗時はエラー表示はしない（しきい値未満なら再試行中）
         } finally {
           setScanning(false);
         }
@@ -231,7 +216,7 @@ export default function ReagentRegistration() {
         setScanning(false);
       };
     }
-  };
+  }, [codeReader, parseGS1Barcode]);
 
   // 自動撮影ループ（カメラ表示中で登録完了前は定期的にキャプチャ）
   useEffect(() => {
@@ -241,7 +226,7 @@ export default function ReagentRegistration() {
       }, 1500);
       return () => clearInterval(intervalId);
     }
-  }, [showCamera, registrationComplete]);
+  }, [showCamera, registrationComplete, captureAndDecodeBarcode]);
 
   // 試薬名入力後、過去の登録履歴から最新の部署情報を自動補完
   const handleReagentNameBlur = async (e: React.FocusEvent<HTMLInputElement>) => {
@@ -347,7 +332,6 @@ export default function ReagentRegistration() {
   const handleNext = () => {
     reset();
     setError("");
-    setFailureCount(0);
     setRegistrationComplete(false);
     addDebugLog("フォームリセット。次の試薬登録へ");
     setShowCamera(true);
