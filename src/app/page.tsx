@@ -10,9 +10,9 @@ import {
   XCircle,
   CheckCircle,
   Trash2,
-  Home,
   User,
   LogOut,
+  Home,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -36,13 +36,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { supabase } from "@/lib/supabaseClient";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 
-// 型定義
 interface Reagent {
   id: number;
   department: string;
   name: string;
   lotNo: string;
   specification: string;
+  unit: string; // 追加：単位
   expirationDate: string; // ISO 日付文字列
   registrationDate: string;
   registeredBy: { fullname: string } | string;
@@ -62,7 +62,6 @@ interface Notification {
   timestamp: Date;
 }
 
-// タイムスタンプを "YYYY/MM/DD HH:mm" 形式にフォーマットする関数
 const formatDateTime = (timestamp: string | null) => {
   if (!timestamp) return "";
   return new Date(timestamp).toLocaleString("ja-JP", {
@@ -109,13 +108,11 @@ export default function DashboardPage() {
   const [selectedDepartment, setSelectedDepartment] = useState("all");
   const [showEnded, setShowEnded] = useState(false);
 
-  // 試薬データの取得（profiles との join で registeredBy, used_by, ended_by の fullname を取得）
+  // 試薬データの取得（profiles との join で各ユーザー情報を取得）
   const fetchReagents = async () => {
     const { data, error } = await supabase
       .from("reagents")
-      .select(
-        `*, registeredBy (fullname), used_by (fullname), ended_by (fullname)`
-      )
+      .select(`*, registeredBy (fullname), used_by (fullname), ended_by (fullname)`)
       .order("registrationDate", { ascending: false });
     if (error) {
       console.error("Error fetching reagents:", error);
@@ -124,7 +121,7 @@ export default function DashboardPage() {
     }
   };
 
-  // カレントユーザーの氏名取得（supabase.auth.getUser() と profiles テーブルから）
+  // カレントユーザーの氏名取得
   const fetchCurrentUserProfile = async () => {
     const { data: userData, error } = await supabase.auth.getUser();
     if (error || !userData.user) {
@@ -204,7 +201,6 @@ export default function DashboardPage() {
 
   // 行クリック時の処理（詳細画面への遷移）
   const handleRowClick = (reagent: Reagent) => {
-    // すでに使用開始済みの場合は詳細画面へ（アイテム追加可能）
     router.push(`/reagent/${reagent.id}`);
   };
 
@@ -240,11 +236,7 @@ export default function DashboardPage() {
               {/* ユーザー設定アイコン */}
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => router.push("/user-settings")}
-                  >
+                  <Button variant="ghost" size="icon" onClick={() => router.push("/user-settings")}>
                     <User className="h-6 w-6" />
                   </Button>
                 </TooltipTrigger>
@@ -255,7 +247,7 @@ export default function DashboardPage() {
               {/* ホーム（ダッシュボード）アイコン */}
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
+                <Button
                     variant="ghost"
                     size="icon"
                     onClick={() => router.push("/")}
@@ -284,10 +276,7 @@ export default function DashboardPage() {
                     <DropdownMenuContent className="w-80">
                       {notifications.length > 0 ? (
                         notifications.map((notification) => (
-                          <DropdownMenuItem
-                            key={notification.id}
-                            className="flex items-start"
-                          >
+                          <DropdownMenuItem key={notification.id} className="flex items-start">
                             {notificationIcons[notification.type]}
                             <div className="flex flex-col">
                               <span>{notification.message}</span>
@@ -298,9 +287,7 @@ export default function DashboardPage() {
                           </DropdownMenuItem>
                         ))
                       ) : (
-                        <DropdownMenuItem className="text-center">
-                          通知はありません
-                        </DropdownMenuItem>
+                        <DropdownMenuItem className="text-center">通知はありません</DropdownMenuItem>
                       )}
                       {notifications.length > 0 && (
                         <>
@@ -393,21 +380,18 @@ export default function DashboardPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>試薬名</TableHead>
-                  <TableHead>Lot No.</TableHead>
-                  <TableHead>規格</TableHead>
-                  <TableHead>有効期限</TableHead>
-                  <TableHead className="bg-primary/10 font-bold">
-                    使用開始日
-                  </TableHead>
-                  <TableHead className="bg-primary/10 font-bold">
-                    使用終了日
-                  </TableHead>
-                  <TableHead>使用入力者</TableHead>
-                  <TableHead>終了入力者</TableHead>
-                  <TableHead>登録日</TableHead>
-                  <TableHead>登録者</TableHead>
-                  <TableHead>操作</TableHead>
+                  <TableHead className="min-w-[6rem]">試薬名</TableHead>
+                  <TableHead className="min-w-[4rem]">Lot No.</TableHead>
+                  <TableHead className="min-w-[5rem]">規格</TableHead>
+                  <TableHead className="min-w-[4rem]">単位</TableHead>
+                  <TableHead className="min-w-[6rem]">有効期限</TableHead>
+                  <TableHead className="min-w-[6rem] bg-primary/10 font-bold">使用開始日</TableHead>
+                  <TableHead className="min-w-[6rem] bg-primary/10 font-bold">使用終了日</TableHead>
+                  <TableHead className="min-w-[4rem]">使用入力者</TableHead>
+                  <TableHead className="min-w-[4rem]">終了入力者</TableHead>
+                  <TableHead className="min-w-[6rem]">登録日</TableHead>
+                  <TableHead className="min-w-[4rem]">登録者</TableHead>
+                  <TableHead className="min-w-[8rem]">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -420,15 +404,10 @@ export default function DashboardPage() {
                     <TableCell>{reagent.name}</TableCell>
                     <TableCell>{reagent.lotNo}</TableCell>
                     <TableCell>{reagent.specification}</TableCell>
-                    <TableCell>
-                      {formatDateTime(reagent.expirationDate)}
-                    </TableCell>
-                    <TableCell>
-                      {formatDateTime(reagent.used_at)}
-                    </TableCell>
-                    <TableCell>
-                      {formatDateTime(reagent.ended_at)}
-                    </TableCell>
+                    <TableCell>{reagent.unit || "-"}</TableCell>
+                    <TableCell>{formatDateTime(reagent.expirationDate)}</TableCell>
+                    <TableCell>{formatDateTime(reagent.used_at)}</TableCell>
+                    <TableCell>{formatDateTime(reagent.ended_at)}</TableCell>
                     <TableCell>
                       {reagent.used_by
                         ? typeof reagent.used_by === "object"
@@ -443,9 +422,7 @@ export default function DashboardPage() {
                           : reagent.ended_by
                         : "-"}
                     </TableCell>
-                    <TableCell>
-                      {formatDateTime(reagent.registrationDate)}
-                    </TableCell>
+                    <TableCell>{formatDateTime(reagent.registrationDate)}</TableCell>
                     <TableCell>
                       {typeof reagent.registeredBy === "object"
                         ? reagent.registeredBy.fullname
@@ -455,18 +432,14 @@ export default function DashboardPage() {
                       {reagent.used ? (
                         <>
                           {reagent.ended_at ? (
-                            <span className="text-sm text-gray-500">
-                              使用終了済み
-                            </span>
+                            <span className="text-sm text-gray-500">使用終了済み</span>
                           ) : (
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (
-                                  window.confirm("使用終了登録を行いますか？")
-                                ) {
+                                if (window.confirm("使用終了登録を行いますか？")) {
                                   handleUsageEnd(reagent.id);
                                 }
                               }}
@@ -481,9 +454,7 @@ export default function DashboardPage() {
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (
-                              window.confirm("使用開始登録を行いますか？")
-                            ) {
+                            if (window.confirm("使用開始登録を行いますか？")) {
                               handleUsageStart(reagent.id);
                             }
                           }}

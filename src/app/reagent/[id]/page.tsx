@@ -48,7 +48,7 @@ export default function ReagentDetailPage() {
     useRequireAuth();
   const router = useRouter();
   const params = useParams();
-  const reagentId = params.id;
+  const reagentId = params?.id;
   const [reagent, setReagent] = useState<Reagent | null>(null);
   const [items, setItems] = useState<ItemType[]>([]);
   const [loading, setLoading] = useState(true);

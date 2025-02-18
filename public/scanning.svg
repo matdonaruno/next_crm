@@ -1,0 +1,16 @@
+<svg width="150" height="150" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景の円 -->
+  <circle cx="50" cy="50" r="40" stroke="#e0e0e0" stroke-width="8" fill="none" />
+  <!-- 回転するアーク -->
+  <path d="M50 10 A40 40 0 0 1 90 50" stroke="#007BFF" stroke-width="8" fill="none" stroke-linecap="round">
+    <animateTransform 
+      attributeName="transform"
+      type="rotate"
+      from="0 50 50"
+      to="360 50 50"
+      dur="1s"
+      repeatCount="indefinite" />
+  </path>
+  <!-- テキスト -->
+  <text x="50" y="95" text-anchor="middle" font-size="10" fill="#333">scanning</text>
+</svg>
