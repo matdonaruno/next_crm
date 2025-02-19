@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import Webcam from "react-webcam";
 import { supabase } from "@/lib/supabaseClient";
@@ -44,7 +44,6 @@ export default function ReagentRegistration() {
   const router = useRouter();
   const [error, setError] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  // 自動読み取り中は showCamera が true の間実行
   const [showCamera, setShowCamera] = useState<boolean>(true);
   const [departments, setDepartments] = useState<string[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -56,13 +55,13 @@ export default function ReagentRegistration() {
   const processing = useRef<boolean>(false);
   const lastScannedCode = useRef<string | null>(null);
 
-  // デバッグログ用関数（認識以降の重要なログのみ出力）
+  // デバッグログ用関数（認識以降の重要ログのみ出力）
   const addDebugLog = useCallback((msg: string) => {
     console.log(msg);
     setDebugLogs((prev) => [...prev, msg]);
   }, []);
 
-  // ページロード時に自動でカメラ起動
+  // ページロード時に自動でカメラを起動
   useEffect(() => {
     addDebugLog("ページロード完了。カメラを自動起動します。");
     setShowCamera(true);
@@ -75,7 +74,9 @@ export default function ReagentRegistration() {
       if (error) {
         console.error("Error fetching departments:", error);
       } else if (data) {
-        const unique = Array.from(new Set(data.map((item: any) => item.department).filter(Boolean)));
+        const unique = Array.from(
+          new Set(data.map((item: { department: string }) => item.department).filter(Boolean))
+        );
         setDepartments(unique);
         unique.forEach((dept) => addDebugLog("部署一覧取得: " + dept));
       }
@@ -83,7 +84,7 @@ export default function ReagentRegistration() {
     fetchDepartments();
   }, [addDebugLog]);
 
-  // 商品CSV（マスタ）の読み込み（成功時はログのみ出力）
+  // 商品CSV（マスタ）の読み込み
   useEffect(() => {
     const fetchProducts = async () => {
       try {
@@ -100,7 +101,7 @@ export default function ReagentRegistration() {
     fetchProducts();
   }, [addDebugLog]);
 
-  // react-webcam の設定（背面カメラ、解像度・フォーカスの最適化）
+  // react-webcam の設定（高解像度・連続フォーカス）
   const videoConstraints = {
     width: { ideal: 1920 },
     height: { ideal: 1080 },
@@ -108,28 +109,31 @@ export default function ReagentRegistration() {
     focusMode: "continuous",
   };
 
-  // ZXing リーダーのヒント設定（Map を個別 set() で構築）
-  const hints = new Map<DecodeHintType, any>();
-  hints.set(DecodeHintType.POSSIBLE_FORMATS, [
-    BarcodeFormat.CODE_128,
-    BarcodeFormat.EAN_13,
-    BarcodeFormat.EAN_8,
-    BarcodeFormat.UPC_A,
-    BarcodeFormat.UPC_E,
-  ]);
-  hints.set(DecodeHintType.TRY_HARDER, true);
-  hints.set(DecodeHintType.ASSUME_GS1, true);
+  // ZXing リーダーのヒント設定（useMemoで安定化）
+  const hints = useMemo<Map<DecodeHintType, boolean | BarcodeFormat[]>>(() => {
+    const map = new Map<DecodeHintType, boolean | BarcodeFormat[]>();
+    map.set(DecodeHintType.POSSIBLE_FORMATS, [
+      BarcodeFormat.CODE_128,
+      BarcodeFormat.EAN_13,
+      BarcodeFormat.EAN_8,
+      BarcodeFormat.UPC_A,
+      BarcodeFormat.UPC_E,
+    ]);
+    map.set(DecodeHintType.TRY_HARDER, true);
+    map.set(DecodeHintType.ASSUME_GS1, true);
+    return map;
+  }, []);
 
-  // タイムアウトは 4000ms（4秒）
-  const codeReader = new BrowserMultiFormatReader(hints, 4000);
+  // codeReader の生成を useMemo で安定化（タイムアウト 4000ms）
+  const codeReader = useMemo(() => new BrowserMultiFormatReader(hints, 4000), [hints]);
 
-  // 手動カメラ起動（ボタン押下時）
+  // 手動カメラ起動（ボタン押下用）
   const handleBarcodeScan = () => {
     addDebugLog("カメラ表示開始（手動）");
     setShowCamera(true);
   };
 
-  // テスト画像での解析ボタン用
+  // テスト画像解析用
   const decodeFromStaticImage = () => {
     addDebugLog("テスト画像からバーコード解析開始");
     const testImage = new Image();
@@ -150,12 +154,11 @@ export default function ReagentRegistration() {
     };
   };
 
-  // GS1バーコードのパース処理（正規表現による例）
-  const parseGS1Barcode = (barcode: string) => {
+  // GS1バーコードのパース処理（useCallbackで依存管理）
+  const parseGS1Barcode = useCallback((barcode: string) => {
     addDebugLog("GS1バーコード解析開始");
     const cleanBarcode = barcode.replace(/[^\d]/g, '');
     addDebugLog(`クリーニング後バーコード: ${cleanBarcode}`);
-    // 例: 01XXXXXXXXXXXXXX17XXXXXX10...30...
     const regex = /^01(\d{14})17(\d{6})10(\d+)(?:30(\d+))?$/;
     const match = cleanBarcode.match(regex);
     if (match) {
@@ -188,7 +191,7 @@ export default function ReagentRegistration() {
       addDebugLog("正規表現マッチ失敗。バーコード内容: " + cleanBarcode);
       setError("GS1バーコード正規表現にマッチせず");
     }
-  };
+  }, [addDebugLog, products, setValue]);
 
   // 自動読み取り処理（decodeFromVideoElement を利用）
   useEffect(() => {
@@ -227,7 +230,7 @@ export default function ReagentRegistration() {
       active = false;
       codeReader.reset();
     };
-  }, [showCamera, addDebugLog, codeReader, failCount]);
+  }, [showCamera, addDebugLog, codeReader, failCount, parseGS1Barcode]);
 
   // 次へボタン：フォームクリアと状態リセット（連続登録用）
   const handleNext = () => {
