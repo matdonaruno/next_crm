@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import Webcam from "react-webcam";
 import { supabase } from "@/lib/supabaseClient";
@@ -16,11 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import {
-  BrowserMultiFormatReader,
-  DecodeHintType,
-  BarcodeFormat,
-} from "@zxing/library";
+import { BrowserMultiFormatReader, DecodeHintType, BarcodeFormat } from "@zxing/library";
 import { Home } from "lucide-react";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 
@@ -45,26 +41,28 @@ export default function ReagentRegistration() {
   const [error, setError] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [showCamera, setShowCamera] = useState<boolean>(false);
-  const [scanning, setScanning] = useState<boolean>(false);
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const [registrationComplete, setRegistrationComplete] = useState<boolean>(false);
-  const webcamRef = useRef<Webcam>(null);
+  const [scanning, setScanning] = useState<boolean>(true);
   const [departments, setDepartments] = useState<string[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [failCount, setFailCount] = useState<number>(0);
+  const [barcodeDetected, setBarcodeDetected] = useState<boolean>(false);
 
-  // デバッグログ用関数
-  const addDebugLog = (msg: string) => {
+  const webcamRef = useRef<Webcam>(null);
+
+  // デバッグログ用関数（バーコード認識以降のログのみ出力）
+  const addDebugLog = useCallback((msg: string) => {
     console.log(msg);
     setDebugLogs((prev) => [...prev, msg]);
-  };
+  }, []);
 
-  // ページロード時に自動でカメラ起動
+  // ページロード時に自動でカメラを起動
   useEffect(() => {
     addDebugLog("ページロード完了。カメラを自動起動します。");
     setShowCamera(true);
-  }, []);
+  }, [addDebugLog]);
 
-  // 過去の登録から部署一覧を取得（datalist用）
+  // 部署一覧取得（datalist用）
   useEffect(() => {
     const fetchDepartments = async () => {
       const { data, error } = await supabase.from("reagents").select("department");
@@ -79,25 +77,25 @@ export default function ReagentRegistration() {
       }
     };
     fetchDepartments();
-  }, []);
+  }, [addDebugLog]);
 
-  // 商品CSV（マスタ）を読み込み（内容の詳細は表示せず成功のみログ出力）
+  // 商品CSV（マスタ）の読み込み
   useEffect(() => {
     const fetchProducts = async () => {
       try {
         const response = await fetch("/products.csv");
         const csvText = await response.text();
         const parsed = Papa.parse(csvText, { header: true });
-        const prods = parsed.data as Product[];
-        setProducts(prods);
+        // 成功時はログのみ出力
+        setProducts(parsed.data as Product[]);
         addDebugLog("商品CSV読み込み成功");
       } catch (error) {
         console.error("CSV読み込みエラー", error);
-        addDebugLog("CSV読み込みエラー: " + (error instanceof Error ? error.message : String(error)));
+        addDebugLog("CSV読み込みエラー");
       }
     };
     fetchProducts();
-  }, []);
+  }, [addDebugLog]);
 
   // react-webcam の設定（背面カメラ）
   const videoConstraints = {
@@ -106,22 +104,19 @@ export default function ReagentRegistration() {
     facingMode: "environment",
   };
 
-  // ZXing リーダーのヒント設定（GS1バーコード用）
-  const codeReader = useMemo(() => {
-    const hints = new Map();
-    hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128]);
-    hints.set(DecodeHintType.TRY_HARDER, true);
-    return new BrowserMultiFormatReader(hints);
-  }, []);
+  // ZXing リーダーのヒント設定（CODE_128 で読み取り）
+  const hints = new Map();
+  hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128]);
+  hints.set(DecodeHintType.TRY_HARDER, true);
+  const codeReader = new BrowserMultiFormatReader(hints);
 
-  // バーコード撮影ボタン（手動起動）
+  // バーコード撮影ボタン押下時：カメラ表示（手動起動）
   const handleBarcodeScan = () => {
     addDebugLog("カメラ表示開始（手動）");
     setShowCamera(true);
-    setError("");
   };
 
-  // テスト画像での解析ボタン
+  // テスト画像での解析ボタン用
   const decodeFromStaticImage = () => {
     addDebugLog("テスト画像からバーコード解析開始");
     const testImage = new Image();
@@ -143,13 +138,13 @@ export default function ReagentRegistration() {
   };
 
   // GS1バーコードのパース処理
-  const parseGS1Barcode = useCallback((barcode: string) => {
+  const parseGS1Barcode = (barcode: string) => {
     addDebugLog("GS1バーコード解析開始");
     const regex = /^01(\d{14})17(\d{6})10(\d+)(?:30(\d+))?$/;
     const match = barcode.match(regex);
     if (match) {
       addDebugLog("正規表現マッチ成功");
-      const gtin = match[1];
+      const gtin = match[1]; // 商品コード
       const expiryRaw = match[2];
       const lot = match[3];
       addDebugLog("GTIN: " + gtin);
@@ -171,16 +166,17 @@ export default function ReagentRegistration() {
       }
       setValue("specification", "規格未設定");
       addDebugLog("各フィールドに自動入力完了");
-      setError("");
+      // 正常に解析できたら、カメラ停止
       setShowCamera(false);
+      setBarcodeDetected(true);
     } else {
       addDebugLog("正規表現マッチ失敗。バーコード内容: " + barcode);
-      setError("バーコードの解析に失敗しました");
+      setError("GS1バーコード正規表現にマッチせず");
     }
-  }, [products, setValue]);
+  };
 
-  // 撮影してバーコード解析を実行（自動撮影ループから呼び出す）
-  const captureAndDecodeBarcode = useCallback(async () => {
+  // 撮影してバーコード解析を実行（自動撮影ループ用）
+  const captureAndDecodeBarcode = async () => {
     if (webcamRef.current) {
       addDebugLog("ウェブカムからスクリーンショット取得開始");
       setScanning(true);
@@ -203,51 +199,105 @@ export default function ReagentRegistration() {
           parseGS1Barcode(resultText);
         } catch (err: unknown) {
           if (err instanceof Error) {
+            console.error("バーコード解析エラー:", err);
             addDebugLog("バーコード解析エラー: " + err.message);
           } else {
+            console.error("バーコード解析エラー:", err);
             addDebugLog("バーコード解析エラー: " + String(err));
           }
-        } finally {
-          setScanning(false);
+          // 失敗の場合は failCount をインクリメントし、一定回数未満ならエラー表示せず再試行
+          setFailCount((prev) => prev + 1);
+          if (failCount >= 2) {
+            setError("バーコードが正しく読み取れませんでした。カメラの位置を調整してください。");
+          }
         }
+        setScanning(false);
       };
       image.onerror = () => {
         setError("画像の読み込みに失敗しました");
         setScanning(false);
       };
     }
-  }, [codeReader, parseGS1Barcode]);
+  };
 
-  // 自動撮影ループ（カメラ表示中で登録完了前は定期的にキャプチャ）
+  // 自動撮影ループ（カメラ表示中は定期的にキャプチャ）
   useEffect(() => {
-    if (showCamera && !registrationComplete) {
-      const intervalId = setInterval(() => {
-        captureAndDecodeBarcode();
+    let intervalId: NodeJS.Timeout;
+    if (showCamera) {
+      intervalId = setInterval(() => {
+        if (!scanning) {
+          captureAndDecodeBarcode();
+        }
       }, 1500);
-      return () => clearInterval(intervalId);
     }
-  }, [showCamera, registrationComplete, captureAndDecodeBarcode]);
+    return () => clearInterval(intervalId);
+  }, [showCamera, scanning]);
 
   // 試薬名入力後、過去の登録履歴から最新の部署情報を自動補完
   const handleReagentNameBlur = async (e: React.FocusEvent<HTMLInputElement>) => {
-    const reagentName = e.target.value;
-    if (!reagentName) return;
-    const { data, error } = await supabase
-      .from("reagents")
-      .select("department")
-      .eq("name", reagentName)
-      .order("registrationDate", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error) {
-      console.error("Error fetching previous department:", error);
-    } else if (data && data.department) {
-      setValue("department", data.department);
-      addDebugLog("過去の部署情報自動補完: " + data.department);
-    }
+    addDebugLog("handleReagentNameBlur triggered with value: " + e.target.value);
+    // 実装例としては、ここで既存データから部署を補完する処理を実装
   };
 
-  // 現在のユーザーのプロフィールが存在するか確認し、なければ作成する関数
+  // 次へボタン：フォームクリア、状態リセット
+  const handleNext = () => {
+    reset();
+    setError("");
+    setFailCount(0);
+    setBarcodeDetected(false);
+    setScanning(true);
+    addDebugLog("フォームクリア。次のバーコード入力へ");
+  };
+
+  // 試薬登録処理
+  const registerReagent = async (startUsage: boolean) => {
+    setIsSubmitting(true);
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user) {
+        setError("ユーザー情報の取得に失敗しました");
+        setIsSubmitting(false);
+        return;
+      }
+      const currentUser = userData.user;
+      const profileOk = await ensureUserProfile(currentUser);
+      if (!profileOk) {
+        setError("ユーザープロフィールの作成に失敗しました");
+        setIsSubmitting(false);
+        return;
+      }
+      const registeredBy = currentUser.id;
+      const formData = getValues();
+      const { error } = await supabase.from("reagents").insert([
+        {
+          department: formData.department,
+          name: formData.reagentName,
+          specification: formData.specification,
+          lotNo: formData.lotNo,
+          expirationDate: formData.expirationDate,
+          registeredBy: registeredBy,
+          used: startUsage ? true : false,
+          used_at: startUsage ? new Date().toISOString() : null,
+          ended_at: null,
+        },
+      ]);
+      if (error) {
+        setError(error.message);
+        setIsSubmitting(false);
+        return;
+      }
+      router.push("/");
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError(String(err));
+      }
+    }
+    setIsSubmitting(false);
+  };
+
+  // 現在のユーザーのプロフィールが存在するか確認し、存在しなければ作成する関数
   const ensureUserProfile = async (
     user: { id: string; email?: string; user_metadata: { fullName?: string } }
   ): Promise<boolean> => {
@@ -275,68 +325,6 @@ export default function ReagentRegistration() {
     return true;
   };
 
-  // 試薬登録処理
-  const registerReagent = async (startUsage: boolean) => {
-    setIsSubmitting(true);
-    try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) {
-        setError("ユーザー情報の取得に失敗しました");
-        setIsSubmitting(false);
-        return;
-      }
-      const currentUser = userData.user;
-      const profileOk = await ensureUserProfile(currentUser);
-      if (!profileOk) {
-        setError("ユーザープロフィールの作成に失敗しました");
-        setIsSubmitting(false);
-        return;
-      }
-      const registeredBy = currentUser.id;
-      const formData = getValues();
-
-      const { error } = await supabase.from("reagents").insert([
-        {
-          department: formData.department,
-          name: formData.reagentName,
-          specification: formData.specification,
-          lotNo: formData.lotNo,
-          expirationDate: formData.expirationDate,
-          registeredBy: registeredBy,
-          used: startUsage ? true : false,
-          used_at: startUsage ? new Date().toISOString() : null,
-          ended_at: null,
-        },
-      ]);
-
-      if (error) {
-        setError(error.message);
-        setIsSubmitting(false);
-        return;
-      }
-
-      // 登録成功時は登録完了状態にする（ページ遷移せずに次の登録を可能にする）
-      addDebugLog("試薬登録成功");
-      setRegistrationComplete(true);
-    } catch (err: unknown) {
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError(String(err));
-      }
-    }
-    setIsSubmitting(false);
-  };
-
-  // 「次へ」ボタン押下時の処理（フォーム、状態のリセット）
-  const handleNext = () => {
-    reset();
-    setError("");
-    setRegistrationComplete(false);
-    addDebugLog("フォームリセット。次の試薬登録へ");
-    setShowCamera(true);
-  };
-
   return (
     <div className="relative flex flex-col items-center justify-center min-h-screen bg-gray-50 p-4">
       {/* 右上に「ダッシュボードへ戻る」ボタン */}
@@ -345,20 +333,19 @@ export default function ReagentRegistration() {
           <Home className="h-6 w-6" />
         </Button>
       </div>
-
       <div className="w-full max-w-md">
         <h1 className="text-2xl font-bold mb-6">Register Reagent</h1>
-
         <Card>
           <CardHeader>
             <CardTitle>試薬パッケージ登録</CardTitle>
           </CardHeader>
           <CardContent>
-            {error && !scanning && (
-              <p className="text-red-500 mb-4">{error}</p>
-            )}
+            {error && <p className="text-red-500 mb-4">{error}</p>}
+            {/* カメラ表示オーバーレイ（読み取り中は表示） */}
             {scanning && (
-              <p className="text-sm text-gray-600 mb-4">読み取り中…</p>
+              <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center bg-gray-800 bg-opacity-50 z-10">
+                <div className="text-white text-lg font-bold">読み取り中…</div>
+              </div>
             )}
             <div className="mb-4 space-y-2">
               <Button onClick={handleBarcodeScan} variant="outline" className="w-full">
@@ -368,8 +355,8 @@ export default function ReagentRegistration() {
                 テスト画像で解析
               </Button>
             </div>
-            {showCamera && (
-              <div className="mb-4">
+            <div className="mb-4 relative">
+              {showCamera && (
                 <Webcam
                   audio={false}
                   ref={webcamRef}
@@ -377,24 +364,12 @@ export default function ReagentRegistration() {
                   videoConstraints={videoConstraints}
                   className="w-full h-auto rounded"
                 />
-                <div className="flex justify-between mt-2">
-                  <Button onClick={captureAndDecodeBarcode} disabled={false}>
-                    撮影して解析
-                  </Button>
-                  <Button variant="destructive" onClick={() => setShowCamera(false)}>
-                    キャンセル
-                  </Button>
-                </div>
-              </div>
-            )}
+              )}
+            </div>
             <form className="space-y-4">
               <div>
                 <Label htmlFor="department">部署名</Label>
-                <Input
-                  id="department"
-                  list="departments-list"
-                  {...register("department", { required: true })}
-                />
+                <Input id="department" list="departments-list" {...register("department", { required: true })} />
                 <datalist id="departments-list">
                   {departments.map((dept) => (
                     <option key={dept} value={dept} />
@@ -403,10 +378,7 @@ export default function ReagentRegistration() {
               </div>
               <div>
                 <Label htmlFor="reagentName">試薬名</Label>
-                <Input
-                  id="reagentName"
-                  {...register("reagentName", { required: true, onBlur: handleReagentNameBlur })}
-                />
+                <Input id="reagentName" {...register("reagentName", { required: true, onBlur: handleReagentNameBlur })} />
               </div>
               <div>
                 <Label htmlFor="specification">規格</Label>
@@ -418,11 +390,7 @@ export default function ReagentRegistration() {
               </div>
               <div>
                 <Label htmlFor="expirationDate">使用期限</Label>
-                <Input
-                  id="expirationDate"
-                  type="date"
-                  {...register("expirationDate", { required: true })}
-                />
+                <Input id="expirationDate" type="date" {...register("expirationDate", { required: true })} />
               </div>
             </form>
           </CardContent>
@@ -435,20 +403,25 @@ export default function ReagentRegistration() {
             </Button>
           </CardFooter>
         </Card>
-        {/* 登録完了時は「次へ」ボタンを表示 */}
-        {registrationComplete && (
+        {/* 次へボタン（連続登録用） */}
+        {barcodeDetected && (
           <div className="mt-4">
-            <Button onClick={handleNext} variant="outline" className="w-full">
+            <Button onClick={handleNext} variant="outline">
               次へ
             </Button>
           </div>
         )}
-        {/* デバッグログ表示エリア（CSV読み込み内容は除外） */}
+        {/* デバッグログ表示エリア（フィルタ済み） */}
         {debugLogs.length > 0 && (
           <div className="mt-4 p-2 bg-gray-100 border rounded">
             <h2 className="font-bold mb-2">デバッグログ</h2>
             <pre className="text-xs whitespace-pre-wrap">
-              {debugLogs.filter((log) => !log.includes("商品CSV読み込み完了")).join("\n")}
+              {debugLogs.filter((log) =>
+                log.startsWith("ZXing") ||
+                log.startsWith("GS1") ||
+                log.startsWith("正規表現") ||
+                log.startsWith("商品名")
+              ).join("\n")}
             </pre>
           </div>
         )}
