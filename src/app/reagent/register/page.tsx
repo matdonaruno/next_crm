@@ -16,7 +16,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { BrowserMultiFormatReader, DecodeHintType, BarcodeFormat } from "@zxing/library";
+import {
+  BrowserMultiFormatReader,
+  DecodeHintType,
+  BarcodeFormat,
+  Result,
+} from "@zxing/library";
 import { Home } from "lucide-react";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 
@@ -28,7 +33,6 @@ type FormValues = {
   expirationDate: string;
 };
 
-// 商品マスタの型
 interface Product {
   code: string;
   name: string;
@@ -40,53 +44,52 @@ export default function ReagentRegistration() {
   const router = useRouter();
   const [error, setError] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [showCamera, setShowCamera] = useState<boolean>(false);
-  const [scanning, setScanning] = useState<boolean>(true);
+  // 自動読み取り中は showCamera が true の間実行
+  const [showCamera, setShowCamera] = useState<boolean>(true);
   const [departments, setDepartments] = useState<string[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const [failCount, setFailCount] = useState<number>(0);
   const [barcodeDetected, setBarcodeDetected] = useState<boolean>(false);
+  const [failCount, setFailCount] = useState<number>(0);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
 
   const webcamRef = useRef<Webcam>(null);
+  const processing = useRef<boolean>(false);
+  const lastScannedCode = useRef<string | null>(null);
 
-  // デバッグログ用関数（バーコード認識以降のログのみ出力）
+  // デバッグログ用関数（認識以降の重要なログのみ出力）
   const addDebugLog = useCallback((msg: string) => {
     console.log(msg);
     setDebugLogs((prev) => [...prev, msg]);
   }, []);
 
-  // ページロード時に自動でカメラを起動
+  // ページロード時に自動でカメラ起動
   useEffect(() => {
     addDebugLog("ページロード完了。カメラを自動起動します。");
     setShowCamera(true);
   }, [addDebugLog]);
 
-  // 部署一覧取得（datalist用）
+  // 部署一覧取得（supabaseから）
   useEffect(() => {
     const fetchDepartments = async () => {
       const { data, error } = await supabase.from("reagents").select("department");
       if (error) {
         console.error("Error fetching departments:", error);
       } else if (data) {
-        const unique = Array.from(
-          new Set(data.map((item) => item.department).filter(Boolean))
-        );
-        setDepartments(unique as string[]);
+        const unique = Array.from(new Set(data.map((item: any) => item.department).filter(Boolean)));
+        setDepartments(unique);
         unique.forEach((dept) => addDebugLog("部署一覧取得: " + dept));
       }
     };
     fetchDepartments();
   }, [addDebugLog]);
 
-  // 商品CSV（マスタ）の読み込み
+  // 商品CSV（マスタ）の読み込み（成功時はログのみ出力）
   useEffect(() => {
     const fetchProducts = async () => {
       try {
         const response = await fetch("/products.csv");
         const csvText = await response.text();
         const parsed = Papa.parse(csvText, { header: true });
-        // 成功時はログのみ出力
         setProducts(parsed.data as Product[]);
         addDebugLog("商品CSV読み込み成功");
       } catch (error) {
@@ -97,20 +100,30 @@ export default function ReagentRegistration() {
     fetchProducts();
   }, [addDebugLog]);
 
-  // react-webcam の設定（背面カメラ）
+  // react-webcam の設定（背面カメラ、解像度・フォーカスの最適化）
   const videoConstraints = {
-    width: 1280,
-    height: 720,
+    width: { ideal: 1920 },
+    height: { ideal: 1080 },
     facingMode: "environment",
+    focusMode: "continuous",
   };
 
-  // ZXing リーダーのヒント設定（CODE_128 で読み取り）
-  const hints = new Map();
-  hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128]);
+  // ZXing リーダーのヒント設定（Map を個別 set() で構築）
+  const hints = new Map<DecodeHintType, any>();
+  hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+    BarcodeFormat.CODE_128,
+    BarcodeFormat.EAN_13,
+    BarcodeFormat.EAN_8,
+    BarcodeFormat.UPC_A,
+    BarcodeFormat.UPC_E,
+  ]);
   hints.set(DecodeHintType.TRY_HARDER, true);
-  const codeReader = new BrowserMultiFormatReader(hints);
+  hints.set(DecodeHintType.ASSUME_GS1, true);
 
-  // バーコード撮影ボタン押下時：カメラ表示（手動起動）
+  // タイムアウトは 4000ms（4秒）
+  const codeReader = new BrowserMultiFormatReader(hints, 4000);
+
+  // 手動カメラ起動（ボタン押下時）
   const handleBarcodeScan = () => {
     addDebugLog("カメラ表示開始（手動）");
     setShowCamera(true);
@@ -125,7 +138,7 @@ export default function ReagentRegistration() {
       addDebugLog("テスト画像読み込み完了。バーコード解析開始（静的画像）");
       codeReader
         .decodeFromImageElement(testImage)
-        .then((result) => {
+        .then((result: Result) => {
           const testResultText = result.getText();
           addDebugLog("テスト画像バーコード認識成功: " + testResultText);
           parseGS1Barcode(testResultText);
@@ -137,14 +150,17 @@ export default function ReagentRegistration() {
     };
   };
 
-  // GS1バーコードのパース処理
+  // GS1バーコードのパース処理（正規表現による例）
   const parseGS1Barcode = (barcode: string) => {
     addDebugLog("GS1バーコード解析開始");
+    const cleanBarcode = barcode.replace(/[^\d]/g, '');
+    addDebugLog(`クリーニング後バーコード: ${cleanBarcode}`);
+    // 例: 01XXXXXXXXXXXXXX17XXXXXX10...30...
     const regex = /^01(\d{14})17(\d{6})10(\d+)(?:30(\d+))?$/;
-    const match = barcode.match(regex);
+    const match = cleanBarcode.match(regex);
     if (match) {
       addDebugLog("正規表現マッチ成功");
-      const gtin = match[1]; // 商品コード
+      const gtin = match[1];
       const expiryRaw = match[2];
       const lot = match[3];
       addDebugLog("GTIN: " + gtin);
@@ -155,7 +171,6 @@ export default function ReagentRegistration() {
       setValue("expirationDate", formattedExpiry);
       setValue("lotNo", lot);
       addDebugLog("有効期限変換: " + formattedExpiry);
-
       const product = products.find((p) => p.code === gtin);
       if (product) {
         setValue("reagentName", product.name);
@@ -166,87 +181,95 @@ export default function ReagentRegistration() {
       }
       setValue("specification", "規格未設定");
       addDebugLog("各フィールドに自動入力完了");
-      // 正常に解析できたら、カメラ停止
       setShowCamera(false);
       setBarcodeDetected(true);
+      setError("");
     } else {
-      addDebugLog("正規表現マッチ失敗。バーコード内容: " + barcode);
+      addDebugLog("正規表現マッチ失敗。バーコード内容: " + cleanBarcode);
       setError("GS1バーコード正規表現にマッチせず");
     }
   };
 
-  // 撮影してバーコード解析を実行（自動撮影ループ用）
-  const captureAndDecodeBarcode = async () => {
-    if (webcamRef.current) {
-      addDebugLog("ウェブカムからスクリーンショット取得開始");
-      setScanning(true);
-      const imageSrc = webcamRef.current.getScreenshot();
-      if (!imageSrc) {
-        setError("画像の取得に失敗しました");
-        setScanning(false);
-        return;
-      }
-      addDebugLog("画像の取得に成功");
-
-      const image = new Image();
-      image.src = imageSrc;
-      image.onload = async () => {
-        addDebugLog("画像読み込み完了。バーコード解析開始");
-        try {
-          const result = await codeReader.decodeFromImageElement(image);
-          const resultText = result.getText();
-          addDebugLog("ZXingバーコード認識成功: " + resultText);
-          parseGS1Barcode(resultText);
-        } catch (err: unknown) {
-          if (err instanceof Error) {
-            console.error("バーコード解析エラー:", err);
-            addDebugLog("バーコード解析エラー: " + err.message);
-          } else {
-            console.error("バーコード解析エラー:", err);
-            addDebugLog("バーコード解析エラー: " + String(err));
-          }
-          // 失敗の場合は failCount をインクリメントし、一定回数未満ならエラー表示せず再試行
-          setFailCount((prev) => prev + 1);
-          if (failCount >= 2) {
-            setError("バーコードが正しく読み取れませんでした。カメラの位置を調整してください。");
-          }
-        }
-        setScanning(false);
-      };
-      image.onerror = () => {
-        setError("画像の読み込みに失敗しました");
-        setScanning(false);
-      };
-    }
-  };
-
-  // 自動撮影ループ（カメラ表示中は定期的にキャプチャ）
+  // 自動読み取り処理（decodeFromVideoElement を利用）
   useEffect(() => {
-    let intervalId: NodeJS.Timeout;
-    if (showCamera) {
-      intervalId = setInterval(() => {
-        if (!scanning) {
-          captureAndDecodeBarcode();
+    let active = true;
+    const videoElem = webcamRef.current?.video;
+    if (showCamera && videoElem) {
+      const detectFrame = async () => {
+        if (!active) return;
+        if (processing.current) return;
+        processing.current = true;
+        try {
+          const result = await codeReader.decodeFromVideoElement(videoElem);
+          if (result && result.getText() !== lastScannedCode.current) {
+            lastScannedCode.current = result.getText();
+            addDebugLog("ZXingバーコード認識成功: " + result.getText());
+            parseGS1Barcode(result.getText());
+          }
+        } catch (err: unknown) {
+          if (err instanceof Error && !err.message.includes("NotFoundException")) {
+            addDebugLog("バーコード解析エラー: " + err.message);
+            setFailCount((prev) => prev + 1);
+            if (failCount >= 2) {
+              setError("バーコードが正しく読み取れませんでした。カメラの位置を調整してください。");
+            }
+          }
+        } finally {
+          processing.current = false;
+          if (active && showCamera) {
+            requestAnimationFrame(detectFrame);
+          }
         }
-      }, 1500);
+      };
+      requestAnimationFrame(detectFrame);
     }
-    return () => clearInterval(intervalId);
-  }, [showCamera, scanning]);
+    return () => {
+      active = false;
+      codeReader.reset();
+    };
+  }, [showCamera, addDebugLog, codeReader, failCount]);
 
-  // 試薬名入力後、過去の登録履歴から最新の部署情報を自動補完
-  const handleReagentNameBlur = async (e: React.FocusEvent<HTMLInputElement>) => {
-    addDebugLog("handleReagentNameBlur triggered with value: " + e.target.value);
-    // 実装例としては、ここで既存データから部署を補完する処理を実装
-  };
-
-  // 次へボタン：フォームクリア、状態リセット
+  // 次へボタン：フォームクリアと状態リセット（連続登録用）
   const handleNext = () => {
     reset();
     setError("");
     setFailCount(0);
     setBarcodeDetected(false);
-    setScanning(true);
     addDebugLog("フォームクリア。次のバーコード入力へ");
+    setShowCamera(true);
+  };
+
+  // 仮の handleReagentNameBlur（必要に応じて実装追加）
+  const handleReagentNameBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    addDebugLog("handleReagentNameBlur triggered with value: " + e.target.value);
+  };
+
+  // ユーザープロフィール確認／作成関数
+  const ensureUserProfile = async (
+    user: { id: string; email?: string; user_metadata: { fullName?: string } }
+  ): Promise<boolean> => {
+    const userEmail = user.email ?? "";
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (error) {
+      console.error("Error checking profile:", error.message);
+      return false;
+    }
+    if (!data) {
+      const { error: insertError } = await supabase.from("profiles").insert({
+        id: user.id,
+        fullname: user.user_metadata.fullName || "",
+        email: userEmail,
+      });
+      if (insertError) {
+        console.error("Error inserting profile:", insertError.message);
+        return false;
+      }
+    }
+    return true;
   };
 
   // 試薬登録処理
@@ -276,7 +299,7 @@ export default function ReagentRegistration() {
           lotNo: formData.lotNo,
           expirationDate: formData.expirationDate,
           registeredBy: registeredBy,
-          used: startUsage ? true : false,
+          used: startUsage,
           used_at: startUsage ? new Date().toISOString() : null,
           ended_at: null,
         },
@@ -297,34 +320,6 @@ export default function ReagentRegistration() {
     setIsSubmitting(false);
   };
 
-  // 現在のユーザーのプロフィールが存在するか確認し、存在しなければ作成する関数
-  const ensureUserProfile = async (
-    user: { id: string; email?: string; user_metadata: { fullName?: string } }
-  ): Promise<boolean> => {
-    const userEmail = user.email ?? "";
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("id", user.id)
-      .maybeSingle();
-    if (error) {
-      console.error("Error checking profile:", error.message);
-      return false;
-    }
-    if (!data) {
-      const { error: insertError } = await supabase.from("profiles").insert({
-        id: user.id,
-        fullname: user.user_metadata.fullName || "",
-        email: userEmail,
-      });
-      if (insertError) {
-        console.error("Error inserting profile:", insertError.message);
-        return false;
-      }
-    }
-    return true;
-  };
-
   return (
     <div className="relative flex flex-col items-center justify-center min-h-screen bg-gray-50 p-4">
       {/* 右上に「ダッシュボードへ戻る」ボタン */}
@@ -339,10 +334,9 @@ export default function ReagentRegistration() {
           <CardHeader>
             <CardTitle>試薬パッケージ登録</CardTitle>
           </CardHeader>
-          <CardContent>
-            {error && <p className="text-red-500 mb-4">{error}</p>}
-            {/* カメラ表示オーバーレイ（読み取り中は表示） */}
-            {scanning && (
+          <CardContent className="relative">
+            {error && !showCamera && <p className="text-red-500 mb-4">{error}</p>}
+            {showCamera && (
               <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center bg-gray-800 bg-opacity-50 z-10">
                 <div className="text-white text-lg font-bold">読み取り中…</div>
               </div>
@@ -364,6 +358,13 @@ export default function ReagentRegistration() {
                   videoConstraints={videoConstraints}
                   className="w-full h-auto rounded"
                 />
+              )}
+              {showCamera && (
+                <div className="flex justify-center mt-2">
+                  <Button variant="destructive" onClick={() => setShowCamera(false)}>
+                    キャンセル
+                  </Button>
+                </div>
               )}
             </div>
             <form className="space-y-4">
@@ -403,7 +404,6 @@ export default function ReagentRegistration() {
             </Button>
           </CardFooter>
         </Card>
-        {/* 次へボタン（連続登録用） */}
         {barcodeDetected && (
           <div className="mt-4">
             <Button onClick={handleNext} variant="outline">
@@ -411,17 +411,18 @@ export default function ReagentRegistration() {
             </Button>
           </div>
         )}
-        {/* デバッグログ表示エリア（フィルタ済み） */}
         {debugLogs.length > 0 && (
           <div className="mt-4 p-2 bg-gray-100 border rounded">
             <h2 className="font-bold mb-2">デバッグログ</h2>
             <pre className="text-xs whitespace-pre-wrap">
-              {debugLogs.filter((log) =>
-                log.startsWith("ZXing") ||
-                log.startsWith("GS1") ||
-                log.startsWith("正規表現") ||
-                log.startsWith("商品名")
-              ).join("\n")}
+              {debugLogs
+                .filter((log) =>
+                  log.startsWith("ZXing") ||
+                  log.startsWith("GS1") ||
+                  log.startsWith("正規表現") ||
+                  log.startsWith("商品名")
+                )
+                .join("\n")}
             </pre>
           </div>
         )}
