@@ -31,10 +31,12 @@ type FormValues = {
   specification: string;
   lotNo: string;
   expirationDate: string;
+  // 追加: JANコード欄
+  janCode?: string;
 };
 
 interface Product {
-  code: string;
+  code: string; // JAN/EAN/GTINなど
   name: string;
 }
 
@@ -44,24 +46,33 @@ export default function ReagentRegistration() {
   const router = useRouter();
   const [error, setError] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // カメラとバーコード解析関連ステート
   const [showCamera, setShowCamera] = useState<boolean>(true);
+  const [manualCaptureMode, setManualCaptureMode] = useState<boolean>(false); // 追加
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);   // 追加
+
+  // 部署一覧、商品CSV、バーコード読み取り状況
   const [departments, setDepartments] = useState<string[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [barcodeDetected, setBarcodeDetected] = useState<boolean>(false);
   const [failCount, setFailCount] = useState<number>(0);
+
+  // デバッグログ表示用
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
 
+  // Webcamや解析状態管理
   const webcamRef = useRef<Webcam>(null);
   const processing = useRef<boolean>(false);
   const lastScannedCode = useRef<string | null>(null);
 
-  // デバッグログ用関数（認識以降の重要ログのみ出力）
+  // デバッグログ用関数
   const addDebugLog = useCallback((msg: string) => {
     console.log(msg);
     setDebugLogs((prev) => [...prev, msg]);
   }, []);
 
-  // ページロード時に自動でカメラを起動
+  // ページ初期表示時にカメラON
   useEffect(() => {
     addDebugLog("ページロード完了。カメラを自動起動します。");
     setShowCamera(true);
@@ -101,7 +112,7 @@ export default function ReagentRegistration() {
     fetchProducts();
   }, [addDebugLog]);
 
-  // react-webcam の設定（高解像度・連続フォーカス）
+  // react-webcam のビデオ設定（連続フォーカスなど）
   const videoConstraints = {
     width: { ideal: 1920 },
     height: { ideal: 1080 },
@@ -109,7 +120,7 @@ export default function ReagentRegistration() {
     focusMode: "continuous",
   };
 
-  // ZXing リーダーのヒント設定（useMemoで安定化）
+  // ZXing リーダーのヒント設定
   const hints = useMemo<Map<DecodeHintType, boolean | BarcodeFormat[]>>(() => {
     const map = new Map<DecodeHintType, boolean | BarcodeFormat[]>();
     map.set(DecodeHintType.POSSIBLE_FORMATS, [
@@ -124,10 +135,10 @@ export default function ReagentRegistration() {
     return map;
   }, []);
 
-  // codeReader の生成を useMemo で安定化（タイムアウト 4000ms）
+  // codeReader の生成
   const codeReader = useMemo(() => new BrowserMultiFormatReader(hints, 4000), [hints]);
 
-  // 手動カメラ起動（ボタン押下用）
+  // 手動で「バーコード撮影を再開」
   const handleBarcodeScan = () => {
     addDebugLog("カメラ表示開始（手動）");
     setShowCamera(true);
@@ -154,50 +165,128 @@ export default function ReagentRegistration() {
     };
   };
 
-  // GS1バーコードのパース処理（useCallbackで依存管理）
-  const parseGS1Barcode = useCallback((barcode: string) => {
-    addDebugLog("GS1バーコード解析開始");
-    const cleanBarcode = barcode.replace(/[^\d]/g, '');
-    addDebugLog(`クリーニング後バーコード: ${cleanBarcode}`);
-    const regex = /^01(\d{14})17(\d{6})10(\d+)(?:30(\d+))?$/;
-    const match = cleanBarcode.match(regex);
-    if (match) {
-      addDebugLog("正規表現マッチ成功");
-      const gtin = match[1];
-      const expiryRaw = match[2];
-      const lot = match[3];
-      addDebugLog("GTIN: " + gtin);
-      addDebugLog("生の有効期限: " + expiryRaw);
-      addDebugLog("ロット番号: " + lot);
-      const yearPrefix = parseInt(expiryRaw.substring(0, 2)) >= 50 ? "19" : "20";
-      const formattedExpiry = `${yearPrefix}${expiryRaw.substring(0, 2)}-${expiryRaw.substring(2, 4)}-${expiryRaw.substring(4, 6)}`;
-      setValue("expirationDate", formattedExpiry);
-      setValue("lotNo", lot);
-      addDebugLog("有効期限変換: " + formattedExpiry);
-      const product = products.find((p) => p.code === gtin);
-      if (product) {
-        setValue("reagentName", product.name);
-        addDebugLog("商品名ルックアップ成功: " + product.name);
-      } else {
-        setValue("reagentName", "商品名未設定");
-        addDebugLog("商品名ルックアップ失敗: 該当するコード " + gtin + " が見つかりません");
-      }
-      setValue("specification", "規格未設定");
-      addDebugLog("各フィールドに自動入力完了");
-      setShowCamera(false);
-      setBarcodeDetected(true);
-      setError("");
-    } else {
-      addDebugLog("正規表現マッチ失敗。バーコード内容: " + cleanBarcode);
-      setError("GS1バーコード正規表現にマッチせず");
-    }
-  }, [addDebugLog, products, setValue]);
+  // 追加: マニュアル撮影モード
+  const handleManualCaptureMode = () => {
+    setManualCaptureMode((prev) => !prev); // ON/OFF切り替え
+    setCapturedImage(null);
+    addDebugLog("手動撮影モード: " + (!manualCaptureMode ? "開始" : "終了"));
+  };
 
-  // 自動読み取り処理（decodeFromVideoElement を利用）
+  // 手動撮影で1枚キャプチャ
+  const handleCaptureImage = () => {
+    if (webcamRef.current) {
+      const imageSrc = webcamRef.current.getScreenshot();
+      if (imageSrc) {
+        setCapturedImage(imageSrc);
+        addDebugLog("画像を手動でキャプチャしました");
+      }
+    }
+  };
+
+  // 手動撮影でキャプチャした画像を解析
+  const handleAnalyzeCapturedImage = () => {
+    if (!capturedImage) return;
+    addDebugLog("手動撮影画像でバーコード解析を試みます");
+    const image = new Image();
+    image.src = capturedImage;
+    image.onload = () => {
+      codeReader
+        .decodeFromImageElement(image)
+        .then((result: Result) => {
+          const codeText = result.getText();
+          addDebugLog("手動撮影画像のバーコード認識成功: " + codeText);
+          parseGS1Barcode(codeText);
+        })
+        .catch((e: unknown) => {
+          console.error("手動撮影画像解析エラー:", e);
+          setError("手動撮影画像バーコード解析に失敗しました");
+        });
+    };
+  };
+
+  // GS1バーコードのパース処理
+  const parseGS1Barcode = useCallback(
+    (barcode: string) => {
+      addDebugLog("GS1バーコード解析開始");
+      const cleanBarcode = barcode.replace(/[^\d]/g, "");
+      addDebugLog(`クリーニング後バーコード: ${cleanBarcode}`);
+
+      // GS1を想定した正規表現
+      const regex = /^01(\d{14})17(\d{6})10(\d+)(?:30(\d+))?$/;
+      const match = cleanBarcode.match(regex);
+      if (match) {
+        addDebugLog("正規表現マッチ成功");
+        const gtin = match[1];
+        const expiryRaw = match[2];
+        const lot = match[3];
+        addDebugLog("GTIN: " + gtin);
+        addDebugLog("生の有効期限: " + expiryRaw);
+        addDebugLog("ロット番号: " + lot);
+
+        // YY(>=50なら1900年代、<50なら2000年代) としてパース
+        const yearPrefix = parseInt(expiryRaw.substring(0, 2)) >= 50 ? "19" : "20";
+        const formattedExpiry = `${yearPrefix}${expiryRaw.substring(0, 2)}-${expiryRaw.substring(
+          2,
+          4
+        )}-${expiryRaw.substring(4, 6)}`;
+        setValue("expirationDate", formattedExpiry);
+        setValue("lotNo", lot);
+        addDebugLog("有効期限変換: " + formattedExpiry);
+
+        // CSVから商品名をルックアップ
+        const product = products.find((p) => p.code === gtin);
+        if (product) {
+          setValue("reagentName", product.name);
+          addDebugLog("商品名ルックアップ成功: " + product.name);
+        } else {
+          setValue("reagentName", "商品名未設定");
+          addDebugLog("商品名ルックアップ失敗: 該当するコード " + gtin + " が見つかりません");
+        }
+        setValue("specification", "規格未設定");
+        addDebugLog("各フィールドに自動入力完了");
+        setShowCamera(false);
+        setBarcodeDetected(true);
+        setError("");
+      } else {
+        // GS1でない場合の処理をここで行っても良い (JAN/EANとして処理 など)
+        addDebugLog("正規表現マッチ失敗。GS1ではない可能性: " + cleanBarcode);
+        // 例: もしEAN/JANならCSVのcodeと一致するか調べる場合
+        // parseJANBarcode(cleanBarcode); ... のようにしてもOK
+        setError("GS1バーコードの正規表現にマッチしませんでした");
+      }
+    },
+    [addDebugLog, products, setValue]
+  );
+
+  // JANコード手入力 → CSVマスタを探す
+  const handleJanCodeBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    const typedCode = e.target.value.trim();
+    if (!typedCode) return; // 未入力の場合は何もしない
+
+    addDebugLog("JANコード手入力: " + typedCode);
+
+    // CSV上で code === typedCode の商品を探す
+    const product = products.find((p) => p.code === typedCode);
+    if (product) {
+      addDebugLog("JANコード一致: " + product.name);
+      setValue("reagentName", product.name);
+      // 規格などがあるならセット、無ければ「規格未設定」
+      setValue("specification", "規格未設定");
+      // 他にLotNoや期限を紐付けていればセットする
+      // ここでは単純に名前だけをルックアップする例
+      // setValue("lotNo", "JAN入力ロット");
+      // setValue("expirationDate", "2025-12-31");
+    } else {
+      addDebugLog("JANコード: CSVに該当なし");
+      setError("JANコードに該当する商品がCSVに見つかりませんでした");
+    }
+  };
+
+  // 自動読み取り（decodeFromVideoElement）: 従来の処理
   useEffect(() => {
     let active = true;
     const videoElem = webcamRef.current?.video;
-    if (showCamera && videoElem) {
+    if (showCamera && videoElem && !manualCaptureMode) {
       const detectFrame = async () => {
         if (!active) return;
         if (processing.current) return;
@@ -219,7 +308,7 @@ export default function ReagentRegistration() {
           }
         } finally {
           processing.current = false;
-          if (active && showCamera) {
+          if (active && showCamera && !manualCaptureMode) {
             requestAnimationFrame(detectFrame);
           }
         }
@@ -230,7 +319,14 @@ export default function ReagentRegistration() {
       active = false;
       codeReader.reset();
     };
-  }, [showCamera, addDebugLog, codeReader, failCount, parseGS1Barcode]);
+  }, [
+    showCamera,
+    manualCaptureMode,
+    addDebugLog,
+    codeReader,
+    failCount,
+    parseGS1Barcode,
+  ]);
 
   // 次へボタン：フォームクリアと状態リセット（連続登録用）
   const handleNext = () => {
@@ -240,9 +336,11 @@ export default function ReagentRegistration() {
     setBarcodeDetected(false);
     addDebugLog("フォームクリア。次のバーコード入力へ");
     setShowCamera(true);
+    setManualCaptureMode(false);
+    setCapturedImage(null);
   };
 
-  // 仮の handleReagentNameBlur（必要に応じて実装追加）
+  // （サンプル）reagentNameのonBlur
   const handleReagentNameBlur = (e: React.FocusEvent<HTMLInputElement>) => {
     addDebugLog("handleReagentNameBlur triggered with value: " + e.target.value);
   };
@@ -331,29 +429,33 @@ export default function ReagentRegistration() {
           <Home className="h-6 w-6" />
         </Button>
       </div>
+
       <div className="w-full max-w-md">
         <h1 className="text-2xl font-bold mb-6">Register Reagent</h1>
+
         <Card>
           <CardHeader>
             <CardTitle>試薬パッケージ登録</CardTitle>
           </CardHeader>
           <CardContent className="relative">
             {error && !showCamera && <p className="text-red-500 mb-4">{error}</p>}
-            {showCamera && (
-              <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center bg-gray-800 bg-opacity-50 z-10">
-                <div className="text-white text-lg font-bold">読み取り中…</div>
-              </div>
-            )}
-            <div className="mb-4 space-y-2">
-              <Button onClick={handleBarcodeScan} variant="outline" className="w-full">
-                バーコード撮影
+
+            {/* 自動解析・手動撮影のモード切り替えボタン */}
+            <div className="flex space-x-2 mb-4">
+              <Button onClick={handleBarcodeScan} variant="outline">
+                自動読み取り (再開)
               </Button>
-              <Button onClick={decodeFromStaticImage} variant="outline" className="w-full">
-                テスト画像で解析
+              <Button onClick={decodeFromStaticImage} variant="outline">
+                テスト画像解析
+              </Button>
+              <Button onClick={handleManualCaptureMode} variant="outline">
+                {manualCaptureMode ? "手動撮影モード終了" : "手動撮影モード開始"}
               </Button>
             </div>
-            <div className="mb-4 relative">
-              {showCamera && (
+
+            {/* カメラプレビュー or 手動撮影モード */}
+            {showCamera && (
+              <div className="mb-4 relative">
                 <Webcam
                   audio={false}
                   ref={webcamRef}
@@ -361,40 +463,100 @@ export default function ReagentRegistration() {
                   videoConstraints={videoConstraints}
                   className="w-full h-auto rounded"
                 />
-              )}
-              {showCamera && (
-                <div className="flex justify-center mt-2">
-                  <Button variant="destructive" onClick={() => setShowCamera(false)}>
-                    キャンセル
-                  </Button>
-                </div>
-              )}
-            </div>
+
+                {/* 手動撮影モードがONなら「写真を撮る」ボタンとプレビュー */}
+                {manualCaptureMode && (
+                  <div className="mt-2 space-y-2">
+                    <Button onClick={handleCaptureImage}>写真を撮る</Button>
+                    {capturedImage && (
+                      <div>
+                        <p>撮影した画像:</p>
+                        <img
+                          src={capturedImage}
+                          alt="Captured"
+                          className="w-full max-h-96 object-contain border"
+                        />
+                        <Button
+                          className="mt-2"
+                          onClick={handleAnalyzeCapturedImage}
+                        >
+                          バーコード解析
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 自動撮影モード中はキャンセルボタンを表示 */}
+                {!manualCaptureMode && (
+                  <div className="flex justify-center mt-2">
+                    <Button variant="destructive" onClick={() => setShowCamera(false)}>
+                      キャンセル
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* フォーム */}
             <form className="space-y-4">
               <div>
                 <Label htmlFor="department">部署名</Label>
-                <Input id="department" list="departments-list" {...register("department", { required: true })} />
+                <Input
+                  id="department"
+                  list="departments-list"
+                  {...register("department", { required: true })}
+                />
                 <datalist id="departments-list">
                   {departments.map((dept) => (
                     <option key={dept} value={dept} />
                   ))}
                 </datalist>
               </div>
+
+              {/* 追加: JANコード */}
+              <div>
+                <Label htmlFor="janCode">JANコード</Label>
+                <Input
+                  id="janCode"
+                  {...register("janCode", {
+                    onBlur: handleJanCodeBlur,
+                  })}
+                  placeholder="JANまたはEANコード"
+                />
+              </div>
+
               <div>
                 <Label htmlFor="reagentName">試薬名</Label>
-                <Input id="reagentName" {...register("reagentName", { required: true, onBlur: handleReagentNameBlur })} />
+                <Input
+                  id="reagentName"
+                  {...register("reagentName", {
+                    required: true,
+                    onBlur: handleReagentNameBlur,
+                  })}
+                />
               </div>
+
               <div>
                 <Label htmlFor="specification">規格</Label>
-                <Input id="specification" {...register("specification", { required: true })} />
+                <Input
+                  id="specification"
+                  {...register("specification", { required: true })}
+                />
               </div>
+
               <div>
                 <Label htmlFor="lotNo">ロット番号</Label>
                 <Input id="lotNo" {...register("lotNo", { required: true })} />
               </div>
+
               <div>
                 <Label htmlFor="expirationDate">使用期限</Label>
-                <Input id="expirationDate" type="date" {...register("expirationDate", { required: true })} />
+                <Input
+                  id="expirationDate"
+                  type="date"
+                  {...register("expirationDate", { required: true })}
+                />
               </div>
             </form>
           </CardContent>
@@ -407,6 +569,8 @@ export default function ReagentRegistration() {
             </Button>
           </CardFooter>
         </Card>
+
+        {/* 次へボタン（連続登録用） */}
         {barcodeDetected && (
           <div className="mt-4">
             <Button onClick={handleNext} variant="outline">
@@ -414,6 +578,8 @@ export default function ReagentRegistration() {
             </Button>
           </div>
         )}
+
+        {/* デバッグログ表示 */}
         {debugLogs.length > 0 && (
           <div className="mt-4 p-2 bg-gray-100 border rounded">
             <h2 className="font-bold mb-2">デバッグログ</h2>
@@ -423,7 +589,8 @@ export default function ReagentRegistration() {
                   log.startsWith("ZXing") ||
                   log.startsWith("GS1") ||
                   log.startsWith("正規表現") ||
-                  log.startsWith("商品名")
+                  log.startsWith("商品名") ||
+                  log.startsWith("JANコード")
                 )
                 .join("\n")}
             </pre>
