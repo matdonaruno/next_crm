@@ -42,7 +42,7 @@ const AuthForm = () => {
       }
       
       // ホームへリダイレクト
-      router.push('/');
+      router.push('/depart');
     } catch (error: unknown) {
       if (error instanceof Error) {
         alert(error.message);

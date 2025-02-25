@@ -1,6 +1,6 @@
 {
-    "name": "Clinical Reagent Manager",
-    "short_name": "ReagentManager",
+    "name": "Labo Logbook",
+    "short_name": "LaboLog",
     "icons": [
       {
         "src": "/icon-192x192.png",
@@ -20,7 +20,7 @@
     ],
     "start_url": "/",
     "display": "standalone",
-    "background_color": "#ffffff",
-    "theme_color": "#ffffff"
+    "background_color": "#fcd1e8",
+    "theme_color": "#dccbf8"
   }
   

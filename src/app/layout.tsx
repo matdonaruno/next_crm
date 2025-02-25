@@ -15,20 +15,25 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// メタ情報を上書き
 export const metadata: Metadata = {
-  title: "Clinical Reagent Manager",
-  description: "臨床試薬管理アプリ",
+  title: 'Labo Logbook',
+  description: '臨床検査現場向け記録管理システム',
 };
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
-    <html lang="ja">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+    <html lang="en">
+      <head>
+        <link rel="stylesheet" href="/css/simple-css-waves.css" />
+        <link rel="stylesheet" href="/css/menu.css" />
+      </head>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
         {children}
       </body>
     </html>

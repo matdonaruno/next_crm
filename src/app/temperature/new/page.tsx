@@ -1,0 +1,259 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Plus, ThermometerSnowflake, ChevronLeft, Home } from 'lucide-react';
+import { Slot } from '@radix-ui/react-slot';
+import { supabase } from '@/lib/supabaseClient'; 
+
+interface TemperatureItem {
+  id: string;
+  item_name: string;       // DB 内部用システム名
+  display_name: string;    // 表示名
+  default_value: number;
+  display_order: number;   // 順序
+  department_id: string;
+}
+
+export default function NewTemperatureRecord() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const departmentName = searchParams?.get("department") || "部署未指定";
+  const departmentId = searchParams?.get("departmentId") || "";
+
+  // 日付は初期値を「今日」に設定
+  const today = new Date().toISOString().slice(0, 10);
+  const [recordDate, setRecordDate] = useState(today);
+
+  const [temperatureItems, setTemperatureItems] = useState<TemperatureItem[]>([]);
+  // フォーム値を item.id => number|boolean で保持
+  const [formValues, setFormValues] = useState<Record<string, number | boolean>>({});
+
+  useEffect(() => {
+    if (!departmentId) return;
+
+    const fetchItems = async () => {
+      const { data, error } = await supabase
+        .from("temperature_items")
+        .select("id, item_name, display_name, default_value, display_order, department_id")
+        .eq("department_id", departmentId)
+        .order("display_order", { ascending: true });
+
+      if (error) {
+        console.error("Fetch Items Error:", error);
+        return;
+      }
+      if (data) {
+        setTemperatureItems(data);
+
+        // 各項目の初期値 (bool => false, 数値 => default_value)
+        const initialValues: Record<string, number | boolean> = {};
+        data.forEach((item) => {
+          initialValues[item.id] =
+            item.item_name === "seika_samplecheck"
+              ? false
+              : item.default_value;
+        });
+        setFormValues(initialValues);
+      }
+    };
+
+    fetchItems();
+  }, [departmentId]);
+
+  const handleInputChange = (itemId: string, value: number | boolean) => {
+    setFormValues((prev) => ({ ...prev, [itemId]: value }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!departmentId) {
+      alert("部署情報が不足しています。");
+      return;
+    }
+
+    // temperature_records にヘッダを作成
+    const { data: recordData, error: recordError } = await supabase
+      .from("temperature_records")
+      .insert([
+        {
+          department_id: departmentId,
+          record_date: recordDate,
+        },
+      ])
+      .select()
+      .single();
+
+    if (recordError) {
+      console.error("Record Save Error:", recordError);
+      alert("記録の保存に失敗しました。");
+      return;
+    }
+
+    const recordId = recordData.id;
+
+    // temperature_record_details へ項目を保存 (bool => 0/1)
+    const details = temperatureItems.map((item) => {
+      const rawValue = formValues[item.id];
+      const finalValue =
+        item.item_name === "seika_samplecheck"
+          ? (rawValue ? 1 : 0) // bool -> 0/1
+          : rawValue; // 数値のまま
+
+      return {
+        temperature_record_id: recordId,
+        temperature_item_id: item.id,
+        value: finalValue,
+      };
+    });
+
+    const { error: detailsError } = await supabase
+      .from("temperature_record_details")
+      .insert(details);
+
+    if (detailsError) {
+      console.error("Details Save Error:", detailsError);
+      alert("詳細記録の保存に失敗しました。");
+      return;
+    }
+
+    // 一覧へ戻る
+    router.push(
+      `/temperature?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`
+    );
+  };
+
+  return (
+    <div className="min-h-screen w-full overflow-y-auto bg-white">
+      {/* ヘッダー */}
+      <header className="border-b border-border bg-white sticky top-0">
+        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center">
+          {/* 戻るボタン */}
+          <button
+            onClick={() => router.back()}
+            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+          >
+            <ChevronLeft className="h-5 w-5 text-gray-600" />
+          </button>
+
+          {/* 中央配置のタイトル */}
+          <div className="flex-1 flex items-center justify-center gap-4">
+            <ThermometerSnowflake className="h-6 w-6 text-[rgb(155,135,245)]" />
+            <h1 className="text-xl font-semibold">New Temperature Record</h1>
+          </div>
+
+          {/* 右側のホームボタン */}
+          <button
+            onClick={() => router.push('/depart')}
+            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+          >
+            <Home className="h-5 w-5 text-gray-600" />
+          </button>
+        </div>
+      </header>
+
+      {/* 部署名 */}
+      <div className="max-w-4xl mx-auto px-4 py-4">
+        <h2 className="cutefont text-lg font-medium text-gray-800">
+          部署: {departmentName}
+        </h2>
+      </div>
+
+      {/* メインフォーム */}
+      <main className="max-w-4xl mx-auto px-4 py-6">
+        <form
+          onSubmit={handleSubmit}
+          className="bg-white p-6 rounded-lg border border-border space-y-4"
+        >
+          {/* 日付入力 */}
+          <div>
+            <label
+              htmlFor="recordDate"
+              className="block text-sm font-medium text-gray-800 bg-gray-50"
+            >
+              Date
+            </label>
+            <input
+              id="recordDate"
+              type="date"
+              value={recordDate}
+              onChange={(e) => setRecordDate(e.target.value)}
+              className="mt-1 block w-40 border border-border rounded-md px-3 py-2 text-gray-800"
+              required
+            />
+          </div>
+
+          {/* 各項目 */}
+          <div className="space-y-4">
+            {temperatureItems.map((item) => {
+              const displayLabel = item.display_name || item.item_name;
+              const isBoolItem = item.item_name === "seika_samplecheck";
+
+              return (
+                <div key={item.id} className="flex items-center gap-4">
+                  {/* 項目名 */}
+                  <label
+                    htmlFor={item.id}
+                    className="text-sm font-medium text-gray-800 w-1/3 bg-gray-50"
+                  >
+                    {displayLabel}
+                  </label>
+
+                  {/* 入力欄 or チェックボックス */}
+                  {isBoolItem ? (
+                    <input
+                      id={item.id}
+                      type="checkbox"
+                      checked={Boolean(formValues[item.id])}
+                      onChange={(e) => handleInputChange(item.id, e.target.checked)}
+                      className="h-5 w-5 border border-border rounded-md"
+                    />
+                  ) : (
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center">
+                          <button
+                            type="button"
+                            onClick={() => handleInputChange(item.id, Number(formValues[item.id]) - 1)}
+                            className="px-3 py-1 border border-gray-800 rounded-l-md hover:bg-blue-300 text-gray-800"
+                          >
+                            -
+                          </button>
+                          <input
+                            id={item.id}
+                            type="number"
+                            value={formValues[item.id] as number}
+                            onChange={(e) => handleInputChange(item.id, Number(e.target.value))}
+                            className="w-24 border border-border rounded-md px-2 py-1 text-gray-800"
+                            />
+                          <button
+                            type="button"
+                            onClick={() => handleInputChange(item.id, Number(formValues[item.id]) + 1)}
+                            className="px-3 py-1 border border-gray-800 rounded-r-md hover:bg-orange-300 text-gray-800"
+                          >
+                            +
+                          </button>
+                        </div>
+                      <span className="text-gray-800">℃</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <Slot>
+            <button
+              type="submit"
+              // ボタンは紫、ホバー時に薄く
+              className="w-full bg-[rgb(155,135,245)] hover:bg-violet-300 text-white rounded-md px-4 py-2.5 font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary/20 flex items-center justify-center gap-2"
+            >
+              <Plus className="h-5 w-5" />
+              Save Record
+            </button>
+          </Slot>
+        </form>
+      </main>
+    </div>
+  );
+}
