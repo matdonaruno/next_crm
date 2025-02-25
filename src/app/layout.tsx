@@ -3,6 +3,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "/public/css/menu.css"
+import "/public/css/simple-css-waves.css"
 
 // フォント設定
 const geistSans = Geist({

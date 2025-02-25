@@ -3,7 +3,6 @@
 import { Calendar } from "@/components/ui/calendar";
 import { Bell, Plus, FileText, ChevronLeft, Home, Check, X } from "lucide-react";
 import { useState, useEffect } from "react";
-import { Slot } from "@radix-ui/react-slot";
 import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from '@/lib/supabaseClient'; 
 import { DayContentProps } from "react-day-picker";
