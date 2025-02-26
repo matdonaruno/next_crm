@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, ThermometerSnowflake, ChevronLeft, Home } from 'lucide-react';
 import { Slot } from '@radix-ui/react-slot';
-import { supabase } from '@/lib/supabaseClient'; 
+import { supabase } from '@/lib/supabaseClient';
 
 interface TemperatureItem {
   id: string;
@@ -15,7 +15,7 @@ interface TemperatureItem {
   department_id: string;
 }
 
-export default function NewTemperatureRecord() {
+function NewTemperatureRecordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const departmentName = searchParams?.get("department") || "部署未指定";
@@ -26,7 +26,7 @@ export default function NewTemperatureRecord() {
   const [recordDate, setRecordDate] = useState(today);
 
   const [temperatureItems, setTemperatureItems] = useState<TemperatureItem[]>([]);
-  // フォーム値を item.id => number|boolean で保持
+  // 各項目の入力値を item.id => number|boolean で保持
   const [formValues, setFormValues] = useState<Record<string, number | boolean>>({});
 
   useEffect(() => {
@@ -93,13 +93,13 @@ export default function NewTemperatureRecord() {
 
     const recordId = recordData.id;
 
-    // temperature_record_details へ項目を保存 (bool => 0/1)
+    // temperature_record_details へ各項目を保存 (bool => 0/1 に変換)
     const details = temperatureItems.map((item) => {
       const rawValue = formValues[item.id];
       const finalValue =
         item.item_name === "seika_samplecheck"
-          ? (rawValue ? 1 : 0) // bool -> 0/1
-          : rawValue; // 数値のまま
+          ? (rawValue ? 1 : 0)
+          : rawValue;
 
       return {
         temperature_record_id: recordId,
@@ -118,7 +118,7 @@ export default function NewTemperatureRecord() {
       return;
     }
 
-    // 一覧へ戻る
+    // 記録完了後、一覧画面へ戻る
     router.push(
       `/temperature?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`
     );
@@ -153,7 +153,7 @@ export default function NewTemperatureRecord() {
         </div>
       </header>
 
-      {/* 部署名 */}
+      {/* 部署名表示 */}
       <div className="max-w-4xl mx-auto px-4 py-4">
         <h2 className="cutefont text-lg font-medium text-gray-800">
           部署: {departmentName}
@@ -184,7 +184,7 @@ export default function NewTemperatureRecord() {
             />
           </div>
 
-          {/* 各項目 */}
+          {/* 各項目の入力 */}
           <div className="space-y-4">
             {temperatureItems.map((item) => {
               const displayLabel = item.display_name || item.item_name;
@@ -200,7 +200,7 @@ export default function NewTemperatureRecord() {
                     {displayLabel}
                   </label>
 
-                  {/* 入力欄 or チェックボックス */}
+                  {/* 入力欄またはチェックボックス */}
                   {isBoolItem ? (
                     <input
                       id={item.id}
@@ -210,30 +210,36 @@ export default function NewTemperatureRecord() {
                       className="h-5 w-5 border border-border rounded-md"
                     />
                   ) : (
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center">
-                          <button
-                            type="button"
-                            onClick={() => handleInputChange(item.id, Number(formValues[item.id]) - 1)}
-                            className="px-3 py-1 border border-gray-800 rounded-l-md hover:bg-blue-300 text-gray-800"
-                          >
-                            -
-                          </button>
-                          <input
-                            id={item.id}
-                            type="number"
-                            value={formValues[item.id] as number}
-                            onChange={(e) => handleInputChange(item.id, Number(e.target.value))}
-                            className="w-24 border border-border rounded-md px-2 py-1 text-gray-800"
-                            />
-                          <button
-                            type="button"
-                            onClick={() => handleInputChange(item.id, Number(formValues[item.id]) + 1)}
-                            className="px-3 py-1 border border-gray-800 rounded-r-md hover:bg-orange-300 text-gray-800"
-                          >
-                            +
-                          </button>
-                        </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleInputChange(item.id, Number(formValues[item.id]) - 1)
+                          }
+                          className="px-3 py-1 border border-gray-800 rounded-l-md hover:bg-blue-300 text-gray-800"
+                        >
+                          -
+                        </button>
+                        <input
+                          id={item.id}
+                          type="number"
+                          value={formValues[item.id] as number}
+                          onChange={(e) =>
+                            handleInputChange(item.id, Number(e.target.value))
+                          }
+                          className="w-24 border border-border rounded-md px-2 py-1 text-gray-800"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleInputChange(item.id, Number(formValues[item.id]) + 1)
+                          }
+                          className="px-3 py-1 border border-gray-800 rounded-r-md hover:bg-orange-300 text-gray-800"
+                        >
+                          +
+                        </button>
+                      </div>
                       <span className="text-gray-800">℃</span>
                     </div>
                   )}
@@ -245,7 +251,6 @@ export default function NewTemperatureRecord() {
           <Slot>
             <button
               type="submit"
-              // ボタンは紫、ホバー時に薄く
               className="w-full bg-[rgb(155,135,245)] hover:bg-violet-300 text-white rounded-md px-4 py-2.5 font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary/20 flex items-center justify-center gap-2"
             >
               <Plus className="h-5 w-5" />
@@ -255,5 +260,13 @@ export default function NewTemperatureRecord() {
         </form>
       </main>
     </div>
+  );
+}
+
+export default function NewTemperatureRecord() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <NewTemperatureRecordContent />
+    </Suspense>
   );
 }

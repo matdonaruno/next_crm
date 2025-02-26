@@ -29,13 +29,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
-        <link rel="stylesheet" href="/css/simple-css-waves.css" />
-        <link rel="stylesheet" href="/css/menu.css" />
-      </head>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      {/* head 内の手動での stylesheet 読み込みは削除 */}
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         {children}
       </body>
     </html>

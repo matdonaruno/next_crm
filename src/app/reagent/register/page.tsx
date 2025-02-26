@@ -24,6 +24,8 @@ import {
 } from "@zxing/library";
 import { Home } from "lucide-react";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
+import NextImage from "next/image";
+
 
 type FormValues = {
   department: string;
@@ -471,11 +473,13 @@ export default function ReagentRegistration() {
                     {capturedImage && (
                       <div>
                         <p>撮影した画像:</p>
-                        <img
-                          src={capturedImage}
-                          alt="Captured"
-                          className="w-full max-h-96 object-contain border"
-                        />
+                        <div className="relative w-full h-96 border">
+                          <NextImage
+                            src={capturedImage}
+                            alt="Captured"
+                            className="w-full max-h-96 object-contain border"
+                          />
+                        </div>
                         <Button
                           className="mt-2"
                           onClick={handleAnalyzeCapturedImage}
