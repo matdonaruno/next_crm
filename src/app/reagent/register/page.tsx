@@ -2,7 +2,6 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useForm } from "react-hook-form";
-import Webcam from "react-webcam";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import Papa from "papaparse";
@@ -16,16 +15,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import {
-  BrowserMultiFormatReader,
-  DecodeHintType,
-  BarcodeFormat,
-  Result,
-} from "@zxing/library";
 import { Home } from "lucide-react";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import NextImage from "next/image";
-
+import Quagga from "quagga";
 
 type FormValues = {
   department: string;
@@ -63,16 +56,64 @@ export default function ReagentRegistration() {
   // デバッグログ表示用
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
 
-  // Webcamや解析状態管理
-  const webcamRef = useRef<Webcam>(null);
+  // Quagga用のマウントポイント参照
+  const quaggaRef = useRef<HTMLDivElement>(null);
   const processing = useRef<boolean>(false);
   const lastScannedCode = useRef<string | null>(null);
+  
+  // 高解像度カメラ用の参照
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   // デバッグログ用関数
   const addDebugLog = useCallback((msg: string) => {
     console.log(msg);
     setDebugLogs((prev) => [...prev, msg]);
   }, []);
+
+  // カメラ初期化関数
+  const initCamera = useCallback(async () => {
+    if (!videoRef.current) return;
+    
+    try {
+      // 高解像度設定でカメラを取得
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 3840 }, // 4K
+          height: { ideal: 2160 },
+          facingMode: "environment",
+          frameRate: { ideal: 30 }
+        },
+        audio: false
+      });
+      
+      streamRef.current = stream;
+      videoRef.current.srcObject = stream;
+      
+      // ビデオが読み込まれたら実際の解像度をログに出力
+      videoRef.current.onloadedmetadata = () => {
+        if (videoRef.current) {
+          addDebugLog(`カメラ解像度: ${videoRef.current.videoWidth}x${videoRef.current.videoHeight}`);
+        }
+      };
+      
+      videoRef.current.play();
+      addDebugLog("高解像度カメラ初期化成功");
+    } catch (err) {
+      addDebugLog("カメラ初期化エラー: " + err);
+      setError("カメラの起動に失敗しました。カメラへのアクセス許可を確認してください。");
+    }
+  }, [addDebugLog]);
+
+  // カメラ停止関数
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+      addDebugLog("カメラ停止");
+    }
+  }, [addDebugLog]);
 
   // ページ初期表示時にカメラON
   useEffect(() => {
@@ -114,57 +155,154 @@ export default function ReagentRegistration() {
     fetchProducts();
   }, [addDebugLog]);
 
-  // react-webcam のビデオ設定（連続フォーカスなど）
-  const videoConstraints = {
-    width: { ideal: 1920 },
-    height: { ideal: 1080 },
-    facingMode: "environment",
-    focusMode: "continuous",
+  // Quaggaの初期化と実行
+  useEffect(() => {
+    if (showCamera && !manualCaptureMode && quaggaRef.current) {
+      addDebugLog("Quagga初期化開始");
+      
+      // Quaggaの設定
+      Quagga.init({
+        inputStream: {
+          name: "Live",
+          type: "LiveStream",
+          target: quaggaRef.current,
+          constraints: {
+            width: { min: 640 },
+            height: { min: 480 },
+            facingMode: "environment", // バックカメラを使用
+            aspectRatio: { min: 1, max: 2 }
+          },
+        },
+        locator: {
+          patchSize: "medium",
+          halfSample: true
+        },
+        numOfWorkers: navigator.hardwareConcurrency || 4,
+        decoder: {
+          readers: [
+            "ean_reader",
+            "ean_8_reader",
+            "code_128_reader",
+            "code_39_reader",
+            "upc_reader",
+            "upc_e_reader"
+          ],
+        },
+        locate: true
+      }, function(err) {
+        if (err) {
+          addDebugLog("Quagga初期化エラー: " + err);
+          return;
+        }
+        
+        addDebugLog("Quagga初期化成功。スキャン開始");
+        Quagga.start();
+      });
+
+      // バーコード検出時のハンドラ
+      Quagga.onDetected((result) => {
+        if (!processing.current && result.codeResult) {
+          processing.current = true;
+          const code = result.codeResult.code;
+          
+          if (code && code !== lastScannedCode.current) {
+            lastScannedCode.current = code;
+            addDebugLog("Quaggaバーコード認識成功: " + code);
+            parseGS1Barcode(code);
+          }
+          
+          setTimeout(() => {
+            processing.current = false;
+          }, 1000); // 重複認識防止のため1秒待機
+        }
+      });
+
+      // エラー処理
+      Quagga.onProcessed((result) => {
+        if (!result) {
+          setFailCount((prev) => prev + 1);
+          if (failCount >= 5) {
+            setError("バーコードが正しく読み取れませんでした。カメラの位置を調整してください。");
+          }
+          return;
+        }
+      });
+
+      return () => {
+        addDebugLog("Quagga停止");
+        Quagga.stop();
+      };
+    }
+  }, [showCamera, manualCaptureMode, addDebugLog, failCount]);
+
+  // 高解像度カメラの初期化と停止を管理
+  useEffect(() => {
+    if (showCamera && manualCaptureMode) {
+      initCamera();
+    }
+    
+    return () => {
+      stopCamera();
+    };
+  }, [showCamera, manualCaptureMode, initCamera, stopCamera]);
+
+  // テスト画像解析用
+  const decodeFromStaticImage = () => {
+    addDebugLog("テスト画像からバーコード解析開始");
+    
+    const img = new Image();
+    img.src = "/barcode-02.png";
+    img.onload = function() {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx?.drawImage(img, 0, 0);
+      
+      // ダミーのdiv要素を作成してtargetとして使用
+      const dummyElement = document.createElement("div");
+      
+      Quagga.decodeSingle({
+        inputStream: {
+          name: "Static Image",
+          type: "ImageStream",
+          target: dummyElement,
+          constraints: {
+            width: img.width,
+            height: img.height,
+            facingMode: "environment"
+          }
+        },
+        decoder: {
+          readers: [
+            "ean_reader",
+            "ean_8_reader", 
+            "code_128_reader",
+            "code_39_reader",
+            "upc_reader",
+            "upc_e_reader"
+          ]
+        },
+        locate: true,
+        src: canvas.toDataURL()
+      }, function(result) {
+        if (result && result.codeResult) {
+          const testResultText = result.codeResult.code;
+          addDebugLog("テスト画像バーコード認識成功: " + testResultText);
+          parseGS1Barcode(testResultText);
+        } else {
+          addDebugLog("テスト画像バーコード認識失敗");
+          setError("テスト画像バーコード解析に失敗しました");
+        }
+      });
+    };
   };
-
-  // ZXing リーダーのヒント設定
-  const hints = useMemo<Map<DecodeHintType, boolean | BarcodeFormat[]>>(() => {
-    const map = new Map<DecodeHintType, boolean | BarcodeFormat[]>();
-    map.set(DecodeHintType.POSSIBLE_FORMATS, [
-      BarcodeFormat.CODE_128,
-      BarcodeFormat.EAN_13,
-      BarcodeFormat.EAN_8,
-      BarcodeFormat.UPC_A,
-      BarcodeFormat.UPC_E,
-    ]);
-    map.set(DecodeHintType.TRY_HARDER, true);
-    map.set(DecodeHintType.ASSUME_GS1, true);
-    return map;
-  }, []);
-
-  // codeReader の生成
-  const codeReader = useMemo(() => new BrowserMultiFormatReader(hints, 4000), [hints]);
 
   // 手動で「バーコード撮影を再開」
   const handleBarcodeScan = () => {
     addDebugLog("カメラ表示開始（手動）");
     setShowCamera(true);
-  };
-
-  // テスト画像解析用
-  const decodeFromStaticImage = () => {
-    addDebugLog("テスト画像からバーコード解析開始");
-    const testImage = new Image();
-    testImage.src = "/barcode-02.png";
-    testImage.onload = () => {
-      addDebugLog("テスト画像読み込み完了。バーコード解析開始（静的画像）");
-      codeReader
-        .decodeFromImageElement(testImage)
-        .then((result: Result) => {
-          const testResultText = result.getText();
-          addDebugLog("テスト画像バーコード認識成功: " + testResultText);
-          parseGS1Barcode(testResultText);
-        })
-        .catch((e: unknown) => {
-          console.error("テスト画像解析エラー:", e);
-          setError("テスト画像バーコード解析に失敗しました");
-        });
-    };
+    setManualCaptureMode(false);
   };
 
   // 追加: マニュアル撮影モード
@@ -172,50 +310,95 @@ export default function ReagentRegistration() {
     setManualCaptureMode((prev) => !prev); // ON/OFF切り替え
     setCapturedImage(null);
     addDebugLog("手動撮影モード: " + (!manualCaptureMode ? "開始" : "終了"));
+    
+    if (!manualCaptureMode) {
+      // 自動モードからマニュアルモードに切り替える場合はQuaggaを停止
+      Quagga.stop();
+      // 少し遅延させてカメラを初期化
+      setTimeout(initCamera, 500);
+    } else {
+      stopCamera();
+    }
   };
 
   // 手動撮影で1枚キャプチャ
   const handleCaptureImage = () => {
-    if (webcamRef.current) {
-      const imageSrc = webcamRef.current.getScreenshot();
-      if (imageSrc) {
-        setCapturedImage(imageSrc);
-        addDebugLog("画像を手動でキャプチャしました");
-      }
-    }
+    if (!videoRef.current || !canvasRef.current) return;
+    
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    
+    // キャンバスをビデオと同じサイズに設定
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    
+    // ビデオフレームをキャンバスに描画
+    ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    
+    // キャンバスから画像データを取得
+    const imageSrc = canvas.toDataURL('image/jpeg', 1.0); // 最高品質
+    setCapturedImage(imageSrc);
+    addDebugLog(`画像を手動でキャプチャしました (${video.videoWidth}x${video.videoHeight})`);
   };
 
   // 手動撮影でキャプチャした画像を解析
   const handleAnalyzeCapturedImage = () => {
     if (!capturedImage) return;
     addDebugLog("手動撮影画像でバーコード解析を試みます");
-    const image = new Image();
-    image.src = capturedImage;
-    image.onload = () => {
-      codeReader
-        .decodeFromImageElement(image)
-        .then((result: Result) => {
-          const codeText = result.getText();
-          addDebugLog("手動撮影画像のバーコード認識成功: " + codeText);
-          parseGS1Barcode(codeText);
-        })
-        .catch((e: unknown) => {
-          console.error("手動撮影画像解析エラー:", e);
-          setError("手動撮影画像バーコード解析に失敗しました");
-        });
-    };
+    
+    // ダミーのdiv要素を作成してtargetとして使用
+    const dummyElement = document.createElement("div");
+    
+    Quagga.decodeSingle({
+      inputStream: {
+        name: "Captured Image",
+        type: "ImageStream",
+        target: dummyElement,
+        constraints: {
+          width: 800,
+          height: 600,
+          facingMode: "environment"
+        }
+      },
+      decoder: {
+        readers: [
+          "ean_reader",
+          "ean_8_reader", 
+          "code_128_reader",
+          "code_39_reader",
+          "upc_reader",
+          "upc_e_reader"
+        ]
+      },
+      locate: true,
+      src: capturedImage
+    }, function(result) {
+      if (result && result.codeResult) {
+        const codeText = result.codeResult.code;
+        addDebugLog("手動撮影画像のバーコード認識成功: " + codeText);
+        parseGS1Barcode(codeText);
+      } else {
+        addDebugLog("手動撮影画像バーコード認識失敗");
+        setError("手動撮影画像バーコード解析に失敗しました");
+      }
+    });
   };
 
   // GS1バーコードのパース処理
   const parseGS1Barcode = useCallback(
     (barcode: string) => {
       addDebugLog("GS1バーコード解析開始");
+      // 数字以外の文字を除去する前のバーコードを保存
+      const originalBarcode = barcode;
+      // 数字のみに変換
       const cleanBarcode = barcode.replace(/[^\d]/g, "");
       addDebugLog(`クリーニング後バーコード: ${cleanBarcode}`);
 
-      // GS1を想定した正規表現
-      const regex = /^01(\d{14})17(\d{6})10(\d+)(?:30(\d+))?$/;
+      // より柔軟なGS1正規表現 - 01と17と10のAIを探す
+      const regex = /01(\d{14}).*?17(\d{6}).*?10([^]*?)(?:$|(?:30|21|91))/;
       const match = cleanBarcode.match(regex);
+
       if (match) {
         addDebugLog("正規表現マッチ成功");
         const gtin = match[1];
@@ -232,7 +415,19 @@ export default function ReagentRegistration() {
           4
         )}-${expiryRaw.substring(4, 6)}`;
         setValue("expirationDate", formattedExpiry);
-        setValue("lotNo", lot);
+        
+        // ロット番号の処理 - 数字だけでなく英数字も処理
+        // 元のバーコードから英数字のロット番号を抽出
+        const lotRegex = /10([A-Za-z0-9]+)/;
+        const lotMatch = originalBarcode.match(lotRegex);
+        if (lotMatch) {
+          setValue("lotNo", lotMatch[1]);
+          addDebugLog("元バーコードからロット番号抽出: " + lotMatch[1]);
+        } else {
+          setValue("lotNo", lot);
+          addDebugLog("数字のみのロット番号使用: " + lot);
+        }
+        
         addDebugLog("有効期限変換: " + formattedExpiry);
 
         // CSVから商品名をルックアップ
@@ -249,15 +444,32 @@ export default function ReagentRegistration() {
         setShowCamera(false);
         setBarcodeDetected(true);
         setError("");
+        Quagga.stop();
+        stopCamera();
       } else {
-        // GS1でない場合の処理をここで行っても良い (JAN/EANとして処理 など)
+        // 単純なJANコードとして処理を試みる
+        if (cleanBarcode.length >= 8 && cleanBarcode.length <= 13) {
+          addDebugLog("GS1ではなくJANコードとして処理を試みます: " + cleanBarcode);
+          const product = products.find((p) => p.code === cleanBarcode);
+          if (product) {
+            setValue("reagentName", product.name);
+            setValue("specification", "規格未設定");
+            setValue("janCode", cleanBarcode);
+            addDebugLog("JANコード一致: " + product.name);
+            setShowCamera(false);
+            setBarcodeDetected(true);
+            setError("");
+            Quagga.stop();
+            stopCamera();
+            return;
+          }
+        }
+        
         addDebugLog("正規表現マッチ失敗。GS1ではない可能性: " + cleanBarcode);
-        // 例: もしEAN/JANならCSVのcodeと一致するか調べる場合
-        // parseJANBarcode(cleanBarcode); ... のようにしてもOK
         setError("GS1バーコードの正規表現にマッチしませんでした");
       }
     },
-    [addDebugLog, products, setValue]
+    [addDebugLog, products, setValue, stopCamera]
   );
 
   // JANコード手入力 → CSVマスタを探す
@@ -283,52 +495,6 @@ export default function ReagentRegistration() {
       setError("JANコードに該当する商品がCSVに見つかりませんでした");
     }
   };
-
-  // 自動読み取り（decodeFromVideoElement）: 従来の処理
-  useEffect(() => {
-    let active = true;
-    const videoElem = webcamRef.current?.video;
-    if (showCamera && videoElem && !manualCaptureMode) {
-      const detectFrame = async () => {
-        if (!active) return;
-        if (processing.current) return;
-        processing.current = true;
-        try {
-          const result = await codeReader.decodeFromVideoElement(videoElem);
-          if (result && result.getText() !== lastScannedCode.current) {
-            lastScannedCode.current = result.getText();
-            addDebugLog("ZXingバーコード認識成功: " + result.getText());
-            parseGS1Barcode(result.getText());
-          }
-        } catch (err: unknown) {
-          if (err instanceof Error && !err.message.includes("NotFoundException")) {
-            addDebugLog("バーコード解析エラー: " + err.message);
-            setFailCount((prev) => prev + 1);
-            if (failCount >= 2) {
-              setError("バーコードが正しく読み取れませんでした。カメラの位置を調整してください。");
-            }
-          }
-        } finally {
-          processing.current = false;
-          if (active && showCamera && !manualCaptureMode) {
-            requestAnimationFrame(detectFrame);
-          }
-        }
-      };
-      requestAnimationFrame(detectFrame);
-    }
-    return () => {
-      active = false;
-      codeReader.reset();
-    };
-  }, [
-    showCamera,
-    manualCaptureMode,
-    addDebugLog,
-    codeReader,
-    failCount,
-    parseGS1Barcode,
-  ]);
 
   // 次へボタン：フォームクリアと状態リセット（連続登録用）
   const handleNext = () => {
@@ -458,13 +624,25 @@ export default function ReagentRegistration() {
             {/* カメラプレビュー or 手動撮影モード */}
             {showCamera && (
               <div className="mb-4 relative">
-                <Webcam
-                  audio={false}
-                  ref={webcamRef}
-                  screenshotFormat="image/jpeg"
-                  videoConstraints={videoConstraints}
-                  className="w-full h-auto rounded"
-                />
+                {!manualCaptureMode ? (
+                  // Quagga用のマウントポイント
+                  <div 
+                    ref={quaggaRef} 
+                    className="w-full h-64 rounded overflow-hidden relative border"
+                    style={{ position: 'relative' }}
+                  />
+                ) : (
+                  // 高解像度カメラ用のビデオ要素
+                  <div className="relative">
+                    <video
+                      ref={videoRef}
+                      className="w-full h-auto rounded"
+                      playsInline
+                      muted
+                    />
+                    <canvas ref={canvasRef} style={{ display: 'none' }} />
+                  </div>
+                )}
 
                 {/* 手動撮影モードがONなら「写真を撮る」ボタンとプレビュー */}
                 {manualCaptureMode && (
@@ -494,7 +672,10 @@ export default function ReagentRegistration() {
                 {/* 自動撮影モード中はキャンセルボタンを表示 */}
                 {!manualCaptureMode && (
                   <div className="flex justify-center mt-2">
-                    <Button variant="destructive" onClick={() => setShowCamera(false)}>
+                    <Button variant="destructive" onClick={() => {
+                      setShowCamera(false);
+                      Quagga.stop();
+                    }}>
                       キャンセル
                     </Button>
                   </div>
@@ -585,22 +766,24 @@ export default function ReagentRegistration() {
 
         {/* デバッグログ表示 */}
         {debugLogs.length > 0 && (
-          <div className="mt-4 p-2 bg-gray-100 border rounded">
-            <h2 className="font-bold mb-2">デバッグログ</h2>
-            <pre className="text-xs whitespace-pre-wrap">
-              {debugLogs
-                .filter((log) =>
-                  log.startsWith("ZXing") ||
-                  log.startsWith("GS1") ||
-                  log.startsWith("正規表現") ||
-                  log.startsWith("商品名") ||
-                  log.startsWith("JANコード")
-                )
-                .join("\n")}
-            </pre>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+                    <div className="mt-4 p-2 bg-gray-100 border rounded">
+                    <h2 className="font-bold mb-2">デバッグログ</h2>
+                    <pre className="text-xs whitespace-pre-wrap">
+                      {debugLogs
+                        .filter((log) =>
+                          log.startsWith("Quagga") ||
+                          log.startsWith("GS1") ||
+                          log.startsWith("正規表現") ||
+                          log.startsWith("商品名") ||
+                          log.startsWith("JANコード") ||
+                          log.startsWith("カメラ解像度") ||
+                          log.startsWith("画像を手動でキャプチャ")
+                        )
+                        .join("\n")}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        }
