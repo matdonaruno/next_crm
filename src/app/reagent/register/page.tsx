@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Home } from "lucide-react";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import NextImage from "next/image";
+// @ts-expect-error Quaggaモジュールの型定義が見つからないため
 import Quagga from "quagga";
 
 type FormValues = {
@@ -72,40 +73,6 @@ export default function ReagentRegistration() {
     setDebugLogs((prev) => [...prev, msg]);
   }, []);
 
-  // カメラ初期化関数
-  const initCamera = useCallback(async () => {
-    if (!videoRef.current) return;
-    
-    try {
-      // 高解像度設定でカメラを取得
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 3840 }, // 4K
-          height: { ideal: 2160 },
-          facingMode: "environment",
-          frameRate: { ideal: 30 }
-        },
-        audio: false
-      });
-      
-      streamRef.current = stream;
-      videoRef.current.srcObject = stream;
-      
-      // ビデオが読み込まれたら実際の解像度をログに出力
-      videoRef.current.onloadedmetadata = () => {
-        if (videoRef.current) {
-          addDebugLog(`カメラ解像度: ${videoRef.current.videoWidth}x${videoRef.current.videoHeight}`);
-        }
-      };
-      
-      videoRef.current.play();
-      addDebugLog("高解像度カメラ初期化成功");
-    } catch (err) {
-      addDebugLog("カメラ初期化エラー: " + err);
-      setError("カメラの起動に失敗しました。カメラへのアクセス許可を確認してください。");
-    }
-  }, [addDebugLog]);
-
   // カメラ停止関数
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -114,276 +81,6 @@ export default function ReagentRegistration() {
       addDebugLog("カメラ停止");
     }
   }, [addDebugLog]);
-
-  // ページ初期表示時にカメラON
-  useEffect(() => {
-    addDebugLog("ページロード完了。カメラを自動起動します。");
-    setShowCamera(true);
-  }, [addDebugLog]);
-
-  // 部署一覧取得（supabaseから）
-  useEffect(() => {
-    const fetchDepartments = async () => {
-      const { data, error } = await supabase.from("reagents").select("department");
-      if (error) {
-        console.error("Error fetching departments:", error);
-      } else if (data) {
-        const unique = Array.from(
-          new Set(data.map((item: { department: string }) => item.department).filter(Boolean))
-        );
-        setDepartments(unique);
-        unique.forEach((dept) => addDebugLog("部署一覧取得: " + dept));
-      }
-    };
-    fetchDepartments();
-  }, [addDebugLog]);
-
-  // 商品CSV（マスタ）の読み込み
-  useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        const response = await fetch("/products.csv");
-        const csvText = await response.text();
-        const parsed = Papa.parse(csvText, { header: true });
-        setProducts(parsed.data as Product[]);
-        addDebugLog("商品CSV読み込み成功");
-      } catch (error) {
-        console.error("CSV読み込みエラー", error);
-        addDebugLog("CSV読み込みエラー");
-      }
-    };
-    fetchProducts();
-  }, [addDebugLog]);
-
-  // Quaggaの初期化と実行
-  useEffect(() => {
-    if (showCamera && !manualCaptureMode && quaggaRef.current) {
-      addDebugLog("Quagga初期化開始");
-      
-      // Quaggaの設定
-      Quagga.init({
-        inputStream: {
-          name: "Live",
-          type: "LiveStream",
-          target: quaggaRef.current,
-          constraints: {
-            width: { min: 640 },
-            height: { min: 480 },
-            facingMode: "environment", // バックカメラを使用
-            aspectRatio: { min: 1, max: 2 }
-          },
-        },
-        locator: {
-          patchSize: "medium",
-          halfSample: true
-        },
-        numOfWorkers: navigator.hardwareConcurrency || 4,
-        decoder: {
-          readers: [
-            "ean_reader",
-            "ean_8_reader",
-            "code_128_reader",
-            "code_39_reader",
-            "upc_reader",
-            "upc_e_reader"
-          ],
-        },
-        locate: true
-      }, function(err) {
-        if (err) {
-          addDebugLog("Quagga初期化エラー: " + err);
-          return;
-        }
-        
-        addDebugLog("Quagga初期化成功。スキャン開始");
-        Quagga.start();
-      });
-
-      // バーコード検出時のハンドラ
-      Quagga.onDetected((result) => {
-        if (!processing.current && result.codeResult) {
-          processing.current = true;
-          const code = result.codeResult.code;
-          
-          if (code && code !== lastScannedCode.current) {
-            lastScannedCode.current = code;
-            addDebugLog("Quaggaバーコード認識成功: " + code);
-            parseGS1Barcode(code);
-          }
-          
-          setTimeout(() => {
-            processing.current = false;
-          }, 1000); // 重複認識防止のため1秒待機
-        }
-      });
-
-      // エラー処理
-      Quagga.onProcessed((result) => {
-        if (!result) {
-          setFailCount((prev) => prev + 1);
-          if (failCount >= 5) {
-            setError("バーコードが正しく読み取れませんでした。カメラの位置を調整してください。");
-          }
-          return;
-        }
-      });
-
-      return () => {
-        addDebugLog("Quagga停止");
-        Quagga.stop();
-      };
-    }
-  }, [showCamera, manualCaptureMode, addDebugLog, failCount]);
-
-  // 高解像度カメラの初期化と停止を管理
-  useEffect(() => {
-    if (showCamera && manualCaptureMode) {
-      initCamera();
-    }
-    
-    return () => {
-      stopCamera();
-    };
-  }, [showCamera, manualCaptureMode, initCamera, stopCamera]);
-
-  // テスト画像解析用
-  const decodeFromStaticImage = () => {
-    addDebugLog("テスト画像からバーコード解析開始");
-    
-    const img = new Image();
-    img.src = "/barcode-02.png";
-    img.onload = function() {
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      canvas.width = img.width;
-      canvas.height = img.height;
-      ctx?.drawImage(img, 0, 0);
-      
-      // ダミーのdiv要素を作成してtargetとして使用
-      const dummyElement = document.createElement("div");
-      
-      Quagga.decodeSingle({
-        inputStream: {
-          name: "Static Image",
-          type: "ImageStream",
-          target: dummyElement,
-          constraints: {
-            width: img.width,
-            height: img.height,
-            facingMode: "environment"
-          }
-        },
-        decoder: {
-          readers: [
-            "ean_reader",
-            "ean_8_reader", 
-            "code_128_reader",
-            "code_39_reader",
-            "upc_reader",
-            "upc_e_reader"
-          ]
-        },
-        locate: true,
-        src: canvas.toDataURL()
-      }, function(result) {
-        if (result && result.codeResult) {
-          const testResultText = result.codeResult.code;
-          addDebugLog("テスト画像バーコード認識成功: " + testResultText);
-          parseGS1Barcode(testResultText);
-        } else {
-          addDebugLog("テスト画像バーコード認識失敗");
-          setError("テスト画像バーコード解析に失敗しました");
-        }
-      });
-    };
-  };
-
-  // 手動で「バーコード撮影を再開」
-  const handleBarcodeScan = () => {
-    addDebugLog("カメラ表示開始（手動）");
-    setShowCamera(true);
-    setManualCaptureMode(false);
-  };
-
-  // 追加: マニュアル撮影モード
-  const handleManualCaptureMode = () => {
-    setManualCaptureMode((prev) => !prev); // ON/OFF切り替え
-    setCapturedImage(null);
-    addDebugLog("手動撮影モード: " + (!manualCaptureMode ? "開始" : "終了"));
-    
-    if (!manualCaptureMode) {
-      // 自動モードからマニュアルモードに切り替える場合はQuaggaを停止
-      Quagga.stop();
-      // 少し遅延させてカメラを初期化
-      setTimeout(initCamera, 500);
-    } else {
-      stopCamera();
-    }
-  };
-
-  // 手動撮影で1枚キャプチャ
-  const handleCaptureImage = () => {
-    if (!videoRef.current || !canvasRef.current) return;
-    
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    
-    // キャンバスをビデオと同じサイズに設定
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    
-    // ビデオフレームをキャンバスに描画
-    ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    // キャンバスから画像データを取得
-    const imageSrc = canvas.toDataURL('image/jpeg', 1.0); // 最高品質
-    setCapturedImage(imageSrc);
-    addDebugLog(`画像を手動でキャプチャしました (${video.videoWidth}x${video.videoHeight})`);
-  };
-
-  // 手動撮影でキャプチャした画像を解析
-  const handleAnalyzeCapturedImage = () => {
-    if (!capturedImage) return;
-    addDebugLog("手動撮影画像でバーコード解析を試みます");
-    
-    // ダミーのdiv要素を作成してtargetとして使用
-    const dummyElement = document.createElement("div");
-    
-    Quagga.decodeSingle({
-      inputStream: {
-        name: "Captured Image",
-        type: "ImageStream",
-        target: dummyElement,
-        constraints: {
-          width: 800,
-          height: 600,
-          facingMode: "environment"
-        }
-      },
-      decoder: {
-        readers: [
-          "ean_reader",
-          "ean_8_reader", 
-          "code_128_reader",
-          "code_39_reader",
-          "upc_reader",
-          "upc_e_reader"
-        ]
-      },
-      locate: true,
-      src: capturedImage
-    }, function(result) {
-      if (result && result.codeResult) {
-        const codeText = result.codeResult.code;
-        addDebugLog("手動撮影画像のバーコード認識成功: " + codeText);
-        parseGS1Barcode(codeText);
-      } else {
-        addDebugLog("手動撮影画像バーコード認識失敗");
-        setError("手動撮影画像バーコード解析に失敗しました");
-      }
-    });
-  };
 
   // GS1バーコードのパース処理
   const parseGS1Barcode = useCallback(
@@ -471,6 +168,310 @@ export default function ReagentRegistration() {
     },
     [addDebugLog, products, setValue, stopCamera]
   );
+
+  // カメラ初期化関数
+  const initCamera = useCallback(async () => {
+    if (!videoRef.current) return;
+    
+    try {
+      // 高解像度設定でカメラを取得
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 3840 }, // 4K
+          height: { ideal: 2160 },
+          facingMode: "environment",
+          frameRate: { ideal: 30 }
+        },
+        audio: false
+      });
+      
+      streamRef.current = stream;
+      videoRef.current.srcObject = stream;
+      
+      // ビデオが読み込まれたら実際の解像度をログに出力
+      videoRef.current.onloadedmetadata = () => {
+        if (videoRef.current) {
+          addDebugLog(`カメラ解像度: ${videoRef.current.videoWidth}x${videoRef.current.videoHeight}`);
+        }
+      };
+      
+      videoRef.current.play();
+      addDebugLog("高解像度カメラ初期化成功");
+    } catch (err) {
+      addDebugLog("カメラ初期化エラー: " + String(err));
+      setError("カメラの起動に失敗しました。カメラへのアクセス許可を確認してください。");
+    }
+  }, [addDebugLog]);
+
+  // ページ初期表示時にカメラON
+  useEffect(() => {
+    addDebugLog("ページロード完了。カメラを自動起動します。");
+    setShowCamera(true);
+  }, [addDebugLog]);
+
+  // 部署一覧取得（supabaseから）
+  useEffect(() => {
+    const fetchDepartments = async () => {
+      const { data, error } = await supabase.from("reagents").select("department");
+      if (error) {
+        console.error("Error fetching departments:", error);
+      } else if (data) {
+        const unique = Array.from(
+          new Set(data.map((item: { department: string }) => item.department).filter(Boolean))
+        );
+        setDepartments(unique);
+        unique.forEach((dept) => addDebugLog("部署一覧取得: " + dept));
+      }
+    };
+    fetchDepartments();
+  }, [addDebugLog]);
+
+  // 商品CSV（マスタ）の読み込み
+  useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        const response = await fetch("/products.csv");
+        const csvText = await response.text();
+        const parsed = Papa.parse(csvText, { header: true });
+        setProducts(parsed.data as Product[]);
+        addDebugLog("商品CSV読み込み成功");
+      } catch (error) {
+        console.error("CSV読み込みエラー", error);
+        addDebugLog("CSV読み込みエラー");
+      }
+    };
+    fetchProducts();
+  }, [addDebugLog]);
+
+  // Quaggaの初期化と実行
+  useEffect(() => {
+    if (showCamera && !manualCaptureMode && quaggaRef.current) {
+      addDebugLog("Quagga初期化開始");
+      
+      // Quaggaの設定
+      Quagga.init({
+        inputStream: {
+          name: "Live",
+          type: "LiveStream",
+          target: quaggaRef.current,
+          constraints: {
+            width: { min: 640 },
+            height: { min: 480 },
+            facingMode: "environment", // バックカメラを使用
+            aspectRatio: { min: 1, max: 2 }
+          },
+        },
+        locator: {
+          patchSize: "medium",
+          halfSample: true
+        },
+        numOfWorkers: navigator.hardwareConcurrency || 4,
+        decoder: {
+          readers: [
+            "ean_reader",
+            "ean_8_reader",
+            "code_128_reader",
+            "code_39_reader",
+            "upc_reader",
+            "upc_e_reader"
+          ],
+        },
+        locate: true
+      }, function(err: Error | null) {
+        if (err) {
+          addDebugLog("Quagga初期化エラー: " + err);
+          return;
+        }
+        
+        addDebugLog("Quagga初期化成功。スキャン開始");
+        Quagga.start();
+      });
+
+      // バーコード検出時のハンドラ
+      Quagga.onDetected((result: { codeResult?: { code: string } }) => {
+        if (!processing.current && result.codeResult) {
+          processing.current = true;
+          const code = result.codeResult.code;
+          
+          if (code && code !== lastScannedCode.current) {
+            lastScannedCode.current = code;
+            addDebugLog("Quaggaバーコード認識成功: " + code);
+            parseGS1Barcode(code);
+          }
+          
+          setTimeout(() => {
+            processing.current = false;
+          }, 1000); // 重複認識防止のため1秒待機
+        }
+      });
+
+      // エラー処理
+      Quagga.onProcessed((result: unknown) => {
+        if (!result) {
+          setFailCount((prev) => prev + 1);
+          if (failCount >= 5) {
+            setError("バーコードが正しく読み取れませんでした。カメラの位置を調整してください。");
+          }
+          return;
+        }
+      });
+
+      return () => {
+        addDebugLog("Quagga停止");
+        Quagga.stop();
+      };
+    }
+  }, [showCamera, manualCaptureMode, addDebugLog, failCount, parseGS1Barcode, stopCamera]);
+
+  // 高解像度カメラの初期化と停止を管理
+  useEffect(() => {
+    if (showCamera && manualCaptureMode) {
+      initCamera();
+    }
+    
+    return () => {
+      stopCamera();
+    };
+  }, [showCamera, manualCaptureMode, initCamera, stopCamera]);
+
+  // テスト画像解析用
+  const decodeFromStaticImage = () => {
+    addDebugLog("テスト画像からバーコード解析開始");
+    
+    const img = new Image();
+    img.src = "/barcode-02.png";
+    img.onload = function() {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx?.drawImage(img, 0, 0);
+      
+      // ダミーのdiv要素を作成してtargetとして使用
+      const dummyElement = document.createElement("div");
+      
+      Quagga.decodeSingle({
+        inputStream: {
+          name: "Static Image",
+          type: "ImageStream",
+          target: dummyElement,
+          constraints: {
+            width: img.width,
+            height: img.height,
+            facingMode: "environment"
+          }
+        },
+        decoder: {
+          readers: [
+            "ean_reader",
+            "ean_8_reader", 
+            "code_128_reader",
+            "code_39_reader",
+            "upc_reader",
+            "upc_e_reader"
+          ]
+        },
+        locate: true,
+        src: canvas.toDataURL()
+      }, function(result: { codeResult?: { code: string } } | null) {
+        if (result && result.codeResult) {
+          const testResultText = result.codeResult.code;
+          addDebugLog("テスト画像バーコード認識成功: " + testResultText);
+          parseGS1Barcode(testResultText);
+        } else {
+          addDebugLog("テスト画像バーコード認識失敗");
+          setError("テスト画像バーコード解析に失敗しました");
+        }
+      });
+    };
+  };
+
+  // 手動で「バーコード撮影を再開」
+  const handleBarcodeScan = () => {
+    addDebugLog("カメラ表示開始（手動）");
+    setShowCamera(true);
+    setManualCaptureMode(false);
+  };
+
+  // 追加: マニュアル撮影モード
+  const handleManualCaptureMode = () => {
+    setManualCaptureMode((prev) => !prev); // ON/OFF切り替え
+    setCapturedImage(null);
+    addDebugLog("手動撮影モード: " + (!manualCaptureMode ? "開始" : "終了"));
+    
+    if (!manualCaptureMode) {
+      // 自動モードからマニュアルモードに切り替える場合はQuaggaを停止
+      Quagga.stop();
+      // 少し遅延させてカメラを初期化
+      setTimeout(initCamera, 500);
+    } else {
+      stopCamera();
+    }
+  };
+
+  // 手動撮影で1枚キャプチャ
+  const handleCaptureImage = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    
+    // キャンバスをビデオと同じサイズに設定
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    
+    // ビデオフレームをキャンバスに描画
+    ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    
+    // キャンバスから画像データを取得
+    const imageSrc = canvas.toDataURL('image/jpeg', 1.0); // 最高品質
+    setCapturedImage(imageSrc);
+    addDebugLog(`画像を手動でキャプチャしました (${video.videoWidth}x${video.videoHeight})`);
+  };
+
+  // 手動撮影でキャプチャした画像を解析
+  const handleAnalyzeCapturedImage = () => {
+    if (!capturedImage) return;
+    addDebugLog("手動撮影画像でバーコード解析を試みます");
+    
+    // ダミーのdiv要素を作成してtargetとして使用
+    const dummyElement = document.createElement("div");
+    
+    Quagga.decodeSingle({
+      inputStream: {
+        name: "Captured Image",
+        type: "ImageStream",
+        target: dummyElement,
+        constraints: {
+          width: 800,
+          height: 600,
+          facingMode: "environment"
+        }
+      },
+      decoder: {
+        readers: [
+          "ean_reader",
+          "ean_8_reader", 
+          "code_128_reader",
+          "code_39_reader",
+          "upc_reader",
+          "upc_e_reader"
+        ]
+      },
+      locate: true,
+      src: capturedImage
+    }, function(result: { codeResult?: { code: string } } | null) {
+      if (result && result.codeResult) {
+        const codeText = result.codeResult.code;
+        addDebugLog("手動撮影画像のバーコード認識成功: " + codeText);
+        parseGS1Barcode(codeText);
+      } else {
+        addDebugLog("手動撮影画像バーコード認識失敗");
+        setError("手動撮影画像バーコード解析に失敗しました");
+      }
+    });
+  };
 
   // JANコード手入力 → CSVマスタを探す
   const handleJanCodeBlur = (e: React.FocusEvent<HTMLInputElement>) => {
@@ -766,24 +767,24 @@ export default function ReagentRegistration() {
 
         {/* デバッグログ表示 */}
         {debugLogs.length > 0 && (
-                    <div className="mt-4 p-2 bg-gray-100 border rounded">
-                    <h2 className="font-bold mb-2">デバッグログ</h2>
-                    <pre className="text-xs whitespace-pre-wrap">
-                      {debugLogs
-                        .filter((log) =>
-                          log.startsWith("Quagga") ||
-                          log.startsWith("GS1") ||
-                          log.startsWith("正規表現") ||
-                          log.startsWith("商品名") ||
-                          log.startsWith("JANコード") ||
-                          log.startsWith("カメラ解像度") ||
-                          log.startsWith("画像を手動でキャプチャ")
-                        )
-                        .join("\n")}
-                    </pre>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        }
+          <div className="mt-4 p-2 bg-gray-100 border rounded">
+            <h2 className="font-bold mb-2">デバッグログ</h2>
+            <pre className="text-xs whitespace-pre-wrap">
+              {debugLogs
+                .filter((log) =>
+                  log.startsWith("Quagga") ||
+                  log.startsWith("GS1") ||
+                  log.startsWith("正規表現") ||
+                  log.startsWith("商品名") ||
+                  log.startsWith("JANコード") ||
+                  log.startsWith("カメラ解像度") ||
+                  log.startsWith("画像を手動でキャプチャ")
+                )
+                .join("\n")}
+            </pre>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
