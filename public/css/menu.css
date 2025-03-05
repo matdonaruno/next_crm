@@ -423,6 +423,59 @@ body.nav-active .nav__list-item:nth-child(10) {
     width: calc(100% - 40px);
     max-width: 280px;
   }
+  /* レスポンシブ対応のためのヘッダー調整 */
+  .header-wrapper {
+    width: calc(100% - 40px);
+    margin-left: 20px;
+  }
+  .logo-wrap {
+    top: 20px;
+  }
+  .logo-wrap a {
+    font-size: 16px;
+    line-height: 16px;
+    letter-spacing: 1px;
+  }
+  .nav-but-wrap {
+    padding-left: 10px;
+    padding-top: 10px;
+    margin-top: 15px;
+  }
+  .menu-icon {
+    height: 25px;
+    width: 25px;
+  }
+  .menu-icon__line {
+    width: 25px;
+  }
+  .menu-icon__line-left,
+  .menu-icon__line-right {
+    width: 14px;
+  }
+  .menu-icon:hover .menu-icon__line-left,
+  .menu-icon:hover .menu-icon__line-right {
+    width: 25px;
+  }
+}
+
+/* タブレット用の調整 */
+@media screen and (min-width: 581px) and (max-width: 992px) {
+  .header-wrapper {
+    width: calc(100% - 60px);
+    margin-left: 30px;
+  }
+  .logo-wrap {
+    top: 30px;
+  }
+  .logo-wrap a {
+    font-size: 18px;
+    line-height: 18px;
+  }
+  .nav-but-wrap {
+    padding-left: 12px;
+    padding-top: 12px;
+    margin-top: 20px;
+  }
 }
 .switch-wrap p {
 	font-weight: 600;
