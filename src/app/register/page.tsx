@@ -37,39 +37,41 @@ export default function RegisterPage() {
       setError(error.message);
     } else {
       reset();
-      router.push("/");
+      router.push("/reagent_dash");
     }
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-100">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>アカウント作成</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {error && <p className="text-red-500">{error}</p>}
-          <div>
-            <Label htmlFor="firstName">名</Label>
-            <Input id="firstName" {...register("firstName", { required: true })} placeholder="名" />
-          </div>
-          <div>
-            <Label htmlFor="lastName">姓</Label>
-            <Input id="lastName" {...register("lastName", { required: true })} placeholder="姓" />
-          </div>
-          <div>
-            <Label htmlFor="email">メールアドレス</Label>
-            <Input id="email" type="email" {...register("email", { required: true })} placeholder="you@example.com" />
-          </div>
-          <div>
-            <Label htmlFor="password">パスワード</Label>
-            <Input id="password" type="password" {...register("password", { required: true })} placeholder="••••••••" />
-          </div>
-        </CardContent>
-        <CardFooter>
-          <Button onClick={handleSubmit(onSubmit)} className="w-full">登録</Button>
-        </CardFooter>
-      </Card>
+    <div className="flex items-center justify-center min-h-screen bg-gray-100 p-4">
+      <div className="w-full sm:w-[85%] md:w-[75%] lg:w-[60%] xl:w-[50%] min-w-[300px] max-w-[800px] mx-auto">
+        <Card className="w-full shadow-lg border border-gray-200">
+          <CardHeader>
+            <CardTitle>アカウント作成</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {error && <p className="text-red-500">{error}</p>}
+            <div>
+              <Label htmlFor="firstName">名</Label>
+              <Input id="firstName" {...register("firstName", { required: true })} placeholder="名" />
+            </div>
+            <div>
+              <Label htmlFor="lastName">姓</Label>
+              <Input id="lastName" {...register("lastName", { required: true })} placeholder="姓" />
+            </div>
+            <div>
+              <Label htmlFor="email">メールアドレス</Label>
+              <Input id="email" type="email" {...register("email", { required: true })} placeholder="you@example.com" />
+            </div>
+            <div>
+              <Label htmlFor="password">パスワード</Label>
+              <Input id="password" type="password" {...register("password", { required: true })} placeholder="••••••••" />
+            </div>
+          </CardContent>
+          <CardFooter>
+            <Button onClick={handleSubmit(onSubmit)} className="w-full">登録</Button>
+          </CardFooter>
+        </Card>
+      </div>
     </div>
   );
 }

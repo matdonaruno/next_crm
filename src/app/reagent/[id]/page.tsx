@@ -142,7 +142,7 @@ export default function ReagentDetailPage() {
     <div className="relative flex flex-col items-center justify-center min-h-screen bg-gray-50 p-4">
       {/* 右上にダッシュボードへ戻るボタン */}
       <div className="absolute top-4 right-4">
-        <Button variant="ghost" size="icon" onClick={() => router.push("/")}>
+        <Button variant="ghost" size="icon" onClick={() => router.push("/depart")}>
           <Home className="h-6 w-6" />
         </Button>
       </div>

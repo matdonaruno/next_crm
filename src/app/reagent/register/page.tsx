@@ -594,7 +594,7 @@ export default function ReagentRegistration() {
     <div className="relative flex flex-col items-center justify-center min-h-screen bg-gray-50 p-4">
       {/* 右上に「ダッシュボードへ戻る」ボタン */}
       <div className="absolute top-4 right-4">
-        <Button variant="ghost" size="icon" onClick={() => router.push("/")}>
+        <Button variant="ghost" size="icon" onClick={() => router.push("/depart")}>
           <Home className="h-6 w-6" />
         </Button>
       </div>
