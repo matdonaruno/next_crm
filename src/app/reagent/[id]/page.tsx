@@ -39,8 +39,9 @@ interface Reagent {
 interface ItemType {
   id: number;
   name: string;
-  usageStartDate: string;
+  usagestartdate: string;
   user: string;
+  user_fullname?: string;
   created_at: string;
 }
 
@@ -53,11 +54,21 @@ export default function ReagentDetailPage() {
   const [items, setItems] = useState<ItemType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [currentUser, setCurrentUser] = useState<string>("");
+  const [currentUserId, setCurrentUserId] = useState<string>("");
+  
+  // 今日の日付をYYYY-MM-DD形式で取得
+  const today = new Date().toISOString().split('T')[0];
+  
   const {
     register,
     handleSubmit,
     reset,
-  } = useForm<ReagentItemFormValues>();
+  } = useForm<ReagentItemFormValues>({
+    defaultValues: {
+      usageStartDate: today // デフォルトで今日の日付を設定
+    }
+  });
 
   const fetchReagent = useCallback(async () => {
     setLoading(true);
@@ -83,9 +94,61 @@ export default function ReagentDetailPage() {
     if (error) {
       console.error("Error fetching items:", error.message);
     } else {
-      setItems(data || []);
+      // 各アイテムのユーザー情報を取得
+      const itemsWithUserInfo = await Promise.all((data || []).map(async (item) => {
+        if (item.user) {
+          // ユーザーIDからプロフィール情報を取得
+          const { data: profileData, error: profileError } = await supabase
+            .from("profiles")
+            .select("fullname")
+            .eq("id", item.user)
+            .single();
+            
+          if (!profileError && profileData) {
+            return {
+              ...item,
+              user_fullname: profileData.fullname
+            };
+          }
+        }
+        return item;
+      }));
+      
+      setItems(itemsWithUserInfo);
     }
   }, [reagentId]);
+
+  // カレントユーザー情報を取得
+  useEffect(() => {
+    const fetchCurrentUser = async () => {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user) {
+        setError("ユーザー情報の取得に失敗しました");
+        return;
+      }
+      
+      // ユーザーIDを保存
+      setCurrentUserId(userData.user.id);
+      
+      // プロフィール情報を取得
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("fullname")
+        .eq("id", userData.user.id)
+        .single();
+        
+      if (profileError) {
+        console.error("Error fetching profile:", profileError);
+        return;
+      }
+      
+      if (profileData) {
+        setCurrentUser(profileData.fullname);
+      }
+    };
+    
+    fetchCurrentUser();
+  }, []);
 
   useEffect(() => {
     if (reagentId) {
@@ -115,15 +178,15 @@ export default function ReagentDetailPage() {
       setError("ユーザー情報の取得に失敗しました");
       return;
     }
-    // ※ 利用者はフォーム入力の値（user）をそのまま使用しています
+    // カレントユーザーを利用者として使用
     const { error } = await supabase
       .from("reagent_items")
       .insert([
         {
           reagent_package_id: reagentId,
           name: data.name,
-          usageStartDate: data.usageStartDate,
-          user: data.user,
+          usagestartdate: data.usageStartDate,
+          user: currentUserId, // ユーザーIDを使用
         },
       ]);
     if (error) {
@@ -214,12 +277,14 @@ export default function ReagentDetailPage() {
               <Input
                 id="usageStartDate"
                 type="date"
+                defaultValue={today}
                 {...register("usageStartDate", { required: true })}
               />
             </div>
             <div>
               <Label htmlFor="user">利用者</Label>
-              <Input id="user" {...register("user", { required: true })} />
+              <p className="text-sm text-gray-600 mt-1">{currentUser}</p>
+              <input type="hidden" {...register("user")} value={currentUserId} />
             </div>
             <Button type="submit" className="w-full">
               アイテム追加
@@ -245,12 +310,12 @@ export default function ReagentDetailPage() {
                   </p>
                   <p>
                     <strong>使用開始日:</strong>{" "}
-                    {item.usageStartDate
-                      ? new Date(item.usageStartDate).toLocaleString()
+                    {item.usagestartdate
+                      ? new Date(item.usagestartdate).toLocaleString()
                       : "未設定"}
                   </p>
                   <p>
-                    <strong>利用者:</strong> {item.user}
+                    <strong>利用者:</strong> {item.user_fullname || item.user}
                   </p>
                   <p>
                     <strong>登録日時:</strong>{" "}

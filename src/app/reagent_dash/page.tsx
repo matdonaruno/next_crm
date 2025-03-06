@@ -15,7 +15,7 @@ import {
   Home,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -51,6 +51,18 @@ interface Reagent {
   ended_at: string | null;
   used_by?: { fullname: string } | string | null;
   ended_by?: { fullname: string } | string | null;
+  items?: ReagentItem[]; // 試薬アイテムの配列を追加
+}
+
+// 試薬アイテムのインターフェース
+interface ReagentItem {
+  id: number;
+  name: string;
+  usagestartdate: string;
+  user: string;
+  user_fullname?: string;
+  created_at: string;
+  reagent_package_id: number;
 }
 
 type NotificationType = "nearExpiry" | "expired" | "newRegistration" | "deletion";
@@ -77,6 +89,7 @@ export default function DashboardPage() {
   useRequireAuth();
   const router = useRouter();
   const [reagents, setReagents] = useState<Reagent[]>([]);
+  const [reagentItems, setReagentItems] = useState<ReagentItem[]>([]); // 試薬アイテムの状態を追加
   const [notifications, setNotifications] = useState<Notification[]>([
     {
       id: 1,
@@ -107,6 +120,7 @@ export default function DashboardPage() {
   // フィルター用の状態
   const [selectedDepartment, setSelectedDepartment] = useState("all");
   const [showEnded, setShowEnded] = useState(false);
+  const [expandedReagents, setExpandedReagents] = useState<Record<number, boolean>>({}); // 展開状態を管理
 
   // 背景色を白色に変更
   useEffect(() => {
@@ -141,6 +155,42 @@ export default function DashboardPage() {
       console.error("Error fetching reagents:", error);
     } else {
       setReagents(data || []);
+      // 試薬データを取得したら、試薬アイテムも取得
+      fetchReagentItems();
+    }
+  };
+
+  // 試薬アイテムの取得
+  const fetchReagentItems = async () => {
+    const { data, error } = await supabase
+      .from("reagent_items")
+      .select("*")
+      .order("created_at", { ascending: false });
+    
+    if (error) {
+      console.error("Error fetching reagent items:", error);
+    } else {
+      // ユーザー情報を取得して試薬アイテムに追加
+      const itemsWithUserInfo = await Promise.all((data || []).map(async (item) => {
+        if (item.user) {
+          // ユーザーIDからプロフィール情報を取得
+          const { data: profileData, error: profileError } = await supabase
+            .from("profiles")
+            .select("fullname")
+            .eq("id", item.user)
+            .single();
+            
+          if (!profileError && profileData) {
+            return {
+              ...item,
+              user_fullname: profileData.fullname
+            };
+          }
+        }
+        return item;
+      }));
+      
+      setReagentItems(itemsWithUserInfo);
     }
   };
 
@@ -222,6 +272,15 @@ export default function DashboardPage() {
     }
   };
 
+  // 試薬パッケージの展開・折りたたみを切り替える
+  const toggleReagentExpand = (reagentId: number, e: React.MouseEvent) => {
+    e.stopPropagation(); // 行のクリックイベントを停止
+    setExpandedReagents(prev => ({
+      ...prev,
+      [reagentId]: !prev[reagentId]
+    }));
+  };
+
   // 行クリック時の処理（詳細画面への遷移）
   const handleRowClick = (reagent: Reagent) => {
     router.push(`/reagent/${reagent.id}`);
@@ -236,15 +295,26 @@ export default function DashboardPage() {
     return Array.from(deps);
   }, [reagents]);
 
+  // 試薬パッケージごとにアイテムをグループ化
+  const reagentsWithItems = useMemo(() => {
+    return reagents.map(reagent => {
+      const items = reagentItems.filter(item => item.reagent_package_id === reagent.id);
+      return {
+        ...reagent,
+        items
+      };
+    });
+  }, [reagents, reagentItems]);
+
   // フィルタリング後の試薬一覧
   const filteredReagents = useMemo(() => {
-    return reagents.filter((r) => {
+    return reagentsWithItems.filter((r) => {
       const matchesDept =
         selectedDepartment === "all" || r.department === selectedDepartment;
       const matchesEnded = showEnded ? true : !r.ended_at;
       return matchesDept && matchesEnded;
     });
-  }, [reagents, selectedDepartment, showEnded]);
+  }, [reagentsWithItems, selectedDepartment, showEnded]);
 
   return (
     <TooltipProvider>
@@ -403,6 +473,7 @@ export default function DashboardPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10"></TableHead> {/* 展開ボタン用 */}
                   <TableHead className="min-w-[6rem]">試薬名</TableHead>
                   <TableHead className="min-w-[4rem]">Lot No.</TableHead>
                   <TableHead className="min-w-[5rem]">規格</TableHead>
@@ -418,87 +489,111 @@ export default function DashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredReagents.map((reagent) => (
-                  <TableRow
-                    key={reagent.id}
-                    onClick={() => handleRowClick(reagent)}
-                    className="cursor-pointer hover:bg-gray-50"
-                  >
-                    <TableCell>{reagent.name}</TableCell>
-                    <TableCell>{reagent.lotNo}</TableCell>
-                    <TableCell>{reagent.specification}</TableCell>
-                    <TableCell>{reagent.unit || "-"}</TableCell>
-                    <TableCell>{formatDateTime(reagent.expirationDate)}</TableCell>
-                    <TableCell>{formatDateTime(reagent.used_at)}</TableCell>
-                    <TableCell>{formatDateTime(reagent.ended_at)}</TableCell>
-                    <TableCell>
-                      {reagent.used_by
-                        ? typeof reagent.used_by === "object"
-                          ? reagent.used_by.fullname
-                          : reagent.used_by
-                        : "-"}
-                    </TableCell>
-                    <TableCell>
-                      {reagent.ended_by
-                        ? typeof reagent.ended_by === "object"
-                          ? reagent.ended_by.fullname
-                          : reagent.ended_by
-                        : "-"}
-                    </TableCell>
-                    <TableCell>{formatDateTime(reagent.registrationDate)}</TableCell>
-                    <TableCell>
-                      {typeof reagent.registeredBy === "object"
-                        ? reagent.registeredBy.fullname
-                        : reagent.registeredBy}
-                    </TableCell>
-                    <TableCell>
-                      {reagent.used ? (
-                        <>
-                          {reagent.ended_at ? (
-                            <span className="text-sm text-gray-500">使用終了済み</span>
-                          ) : (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (window.confirm("使用終了登録を行いますか？")) {
-                                  handleUsageEnd(reagent.id);
-                                }
-                              }}
+                {filteredReagents.map((reagent) => {
+                  // この試薬パッケージに関連するアイテムを取得
+                  const items = reagentItems.filter(item => item.reagent_package_id === reagent.id);
+                  const hasItems = items.length > 0;
+                  const isExpanded = expandedReagents[reagent.id] || false;
+                  
+                  return (
+                    <React.Fragment key={reagent.id}>
+                      <TableRow
+                        onClick={() => handleRowClick(reagent)}
+                        className="cursor-pointer hover:bg-gray-50"
+                      >
+                        <TableCell>
+                          {hasItems && (
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="p-0 h-6 w-6"
+                              onClick={(e) => toggleReagentExpand(reagent.id, e)}
                             >
-                              使用終了登録
+                              {isExpanded ? '−' : '+'}
                             </Button>
                           )}
-                        </>
-                      ) : (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (window.confirm("使用開始登録を行いますか？")) {
-                              handleUsageStart(reagent.id);
-                            }
-                          }}
-                        >
-                          使用開始登録
-                        </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          router.push(`/reagent/${reagent.id}`);
-                        }}
-                        className="ml-2"
-                      >
-                        アイテム追加
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                        </TableCell>
+                        <TableCell>{reagent.name}</TableCell>
+                        <TableCell>{reagent.lotNo}</TableCell>
+                        <TableCell>{reagent.specification}</TableCell>
+                        <TableCell>{reagent.unit || "-"}</TableCell>
+                        <TableCell>{formatDateTime(reagent.expirationDate)}</TableCell>
+                        <TableCell>{formatDateTime(reagent.used_at)}</TableCell>
+                        <TableCell>{formatDateTime(reagent.ended_at)}</TableCell>
+                        <TableCell>
+                          {reagent.used_by
+                            ? typeof reagent.used_by === "object"
+                              ? reagent.used_by.fullname
+                              : reagent.used_by
+                            : "-"}
+                        </TableCell>
+                        <TableCell>
+                          {reagent.ended_by
+                            ? typeof reagent.ended_by === "object"
+                              ? reagent.ended_by.fullname
+                              : reagent.ended_by
+                            : "-"}
+                        </TableCell>
+                        <TableCell>{formatDateTime(reagent.registrationDate)}</TableCell>
+                        <TableCell>
+                          {typeof reagent.registeredBy === "object"
+                            ? reagent.registeredBy.fullname
+                            : reagent.registeredBy}
+                        </TableCell>
+                        <TableCell className="space-x-1">
+                          {!reagent.used && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleUsageStart(reagent.id);
+                              }}
+                            >
+                              使用開始
+                            </Button>
+                          )}
+                          {reagent.used && !reagent.ended_at && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleUsageEnd(reagent.id);
+                              }}
+                            >
+                              使用終了
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                      
+                      {/* アイテム行（展開時のみ表示） */}
+                      {isExpanded && items.map(item => (
+                        <TableRow key={`item-${item.id}`} className="bg-gray-50">
+                          <TableCell></TableCell>
+                          <TableCell className="pl-8 font-medium text-sm">
+                            └ {item.name}
+                          </TableCell>
+                          <TableCell colSpan={3}></TableCell>
+                          <TableCell className="text-sm">
+                            {item.usagestartdate
+                              ? new Date(item.usagestartdate).toLocaleString()
+                              : "未設定"}
+                          </TableCell>
+                          <TableCell colSpan={2}></TableCell>
+                          <TableCell className="text-sm">
+                            {item.user_fullname || item.user}
+                          </TableCell>
+                          <TableCell colSpan={2}></TableCell>
+                          <TableCell className="text-sm">
+                            {new Date(item.created_at).toLocaleString()}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </React.Fragment>
+                  );
+                })}
               </TableBody>
             </Table>
           </Card>
