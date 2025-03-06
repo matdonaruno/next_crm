@@ -93,32 +93,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [reagents, setReagents] = useState<Reagent[]>([]);
   const [reagentItems, setReagentItems] = useState<ReagentItem[]>([]); // 試薬アイテムの状態を追加
-  const [notifications, setNotifications] = useState<Notification[]>([
-    {
-      id: 1,
-      type: "nearExpiry",
-      message: "試薬 A の有効期限が近づいています",
-      timestamp: new Date(),
-    },
-    {
-      id: 2,
-      type: "expired",
-      message: "試薬 B が期限切れです",
-      timestamp: new Date(),
-    },
-    {
-      id: 3,
-      type: "newRegistration",
-      message: "新しい試薬 C が登録されました",
-      timestamp: new Date(),
-    },
-    {
-      id: 4,
-      type: "deletion",
-      message: "試薬 D が削除されました",
-      timestamp: new Date(),
-    },
-  ]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [currentUserName, setCurrentUserName] = useState("");
   const [currentUserId, setCurrentUserId] = useState(""); // カレントユーザーIDを追加
   // フィルター用の状態
@@ -129,6 +104,8 @@ export default function DashboardPage() {
   const [compactMode, setCompactMode] = useState<boolean>(false);
   // すべて展開状態を管理
   const [allExpanded, setAllExpanded] = useState<boolean>(false);
+  // 期限切れ通知用の状態
+  const [expiryNotifications, setExpiryNotifications] = useState<Reagent[]>([]);
 
   // 背景色を白色に変更
   useEffect(() => {
@@ -163,9 +140,31 @@ export default function DashboardPage() {
       console.error("Error fetching reagents:", error);
     } else {
       setReagents(data || []);
+      // 期限切れ間近の試薬を検出
+      checkExpiryNotifications(data || []);
       // 試薬データを取得したら、試薬アイテムも取得
       fetchReagentItems();
     }
+  };
+
+  // 期限切れ間近（1ヶ月以内）の試薬を検出する関数
+  const checkExpiryNotifications = (reagents: Reagent[]) => {
+    const today = new Date();
+    const oneMonthLater = new Date();
+    oneMonthLater.setMonth(today.getMonth() + 1);
+    
+    const nearExpiryReagents = reagents.filter(reagent => {
+      if (!reagent.expirationDate) return false;
+      
+      // 使用終了した試薬は除外
+      if (reagent.ended_at) return false;
+      
+      const expiryDate = new Date(reagent.expirationDate);
+      // 有効期限が今日から1ヶ月以内で、かつ今日以降のもの
+      return expiryDate <= oneMonthLater && expiryDate >= today;
+    });
+    
+    setExpiryNotifications(nearExpiryReagents);
   };
 
   // 試薬アイテムの取得
@@ -520,6 +519,35 @@ export default function DashboardPage() {
               </p>
             )}
           </div>
+
+          {/* 期限切れ通知エリア */}
+          {expiryNotifications.length > 0 && (
+            <div className="mb-6 p-4 border border-yellow-300 bg-yellow-50 rounded-md">
+              <h3 className="text-lg font-semibold text-yellow-800 mb-2">
+                <AlertTriangle className="inline-block mr-2 h-5 w-5" />
+                期限切れ間近の試薬 ({expiryNotifications.length}件)
+              </h3>
+              <div className="max-h-40 overflow-y-auto">
+                <ul className="list-disc pl-5">
+                  {expiryNotifications.map((reagent) => (
+                    <li key={`expiry-${reagent.id}`} className="text-sm text-yellow-700 mb-1">
+                      <span className="font-medium">{reagent.name}</span> (Lot: {reagent.lotNo}) - 
+                      有効期限: {formatDateTime(reagent.expirationDate)}
+                      <Button
+                        variant="link"
+                        size="sm"
+                        className="text-blue-600 p-0 h-auto ml-2"
+                        onClick={() => router.push(`/reagent/${reagent.id}`)}
+                      >
+                        詳細を見る
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
           <div className="mb-6 flex justify-between">
             <div className="flex space-x-2">
               <Button
