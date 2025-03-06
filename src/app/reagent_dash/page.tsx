@@ -35,6 +35,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { supabase } from "@/lib/supabaseClient";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
+import Papa from 'papaparse'; // CSVパーサーライブラリを追加
 
 interface Reagent {
   id: number;
@@ -77,6 +78,14 @@ interface Notification {
   timestamp: Date;
 }
 
+// 試薬マスターデータの型定義
+interface ReagentMaster {
+  code: string;
+  name: string;
+  manufacturer?: string;
+  category?: string;
+}
+
 const formatDateTime = (timestamp: string | null) => {
   if (!timestamp) return "";
   return new Date(timestamp).toLocaleString("ja-JP", {
@@ -106,6 +115,8 @@ export default function DashboardPage() {
   const [allExpanded, setAllExpanded] = useState<boolean>(false);
   // 期限切れ通知用の状態
   const [expiryNotifications, setExpiryNotifications] = useState<Reagent[]>([]);
+  // 試薬マスターデータ
+  const [reagentMasterData, setReagentMasterData] = useState<Record<string, ReagentMaster>>({});
 
   // 背景色を白色に変更
   useEffect(() => {
@@ -130,6 +141,49 @@ export default function DashboardPage() {
     };
   }, []);
 
+  // 試薬マスターデータをCSVから読み込む
+  const loadReagentMasterData = async () => {
+    try {
+      const response = await fetch('/products.csv');
+      const csvText = await response.text();
+      
+      Papa.parse(csvText, {
+        header: true,
+        complete: (results) => {
+          const masterData: Record<string, ReagentMaster> = {};
+          results.data.forEach((row: any) => {
+            if (row.code) {
+              masterData[row.code] = {
+                code: row.code,
+                name: row.name,
+                manufacturer: row.manufacturer,
+                category: row.category
+              };
+            }
+          });
+          setReagentMasterData(masterData);
+        },
+        error: (error: Error) => {
+          console.error('CSV解析エラー:', error);
+        }
+      });
+    } catch (error: unknown) {
+      console.error('試薬マスターデータの読み込みエラー:', error);
+    }
+  };
+
+  // 試薬コードから試薬名を取得する関数
+  const getReagentNameByCode = (code: string): string => {
+    if (!code) return '';
+    
+    const masterData = reagentMasterData[code];
+    if (masterData) {
+      return masterData.name;
+    }
+    
+    return code; // マスターデータに存在しない場合はコードをそのまま返す
+  };
+
   // 試薬データの取得（profiles との join で各ユーザー情報を取得）
   const fetchReagents = async () => {
     const { data, error } = await supabase
@@ -139,9 +193,22 @@ export default function DashboardPage() {
     if (error) {
       console.error("Error fetching reagents:", error);
     } else {
-      setReagents(data || []);
+      // 試薬名をマスターデータから取得して設定
+      const reagentsWithNames = (data || []).map(reagent => {
+        // nameフィールドがコードの場合、マスターデータから名前を取得
+        if (reagent.name && reagent.name.match(/^[A-Z0-9-]+$/)) {
+          return {
+            ...reagent,
+            originalCode: reagent.name, // 元のコードを保存
+            name: getReagentNameByCode(reagent.name)
+          };
+        }
+        return reagent;
+      });
+      
+      setReagents(reagentsWithNames);
       // 期限切れ間近の試薬を検出
-      checkExpiryNotifications(data || []);
+      checkExpiryNotifications(reagentsWithNames);
       // 試薬データを取得したら、試薬アイテムも取得
       fetchReagentItems();
     }
@@ -237,6 +304,7 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
+    loadReagentMasterData(); // マスターデータを読み込む
     fetchReagents();
     fetchCurrentUserProfile();
   }, []);
