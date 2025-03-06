@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   Bell,
@@ -15,7 +15,7 @@ import {
   Home,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -151,13 +151,14 @@ export default function DashboardPage() {
         header: true,
         complete: (results) => {
           const masterData: Record<string, ReagentMaster> = {};
-          results.data.forEach((row: any) => {
-            if (row.code) {
-              masterData[row.code] = {
-                code: row.code,
-                name: row.name,
-                manufacturer: row.manufacturer,
-                category: row.category
+          results.data.forEach((row: unknown) => {
+            const typedRow = row as Record<string, string>;
+            if (typedRow.code) {
+              masterData[typedRow.code] = {
+                code: typedRow.code,
+                name: typedRow.name,
+                manufacturer: typedRow.manufacturer,
+                category: typedRow.category
               };
             }
           });
@@ -173,7 +174,7 @@ export default function DashboardPage() {
   };
 
   // 試薬コードから試薬名を取得する関数
-  const getReagentNameByCode = (code: string): string => {
+  const getReagentNameByCode = useCallback((code: string): string => {
     if (!code) return '';
     
     const masterData = reagentMasterData[code];
@@ -182,60 +183,10 @@ export default function DashboardPage() {
     }
     
     return code; // マスターデータに存在しない場合はコードをそのまま返す
-  };
-
-  // 試薬データの取得（profiles との join で各ユーザー情報を取得）
-  const fetchReagents = async () => {
-    const { data, error } = await supabase
-      .from("reagents")
-      .select(`*, registeredBy (fullname), used_by (fullname), ended_by (fullname)`)
-      .order("registrationDate", { ascending: false });
-    if (error) {
-      console.error("Error fetching reagents:", error);
-    } else {
-      // 試薬名をマスターデータから取得して設定
-      const reagentsWithNames = (data || []).map(reagent => {
-        // nameフィールドがコードの場合、マスターデータから名前を取得
-        if (reagent.name && reagent.name.match(/^[A-Z0-9-]+$/)) {
-          return {
-            ...reagent,
-            originalCode: reagent.name, // 元のコードを保存
-            name: getReagentNameByCode(reagent.name)
-          };
-        }
-        return reagent;
-      });
-      
-      setReagents(reagentsWithNames);
-      // 期限切れ間近の試薬を検出
-      checkExpiryNotifications(reagentsWithNames);
-      // 試薬データを取得したら、試薬アイテムも取得
-      fetchReagentItems();
-    }
-  };
-
-  // 期限切れ間近（1ヶ月以内）の試薬を検出する関数
-  const checkExpiryNotifications = (reagents: Reagent[]) => {
-    const today = new Date();
-    const oneMonthLater = new Date();
-    oneMonthLater.setMonth(today.getMonth() + 1);
-    
-    const nearExpiryReagents = reagents.filter(reagent => {
-      if (!reagent.expirationDate) return false;
-      
-      // 使用終了した試薬は除外
-      if (reagent.ended_at) return false;
-      
-      const expiryDate = new Date(reagent.expirationDate);
-      // 有効期限が今日から1ヶ月以内で、かつ今日以降のもの
-      return expiryDate <= oneMonthLater && expiryDate >= today;
-    });
-    
-    setExpiryNotifications(nearExpiryReagents);
-  };
+  }, [reagentMasterData]);
 
   // 試薬アイテムの取得
-  const fetchReagentItems = async () => {
+  const fetchReagentItems = useCallback(async () => {
     const { data, error } = await supabase
       .from("reagent_items")
       .select("*")
@@ -246,7 +197,7 @@ export default function DashboardPage() {
     } else {
       // ユーザー情報を取得して試薬アイテムに追加
       const itemsWithUserInfo = await Promise.all((data || []).map(async (item) => {
-        let updatedItem = { ...item };
+        const updatedItem = { ...item };
         
         // 利用者のユーザー情報を取得
         if (item.user) {
@@ -279,6 +230,56 @@ export default function DashboardPage() {
       
       setReagentItems(itemsWithUserInfo);
     }
+  }, []);
+
+  // 試薬データの取得（profiles との join で各ユーザー情報を取得）
+  const fetchReagents = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("reagents")
+      .select(`*, registeredBy (fullname), used_by (fullname), ended_by (fullname)`)
+      .order("registrationDate", { ascending: false });
+    if (error) {
+      console.error("Error fetching reagents:", error);
+    } else {
+      // 試薬名をマスターデータから取得して設定
+      const reagentsWithNames = (data || []).map(reagent => {
+        // nameフィールドがコードの場合、マスターデータから名前を取得
+        if (reagent.name && reagent.name.match(/^[A-Z0-9-]+$/)) {
+          return {
+            ...reagent,
+            originalCode: reagent.name, // 元のコードを保存
+            name: getReagentNameByCode(reagent.name)
+          };
+        }
+        return reagent;
+      });
+      
+      setReagents(reagentsWithNames);
+      // 期限切れ間近の試薬を検出
+      checkExpiryNotifications(reagentsWithNames);
+      // 試薬データを取得したら、試薬アイテムも取得
+      fetchReagentItems();
+    }
+  }, [getReagentNameByCode, fetchReagentItems]);
+
+  // 期限切れ間近（1ヶ月以内）の試薬を検出する関数
+  const checkExpiryNotifications = (reagents: Reagent[]) => {
+    const today = new Date();
+    const oneMonthLater = new Date();
+    oneMonthLater.setMonth(today.getMonth() + 1);
+    
+    const nearExpiryReagents = reagents.filter(reagent => {
+      if (!reagent.expirationDate) return false;
+      
+      // 使用終了した試薬は除外
+      if (reagent.ended_at) return false;
+      
+      const expiryDate = new Date(reagent.expirationDate);
+      // 有効期限が今日から1ヶ月以内で、かつ今日以降のもの
+      return expiryDate <= oneMonthLater && expiryDate >= today;
+    });
+    
+    setExpiryNotifications(nearExpiryReagents);
   };
 
   // カレントユーザーの氏名取得
@@ -307,7 +308,7 @@ export default function DashboardPage() {
     loadReagentMasterData(); // マスターデータを読み込む
     fetchReagents();
     fetchCurrentUserProfile();
-  }, []);
+  }, [fetchReagents]);
 
   // 通知アイコンの定義
   const notificationIcons: Record<NotificationType, React.ReactElement> = {
@@ -316,6 +317,20 @@ export default function DashboardPage() {
     newRegistration: <CheckCircle className="h-4 w-4 text-green-500 mr-2" />,
     deletion: <Trash2 className="h-4 w-4 text-blue-500 mr-2" />,
   };
+
+  // useEffectの依存配列にfetchReagentsを追加
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchReagents();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [fetchReagents]);
 
   // 使用開始登録：used, used_at, used_by を更新
   const handleUsageStart = async (reagentId: number) => {
