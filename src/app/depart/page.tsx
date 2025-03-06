@@ -15,15 +15,26 @@ export default function Home() {
   // ハンバーガーメニューの開閉ロジック
   useEffect(() => {
     const body = document.querySelector('body');
+    if (!body) return;
+
     const menuIcon = document.querySelector('.menu-icon');
-    if (!menuIcon || !body) return;
+    if (!menuIcon) return;
+
+    // 元のbodyスタイルを保存
+    const originalBackgroundColor = body.style.backgroundColor;
+    const originalBackgroundImage = body.style.backgroundImage;
+    const originalColor = body.style.color;
+    
+    // このページ用にbodyスタイルを変更
+    body.style.backgroundColor = '#ffffff';
+    body.style.backgroundImage = 'none';
+    body.style.color = '#333333';
 
     const handleClick = () => {
       body.classList.toggle('nav-active');
     };
 
     menuIcon.addEventListener('click', handleClick);
-
       
     async function fetchDepartments() {
         const { data, error } = await supabase
@@ -41,8 +52,12 @@ export default function Home() {
       fetchDepartments();
 
       return () => {
-      menuIcon.removeEventListener('click', handleClick);
-    };
+        // クリーンアップ時に元のスタイルに戻す
+        body.style.backgroundColor = originalBackgroundColor;
+        body.style.backgroundImage = originalBackgroundImage;
+        body.style.color = originalColor;
+        menuIcon.removeEventListener('click', handleClick);
+      };
   }, []);
 
   return (
@@ -56,7 +71,7 @@ export default function Home() {
       <header className="cd-header">
         <div className="header-wrapper">
           <div className="logo-wrap">
-            <a href="#" className="hover-target">
+          <a href="#" className="hover-target">
               <span>life has</span>limit
             </a>
           </div>
@@ -123,16 +138,17 @@ export default function Home() {
             <path id="gentle-wave" d="M-160 44c30 0 58-18 88-18s58 18 88 18 58-18 88-18 58 18 88 18 v44h-352z" />
           </defs>
           <g className="parallax">
-            <use xlinkHref="#gentle-wave" x="48" y="0" fill="rgba(255,255,255,0.7)" />
+          <use xlinkHref="#gentle-wave" x="48" y="0" fill="rgba(255,255,255,0.7)" />
             <use xlinkHref="#gentle-wave" x="48" y="3" fill="rgba(255,255,255,0.5)" />
             <use xlinkHref="#gentle-wave" x="48" y="5" fill="rgba(255,255,255,0.3)" />
             <use xlinkHref="#gentle-wave" x="48" y="7" fill="#fff" />
+
           </g>
         </svg>
       </div>
 
       <div className="content flex">
-        <p>for your side partner | designed By.Goodkatz</p>
+      <p>for your side partner | designed By.Goodkatz</p>
       </div>
     </div>
   );

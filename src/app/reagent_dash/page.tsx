@@ -108,6 +108,29 @@ export default function DashboardPage() {
   const [selectedDepartment, setSelectedDepartment] = useState("all");
   const [showEnded, setShowEnded] = useState(false);
 
+  // 背景色を白色に変更
+  useEffect(() => {
+    const body = document.querySelector('body');
+    if (!body) return;
+
+    // 元のbodyスタイルを保存
+    const originalBackgroundColor = body.style.backgroundColor;
+    const originalBackgroundImage = body.style.backgroundImage;
+    const originalColor = body.style.color;
+    
+    // このページ用にbodyスタイルを変更
+    body.style.backgroundColor = '#ffffff'; // 白色に変更
+    body.style.backgroundImage = 'none';
+    body.style.color = '#333333';
+
+    return () => {
+      // クリーンアップ時に元のスタイルに戻す
+      body.style.backgroundColor = originalBackgroundColor;
+      body.style.backgroundImage = originalBackgroundImage;
+      body.style.color = originalColor;
+    };
+  }, []);
+
   // 試薬データの取得（profiles との join で各ユーザー情報を取得）
   const fetchReagents = async () => {
     const { data, error } = await supabase
@@ -225,7 +248,7 @@ export default function DashboardPage() {
 
   return (
     <TooltipProvider>
-      <>
+      <div style={{ backgroundColor: '#ffffff', minHeight: '100vh' }}>
         <header className="bg-primary text-primary-foreground">
           <div className="container mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center">
@@ -250,7 +273,7 @@ export default function DashboardPage() {
                 <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => router.push("/")}
+                    onClick={() => router.push("/depart")}
                   >
                     <Home className="h-6 w-6" />
                   </Button>
@@ -358,7 +381,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <main className="flex-grow container mx-auto px-4 py-8">
+        <main className="flex-grow container mx-auto px-4 py-8" style={{ backgroundColor: '#ffffff' }}>
           {/* カレントユーザーの氏名表示 */}
           <div className="mb-4 text-right">
             {currentUserName && (
@@ -486,7 +509,7 @@ export default function DashboardPage() {
             © 2025 Your side partner. All rights reserved.
           </div>
         </footer>
-      </>
+      </div>
     </TooltipProvider>
   );
 }
