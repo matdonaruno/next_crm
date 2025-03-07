@@ -180,8 +180,8 @@ a:hover {
 .nav:before, .nav:after {
 	content: "";
 	position: fixed;
-	top: 20px;
-	left: 50px;
+	top: 50px;
+	left: 30px;
 	width: 0;
 	height: 0;
 	background-color: rgba(20, 21, 26,0.6);

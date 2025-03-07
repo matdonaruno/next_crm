@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/table";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { supabase } from "@/lib/supabaseClient";
-import { useRequireAuth } from "@/hooks/useRequireAuth";
+import { useAuth } from "@/contexts/AuthContext";
 import Papa from 'papaparse'; // CSVパーサーライブラリを追加
 import { AppHeader } from "@/components/ui/app-header";
 
@@ -74,12 +74,11 @@ const formatDateTime = (timestamp: string | null) => {
 };
 
 export default function DashboardPage() {
-  useRequireAuth();
+  const { profile } = useAuth();
   const router = useRouter();
   const [reagents, setReagents] = useState<Reagent[]>([]);
   const [reagentItems, setReagentItems] = useState<ReagentItem[]>([]); // 試薬アイテムの状態を追加
   const [currentUserName, setCurrentUserName] = useState("");
-  const [currentUserId, setCurrentUserId] = useState(""); // カレントユーザーIDを追加
   // フィルター用の状態
   const [selectedDepartment, setSelectedDepartment] = useState("all");
   const [showEnded, setShowEnded] = useState(false);
@@ -162,9 +161,12 @@ export default function DashboardPage() {
 
   // 試薬アイテムの取得
   const fetchReagentItems = useCallback(async () => {
+    if (!profile?.facility_id) return;
+
     const { data, error } = await supabase
       .from("reagent_items")
       .select("*")
+      .eq("facility_id", profile.facility_id)
       .order("created_at", { ascending: false });
     
     if (error) {
@@ -205,14 +207,18 @@ export default function DashboardPage() {
       
       setReagentItems(itemsWithUserInfo);
     }
-  }, []);
+  }, [profile?.facility_id]);
 
   // 試薬データの取得（profiles との join で各ユーザー情報を取得）
   const fetchReagents = useCallback(async () => {
+    if (!profile?.facility_id) return;
+
     const { data, error } = await supabase
       .from("reagents")
       .select(`*, registeredBy (fullname), used_by (fullname), ended_by (fullname)`)
+      .eq("facility_id", profile.facility_id)
       .order("registrationDate", { ascending: false });
+
     if (error) {
       console.error("Error fetching reagents:", error);
     } else {
@@ -223,19 +229,21 @@ export default function DashboardPage() {
           return {
             ...reagent,
             originalCode: reagent.name, // 元のコードを保存
-            name: getReagentNameByCode(reagent.name)
+            name: getReagentNameByCode(reagent.name) || reagent.name
           };
         }
         return reagent;
       });
       
       setReagents(reagentsWithNames);
-      // 期限切れ間近の試薬を検出
+      
+      // 期限切れ通知を更新
       checkExpiryNotifications(reagentsWithNames);
-      // 試薬データを取得したら、試薬アイテムも取得
+      
+      // 試薬アイテムも取得
       fetchReagentItems();
     }
-  }, [getReagentNameByCode, fetchReagentItems]);
+  }, [getReagentNameByCode, fetchReagentItems, profile?.facility_id]);
 
   // 期限切れ間近（1ヶ月以内）の試薬を検出する関数
   const checkExpiryNotifications = (reagents: Reagent[]) => {
@@ -265,7 +273,6 @@ export default function DashboardPage() {
       return;
     }
     const userId = userData.user.id;
-    setCurrentUserId(userId); // カレントユーザーIDを設定
     
     const { data: profileData, error: profileError } = await supabase
       .from("profiles")
@@ -343,20 +350,111 @@ export default function DashboardPage() {
     });
   }, [reagentsWithItems, selectedDepartment, showEnded]);
 
-  // アイテムの使用終了処理
+  // 試薬アイテムの使用終了処理
   const handleItemUsageEnd = async (itemId: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const { error } = await supabase
-      .from("reagent_items")
-      .update({
-        ended_at: new Date().toISOString(),
-        ended_by: currentUserId
-      })
-      .eq("id", itemId);
-    if (error) {
-      console.error("Error updating item usage end:", error.message);
-    } else {
-      fetchReagentItems();
+    e.stopPropagation(); // イベントの伝播を停止
+    
+    if (!confirm("この試薬アイテムの使用を終了しますか？")) {
+      return;
+    }
+    
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user) {
+        console.error("Error getting user:", userError);
+        return;
+      }
+      
+      const userId = userData.user.id;
+      
+      const { error } = await supabase
+        .from("reagent_items")
+        .update({
+          ended_at: new Date().toISOString(),
+          ended_by: userId,
+        })
+        .eq("id", itemId)
+        .eq("facility_id", profile?.facility_id); // 施設IDによる制限を追加
+        
+      if (error) {
+        console.error("Error ending item usage:", error);
+      } else {
+        // 試薬アイテム一覧を再取得
+        fetchReagentItems();
+      }
+    } catch (error) {
+      console.error("Error in handleItemUsageEnd:", error);
+    }
+  };
+
+  // 試薬の使用開始処理
+  const handleUsageStart = async (reagentId: number) => {
+    if (!confirm("この試薬の使用を開始しますか？")) {
+      return;
+    }
+    
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user) {
+        console.error("Error getting user:", userError);
+        return;
+      }
+      
+      const userId = userData.user.id;
+      
+      const { error } = await supabase
+        .from("reagents")
+        .update({
+          used: true,
+          used_at: new Date().toISOString(),
+          used_by: userId,
+        })
+        .eq("id", reagentId)
+        .eq("facility_id", profile?.facility_id); // 施設IDによる制限を追加
+        
+      if (error) {
+        console.error("Error starting usage:", error);
+      } else {
+        // 試薬一覧を再取得
+        fetchReagents();
+      }
+    } catch (error) {
+      console.error("Error in handleUsageStart:", error);
+    }
+  };
+
+  // 試薬の使用終了処理
+  const handleUsageEnd = async (reagentId: number) => {
+    if (!confirm("この試薬の使用を終了しますか？")) {
+      return;
+    }
+    
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user) {
+        console.error("Error getting user:", userError);
+        return;
+      }
+      
+      const userId = userData.user.id;
+      
+      const { error } = await supabase
+        .from("reagents")
+        .update({
+          ended_at: new Date().toISOString(),
+          ended_by: userId,
+        })
+        .eq("id", reagentId)
+        .eq("facility_id", profile?.facility_id); // 施設IDによる制限を追加
+        
+      if (error) {
+        console.error("Error ending usage:", error);
+      } else {
+        // 試薬一覧を再取得
+        fetchReagents();
+      }
+    } catch (error) {
+      console.error("Error in handleUsageEnd:", error);
     }
   };
 
@@ -377,51 +475,6 @@ export default function DashboardPage() {
       });
       setExpandedReagents(expandedState);
       setAllExpanded(true);
-    }
-  };
-
-  // 使用開始登録：used, used_at, used_by を更新
-  const handleUsageStart = async (reagentId: number) => {
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError || !userData.user) {
-      console.error("Error fetching user:", userError);
-      return;
-    }
-    const currentUserId = userData.user.id;
-    const { error } = await supabase
-      .from("reagents")
-      .update({
-        used: true,
-        used_at: new Date().toISOString(),
-        used_by: currentUserId,
-      })
-      .eq("id", reagentId);
-    if (error) {
-      console.error("Error updating usage start:", error.message);
-    } else {
-      fetchReagents();
-    }
-  };
-
-  // 使用終了登録：ended_at, ended_by を更新
-  const handleUsageEnd = async (reagentId: number) => {
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError || !userData.user) {
-      console.error("Error fetching user:", userError);
-      return;
-    }
-    const currentUserId = userData.user.id;
-    const { error } = await supabase
-      .from("reagents")
-      .update({
-        ended_at: new Date().toISOString(),
-        ended_by: currentUserId,
-      })
-      .eq("id", reagentId);
-    if (error) {
-      console.error("Error updating usage end:", error.message);
-    } else {
-      fetchReagents();
     }
   };
 

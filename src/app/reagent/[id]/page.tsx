@@ -34,6 +34,7 @@ interface Reagent {
   used_at: string;
   ended_at: string;
   used: boolean;
+  facility_id: string;
 }
 
 interface ItemType {
@@ -43,6 +44,7 @@ interface ItemType {
   user: string;
   user_fullname?: string;
   created_at: string;
+  facility_id: string;
 }
 
 export default function ReagentDetailPage() {
@@ -72,11 +74,36 @@ export default function ReagentDetailPage() {
 
   const fetchReagent = useCallback(async () => {
     setLoading(true);
+    
+    // ユーザーの施設IDを取得
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) {
+      setError("ユーザー情報の取得に失敗しました");
+      setLoading(false);
+      return;
+    }
+    
+    // ユーザーのプロファイルから施設IDを取得
+    const { data: profileData, error: profileError } = await supabase
+      .from("profiles")
+      .select("facility_id")
+      .eq("id", userData.user.id)
+      .single();
+      
+    if (profileError || !profileData?.facility_id) {
+      setError("施設情報の取得に失敗しました");
+      setLoading(false);
+      return;
+    }
+    
+    // 施設IDに基づいて試薬を取得
     const { data, error } = await supabase
       .from("reagents")
       .select("*")
       .eq("id", reagentId)
+      .eq("facility_id", profileData.facility_id)
       .single();
+      
     if (error) {
       setError(error.message);
       setLoading(false);
@@ -87,10 +114,30 @@ export default function ReagentDetailPage() {
   }, [reagentId]);
 
   const fetchItems = useCallback(async () => {
+    // ユーザーのプロファイルから施設IDを取得
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) {
+      console.error("ユーザー情報の取得に失敗しました");
+      return;
+    }
+    
+    const { data: profileData, error: profileError } = await supabase
+      .from("profiles")
+      .select("facility_id")
+      .eq("id", userData.user.id)
+      .single();
+      
+    if (profileError || !profileData?.facility_id) {
+      console.error("施設情報の取得に失敗しました");
+      return;
+    }
+    
     const { data, error } = await supabase
       .from("reagent_items")
       .select("*")
-      .eq("reagent_package_id", reagentId);
+      .eq("reagent_package_id", reagentId)
+      .eq("facility_id", profileData.facility_id);
+      
     if (error) {
       console.error("Error fetching items:", error.message);
     } else {
@@ -159,41 +206,91 @@ export default function ReagentDetailPage() {
 
   // 使用終了ボタン押下時の処理
   const handleUsageEnd = async () => {
-    const { error } = await supabase
-      .from("reagents")
-      .update({ ended_at: new Date().toISOString() })
-      .eq("id", reagentId);
-    if (error) {
-      console.error("Error updating usage end:", error.message);
-    } else {
-      fetchReagent();
+    try {
+      // ユーザーの施設IDを取得
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) {
+        setError("ユーザー情報の取得に失敗しました");
+        return;
+      }
+      
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("facility_id")
+        .eq("id", userData.user.id)
+        .single();
+        
+      if (profileError || !profileData?.facility_id) {
+        setError("施設情報の取得に失敗しました");
+        return;
+      }
+      
+      // 試薬の使用終了を記録
+      const { error } = await supabase
+        .from("reagents")
+        .update({
+          ended_at: new Date().toISOString(),
+          ended_by: currentUserId,
+        })
+        .eq("id", reagentId)
+        .eq("facility_id", profileData.facility_id);
+
+      if (error) {
+        setError(error.message);
+      } else {
+        fetchReagent();
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : '不明なエラーが発生しました';
+      setError(errorMessage);
     }
   };
 
   // 試薬アイテム登録フォーム送信時の処理
   const onSubmit = async (data: ReagentItemFormValues) => {
-    // 現在のユーザー情報を取得（必要に応じて、profiles から取得する実装も可能です）
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError || !userData.user) {
-      setError("ユーザー情報の取得に失敗しました");
-      return;
-    }
-    // カレントユーザーを利用者として使用
-    const { error } = await supabase
-      .from("reagent_items")
-      .insert([
+    try {
+      // ユーザーの施設IDを取得
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) {
+        setError("ユーザー情報の取得に失敗しました");
+        return;
+      }
+      
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("facility_id")
+        .eq("id", userData.user.id)
+        .single();
+        
+      if (profileError || !profileData?.facility_id) {
+        setError("施設情報の取得に失敗しました");
+        return;
+      }
+      
+      // 試薬アイテムを登録
+      const { error: insertError } = await supabase.from("reagent_items").insert([
         {
-          reagent_package_id: reagentId,
           name: data.name,
           usagestartdate: data.usageStartDate,
-          user: currentUserId, // ユーザーIDを使用
+          user: currentUserId || data.user,
+          reagent_package_id: reagentId,
+          facility_id: profileData.facility_id, // 施設IDを設定
         },
       ]);
-    if (error) {
-      setError(error.message);
-    } else {
+
+      if (insertError) {
+        setError(insertError.message);
+        return;
+      }
+
+      // フォームをリセット
       reset();
+      
+      // 試薬アイテム一覧を再取得
       fetchItems();
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : '不明なエラーが発生しました';
+      setError(errorMessage);
     }
   };
 

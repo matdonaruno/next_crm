@@ -5,6 +5,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "/public/css/menu.css"
 import "/public/css/simple-css-waves.css"
+import { AuthProvider } from "@/contexts/AuthContext";
 
 // フォント設定
 const geistSans = Geist({
@@ -36,7 +37,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        {children}
+        <AuthProvider>
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

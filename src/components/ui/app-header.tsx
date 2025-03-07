@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { User, Home, LogOut, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 
 interface AppHeaderProps {
   showBackButton?: boolean;
@@ -34,56 +34,64 @@ export function AppHeader({ showBackButton = true, title, onBackClick }: AppHead
         <div className="flex items-center">
           {/* 戻るアイコン */}
           {showBackButton && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={handleGoBack} className="mr-2">
-                  <ArrowLeft className="h-6 w-6" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
-                <p style={tooltipTextStyle}>戻る</p>
-              </TooltipContent>
-            </Tooltip>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={handleGoBack} className="mr-2">
+                    <ArrowLeft className="h-6 w-6" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
+                  <p style={tooltipTextStyle}>戻る</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
           {/* タイトル */}
           {title && <h1 className="text-xl font-bold">{title}</h1>}
         </div>
         <div className="flex items-center space-x-2 ml-auto">
           {/* ユーザー設定アイコン */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" onClick={() => router.push("/user-settings")}>
-                <User className="h-6 w-6" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
-              <p style={tooltipTextStyle}>ユーザー設定</p>
-            </TooltipContent>
-          </Tooltip>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={() => router.push("/user-settings")}>
+                  <User className="h-6 w-6" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
+                <p style={tooltipTextStyle}>ユーザー設定</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           
           {/* ホームアイコン */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" onClick={() => router.push("/depart")}>
-                <Home className="h-6 w-6" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
-              <p style={tooltipTextStyle}>ホーム</p>
-            </TooltipContent>
-          </Tooltip>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={() => router.push("/depart")}>
+                  <Home className="h-6 w-6" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
+                <p style={tooltipTextStyle}>ホーム</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           
           {/* ログアウトアイコン */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" onClick={() => router.push("/login")}>
-                <LogOut className="h-5 w-5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
-              <p style={tooltipTextStyle}>ログアウト</p>
-            </TooltipContent>
-          </Tooltip>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={() => router.push("/login")}>
+                  <LogOut className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
+                <p style={tooltipTextStyle}>ログアウト</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
       </div>
     </header>

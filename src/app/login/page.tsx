@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import { Button } from "@/components/ui/button";
@@ -8,50 +8,103 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Mail, Lock, ArrowRight } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 const AuthForm = () => {
   const router = useRouter();
+  const { signIn, user, loading } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  // ユーザーが既にログインしている場合はリダイレクト
+  useEffect(() => {
+    if (!loading && user) {
+      router.push('/depart');
+    }
+  }, [user, loading, router]);
 
   const handleAuth = async () => {
     try {
-      let result;
+      setError("");
+      setAuthLoading(true);
+
       if (isSignUp) {
         // 新規登録の場合
-        result = await supabase.auth.signUp({ email, password });
+        const { error } = await supabase.auth.signUp({ 
+          email, 
+          password,
+          options: {
+            data: {
+              // 初期プロファイル情報
+              fullname: null,
+              facility_id: null
+            }
+          }
+        });
+        
+        if (error) {
+          setError(error.message);
+          return;
+        }
+
+        // 新規登録後、プロファイルテーブルにレコードを作成
+        const { data: authData } = await supabase.auth.getUser();
+        if (authData.user) {
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .insert([
+              { 
+                id: authData.user.id,
+                fullname: null,
+                facility_id: null
+              }
+            ]);
+          
+          if (profileError) {
+            setError(profileError.message);
+            return;
+          }
+        }
+
+        // 登録成功メッセージ
+        alert("アカウントが作成されました。ログインしてください。");
+        setIsSignUp(false);
       } else {
         // ログインの場合
-        result = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await signIn(email, password);
+        
+        if (error) {
+          setError(error.message);
+          return;
+        }
+
+        // ログイン成功後、AuthContextのuseEffectでリダイレクトされる
       }
-      if (result.error) {
-        alert(result.error.message);
-        return;
-      }
-      
-      // 認証に成功したらユーザー情報を取得
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) {
-        alert("ユーザー情報の取得に失敗しました");
-        return;
-      }
-      // ユーザーの氏名 (fullName) が未登録の場合は通知する
-      if (!userData.user.user_metadata.fullName) {
-        alert("氏名が登録されていません。ユーザー設定ページから登録してください。");
-      }
-      
-      // ホームへリダイレクト
-      router.push('/depart');
     } catch (error: unknown) {
       if (error instanceof Error) {
-        alert(error.message);
+        setError(error.message);
+      } else {
+        setError("認証中にエラーが発生しました");
       }
+    } finally {
+      setAuthLoading(false);
     }
   };
 
+  // ローディング中はローディング表示
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-100">
+        <p>読み込み中...</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-100">
+    <div className="flex items-center justify-center min-h-screen bg-gradient-to-b from-[#fde3f1] to-[#e9ddfc]">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>{isSignUp ? "新規登録" : "ログイン"}</CardTitle>
@@ -88,16 +141,28 @@ const AuthForm = () => {
               />
             </div>
           </div>
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-300 rounded-md">
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          )}
         </CardContent>
         <CardFooter className="flex flex-col space-y-4">
-          <Button onClick={handleAuth} className="w-full">
-            {isSignUp ? "新規登録" : "ログイン"}
-            <ArrowRight className="ml-2 h-4 w-4" />
+          <Button 
+            onClick={handleAuth} 
+            className="w-full"
+            disabled={authLoading || !email || !password}
+          >
+            {authLoading ? "処理中..." : isSignUp ? "新規登録" : "ログイン"}
+            {!authLoading && <ArrowRight className="ml-2 h-4 w-4" />}
           </Button>
           <p className="text-sm text-center text-gray-600">
             {isSignUp ? "既にアカウントをお持ちですか？ " : "アカウントをお持ちでないですか？ "}
             <span
-              onClick={() => setIsSignUp(!isSignUp)}
+              onClick={() => {
+                setIsSignUp(!isSignUp);
+                setError("");
+              }}
               className="text-primary cursor-pointer hover:underline"
             >
               {isSignUp ? "ログイン" : "新規登録"}

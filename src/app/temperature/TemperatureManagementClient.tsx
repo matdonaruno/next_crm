@@ -17,6 +17,7 @@ interface TemperatureRecord {
   id: string;
   record_date: string;
   temperature_record_details: TemperatureRecordDetail[];
+  facility_id: string;
 }
 
 interface TemperatureItem {
@@ -26,6 +27,7 @@ interface TemperatureItem {
   default_value: number;
   display_order: number;
   department_id: string;
+  facility_id: string;
 }
 
 export default function TemperatureManagementClient() {
@@ -45,10 +47,32 @@ export default function TemperatureManagementClient() {
 
     const fetchItems = async () => {
       setLoading(true);
+      
+      // ユーザーの施設IDを取得
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) {
+        console.error("ユーザー情報の取得に失敗しました");
+        setLoading(false);
+        return;
+      }
+      
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("facility_id")
+        .eq("id", userData.user.id)
+        .single();
+        
+      if (profileError || !profileData?.facility_id) {
+        console.error("施設情報の取得に失敗しました");
+        setLoading(false);
+        return;
+      }
+      
       const { data, error } = await supabase
         .from("temperature_items")
-        .select("id, item_name, display_name, default_value, display_order, department_id")
+        .select("id, item_name, display_name, default_value, display_order, department_id, facility_id")
         .eq("department_id", departmentId)
+        .eq("facility_id", profileData.facility_id)
         .order("display_order", { ascending: true });
 
       if (error) {
@@ -61,6 +85,27 @@ export default function TemperatureManagementClient() {
 
     const fetchRecords = async () => {
       setLoading(true);
+      
+      // ユーザーの施設IDを取得
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) {
+        console.error("ユーザー情報の取得に失敗しました");
+        setLoading(false);
+        return;
+      }
+      
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("facility_id")
+        .eq("id", userData.user.id)
+        .single();
+        
+      if (profileError || !profileData?.facility_id) {
+        console.error("施設情報の取得に失敗しました");
+        setLoading(false);
+        return;
+      }
+      
       const { data, error } = await supabase
         .from("temperature_records")
         .select(`
@@ -70,9 +115,11 @@ export default function TemperatureManagementClient() {
             id,
             temperature_item_id,
             value
-          )
+          ),
+          facility_id
         `)
         .eq("department_id", departmentId)
+        .eq("facility_id", profileData.facility_id)
         .order("record_date", { ascending: false });
 
       if (error) {

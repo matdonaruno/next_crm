@@ -38,25 +38,20 @@ interface Product {
 
 export default function ReagentRegistration() {
   useRequireAuth();
-  const { register, setValue, getValues, reset } = useForm<FormValues>();
+  const { register, setValue, getValues, reset, formState: { errors } } = useForm<FormValues>();
   const router = useRouter();
   const [error, setError] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-
-  // カメラとバーコード解析関連ステート
   const [showCamera, setShowCamera] = useState<boolean>(true);
-  const [manualCaptureMode, setManualCaptureMode] = useState<boolean>(false); // 追加
-  const [capturedImage, setCapturedImage] = useState<string | null>(null);   // 追加
-
+  const [manualCaptureMode, setManualCaptureMode] = useState<boolean>(false);
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  
   // 部署一覧、商品CSV、バーコード読み取り状況
-  const [departments, setDepartments] = useState<string[]>([]);
+  const [departments, setDepartments] = useState<{id: string, name: string}[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [barcodeDetected, setBarcodeDetected] = useState<boolean>(false);
   const [failCount, setFailCount] = useState<number>(0);
-
-  // デバッグログ表示用
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
-
+  
   // Quagga用のマウントポイント参照
   const quaggaRef = useRef<HTMLDivElement>(null);
   const processing = useRef<boolean>(false);
@@ -66,11 +61,14 @@ export default function ReagentRegistration() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  
+  // デバッグログ表示用
+  const [debugLog, setDebugLog] = useState<string[]>([]);
 
   // デバッグログ用関数
   const addDebugLog = useCallback((msg: string) => {
     console.log(msg);
-    setDebugLogs((prev) => [...prev, msg]);
+    setDebugLog((prev) => [...prev, msg]);
   }, []);
 
   // カメラ停止関数
@@ -212,15 +210,39 @@ export default function ReagentRegistration() {
   // 部署一覧取得（supabaseから）
   useEffect(() => {
     const fetchDepartments = async () => {
-      const { data, error } = await supabase.from("reagents").select("department");
-      if (error) {
-        console.error("Error fetching departments:", error);
-      } else if (data) {
-        const unique = Array.from(
-          new Set(data.map((item: { department: string }) => item.department).filter(Boolean))
-        );
-        setDepartments(unique);
-        unique.forEach((dept) => addDebugLog("部署一覧取得: " + dept));
+      try {
+        // ユーザーの施設IDを取得
+        const { data: userData } = await supabase.auth.getUser();
+        if (!userData.user) {
+          console.error("ユーザー情報の取得に失敗しました");
+          return;
+        }
+        
+        const { data: profileData, error: profileError } = await supabase
+          .from("profiles")
+          .select("facility_id")
+          .eq("id", userData.user.id)
+          .single();
+          
+        if (profileError || !profileData?.facility_id) {
+          console.error("施設情報の取得に失敗しました");
+          return;
+        }
+        
+        // 施設IDに基づいて部署を取得
+        const { data, error } = await supabase
+          .from("departments")
+          .select("id, name")
+          .eq("facility_id", profileData.facility_id)
+          .order("name");
+          
+        if (error) {
+          console.error("Error fetching departments:", error);
+        } else {
+          setDepartments(data || []);
+        }
+      } catch (err) {
+        console.error("Error in fetchDepartments:", err);
       }
     };
     fetchDepartments();
@@ -514,34 +536,6 @@ export default function ReagentRegistration() {
     addDebugLog("handleReagentNameBlur triggered with value: " + e.target.value);
   };
 
-  // ユーザープロフィール確認／作成関数
-  const ensureUserProfile = async (
-    user: { id: string; email?: string; user_metadata: { fullName?: string } }
-  ): Promise<boolean> => {
-    const userEmail = user.email ?? "";
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("id", user.id)
-      .maybeSingle();
-    if (error) {
-      console.error("Error checking profile:", error.message);
-      return false;
-    }
-    if (!data) {
-      const { error: insertError } = await supabase.from("profiles").insert({
-        id: user.id,
-        fullname: user.user_metadata.fullName || "",
-        email: userEmail,
-      });
-      if (insertError) {
-        console.error("Error inserting profile:", insertError.message);
-        return false;
-      }
-    }
-    return true;
-  };
-
   // 試薬登録処理
   const registerReagent = async (startUsage: boolean) => {
     setIsSubmitting(true);
@@ -553,12 +547,20 @@ export default function ReagentRegistration() {
         return;
       }
       const currentUser = userData.user;
-      const profileOk = await ensureUserProfile(currentUser);
-      if (!profileOk) {
-        setError("ユーザープロフィールの作成に失敗しました");
+      
+      // ユーザーの施設IDを取得
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("facility_id")
+        .eq("id", currentUser.id)
+        .single();
+        
+      if (profileError || !profileData?.facility_id) {
+        setError("施設情報の取得に失敗しました");
         setIsSubmitting(false);
         return;
       }
+      
       const registeredBy = currentUser.id;
       const formData = getValues();
       const { error } = await supabase.from("reagents").insert([
@@ -572,6 +574,7 @@ export default function ReagentRegistration() {
           used: startUsage,
           used_at: startUsage ? new Date().toISOString() : null,
           ended_at: null,
+          facility_id: profileData.facility_id, // 施設IDを設定
         },
       ]);
       if (error) {
@@ -686,18 +689,24 @@ export default function ReagentRegistration() {
 
             {/* フォーム */}
             <form className="space-y-4">
-              <div>
-                <Label htmlFor="department">部署名</Label>
+              <div className="mb-4">
+                <Label htmlFor="department">部署</Label>
                 <Input
                   id="department"
                   list="departments-list"
-                  {...register("department", { required: true })}
+                  {...register("department", { required: "部署は必須です" })}
+                  className="mt-1"
                 />
                 <datalist id="departments-list">
                   {departments.map((dept) => (
-                    <option key={dept} value={dept} />
+                    <option key={dept.id} value={dept.name} />
                   ))}
                 </datalist>
+                {errors.department && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.department.message}
+                  </p>
+                )}
               </div>
 
               {/* 追加: JANコード */}
@@ -766,11 +775,11 @@ export default function ReagentRegistration() {
         )}
 
         {/* デバッグログ表示 */}
-        {debugLogs.length > 0 && (
+        {debugLog.length > 0 && (
           <div className="mt-4 p-2 bg-gray-100 border rounded">
             <h2 className="font-bold mb-2">デバッグログ</h2>
             <pre className="text-xs whitespace-pre-wrap">
-              {debugLogs
+              {debugLog
                 .filter((log) =>
                   log.startsWith("Quagga") ||
                   log.startsWith("GS1") ||
