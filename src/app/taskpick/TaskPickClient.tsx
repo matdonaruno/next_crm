@@ -2,11 +2,11 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ThermometerSnowflake, Wrench, ChartLine, FlaskRound, User, Home, LogOut, Bell, AlertTriangle } from 'lucide-react';
+import { ThermometerSnowflake, Wrench, ChartLine, FlaskRound, AlertTriangle } from 'lucide-react';
 import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { AppHeader } from '@/components/ui/app-header';
 
 // 通知の型定義
 interface Notification {
@@ -62,7 +62,7 @@ export default function TaskPickClient() {
   const departmentName = searchParams?.get('department') || 'Department';
   const departmentId = searchParams?.get('departmentId') || '';
   // サンプル通知
-  const [notifications, setNotifications] = useState<Notification[]>([
+  const [notifications] = useState<Notification[]>([
     {
       id: 1,
       type: 'warning',
@@ -99,51 +99,8 @@ export default function TaskPickClient() {
         }
       `}</style>
       <div className="min-h-screen w-full flex flex-col bg-gradient-to-b from-[#fde3f1] to-[#e9ddfc]">
-        {/* ヘッダー */}
-        <header className="bg-white text-primary shadow-sm w-full">
-          <div className="w-full px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center">
-              {/* ヘッダータイトルなし（要件通り） */}
-            </div>
-            <div className="flex items-center space-x-2 ml-auto">
-              {/* ユーザー設定アイコン */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" onClick={() => router.push("/user-settings")}>
-                    <User className="h-6 w-6" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
-                  <p style={tooltipTextStyle}>ユーザー設定</p>
-                </TooltipContent>
-              </Tooltip>
-              
-              {/* ホームアイコン */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" onClick={() => router.push("/depart")}>
-                    <Home className="h-6 w-6" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
-                  <p style={tooltipTextStyle}>ホーム</p>
-                </TooltipContent>
-              </Tooltip>
-              
-              {/* ログアウトアイコン */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" onClick={() => router.push("/login")}>
-                    <LogOut className="h-5 w-5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
-                  <p style={tooltipTextStyle}>ログアウト</p>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
-        </header>
+        {/* 共通ヘッダーコンポーネントを使用 */}
+        <AppHeader showBackButton={true} />
 
         {/* 通知欄 */}
         {notifications.length > 0 && (

@@ -20,6 +20,9 @@ export default function Home() {
     const menuIcon = document.querySelector('.menu-icon');
     if (!menuIcon) return;
 
+    // ページロード時にメニューを閉じる
+    body.classList.remove('nav-active');
+
     // 元のbodyスタイルを保存
     const originalBackgroundColor = body.style.backgroundColor;
     const originalBackgroundImage = body.style.backgroundImage;

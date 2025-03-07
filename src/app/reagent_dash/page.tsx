@@ -3,16 +3,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Bell,
   Plus,
-  Beaker,
   AlertTriangle,
-  XCircle,
-  CheckCircle,
-  Trash2,
-  User,
-  LogOut,
-  Home,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -24,18 +16,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { supabase } from "@/lib/supabaseClient";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import Papa from 'papaparse'; // CSVパーサーライブラリを追加
+import { AppHeader } from "@/components/ui/app-header";
 
 interface Reagent {
   id: number;
@@ -69,15 +54,6 @@ interface ReagentItem {
   ended_by_fullname?: string;
 }
 
-type NotificationType = "nearExpiry" | "expired" | "newRegistration" | "deletion";
-
-interface Notification {
-  id: number;
-  type: NotificationType;
-  message: string;
-  timestamp: Date;
-}
-
 // 試薬マスターデータの型定義
 interface ReagentMaster {
   code: string;
@@ -102,7 +78,6 @@ export default function DashboardPage() {
   const router = useRouter();
   const [reagents, setReagents] = useState<Reagent[]>([]);
   const [reagentItems, setReagentItems] = useState<ReagentItem[]>([]); // 試薬アイテムの状態を追加
-  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [currentUserName, setCurrentUserName] = useState("");
   const [currentUserId, setCurrentUserId] = useState(""); // カレントユーザーIDを追加
   // フィルター用の状態
@@ -310,14 +285,6 @@ export default function DashboardPage() {
     fetchCurrentUserProfile();
   }, [fetchReagents]);
 
-  // 通知アイコンの定義
-  const notificationIcons: Record<NotificationType, React.ReactElement> = {
-    nearExpiry: <AlertTriangle className="h-4 w-4 text-yellow-500 mr-2" />,
-    expired: <XCircle className="h-4 w-4 text-red-500 mr-2" />,
-    newRegistration: <CheckCircle className="h-4 w-4 text-green-500 mr-2" />,
-    deletion: <Trash2 className="h-4 w-4 text-blue-500 mr-2" />,
-  };
-
   // useEffectの依存配列にfetchReagentsを追加
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -331,51 +298,6 @@ export default function DashboardPage() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [fetchReagents]);
-
-  // 使用開始登録：used, used_at, used_by を更新
-  const handleUsageStart = async (reagentId: number) => {
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError || !userData.user) {
-      console.error("Error fetching user:", userError);
-      return;
-    }
-    const currentUserId = userData.user.id;
-    const { error } = await supabase
-      .from("reagents")
-      .update({
-        used: true,
-        used_at: new Date().toISOString(),
-        used_by: currentUserId,
-      })
-      .eq("id", reagentId);
-    if (error) {
-      console.error("Error updating usage start:", error.message);
-    } else {
-      fetchReagents();
-    }
-  };
-
-  // 使用終了登録：ended_at, ended_by を更新
-  const handleUsageEnd = async (reagentId: number) => {
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError || !userData.user) {
-      console.error("Error fetching user:", userError);
-      return;
-    }
-    const currentUserId = userData.user.id;
-    const { error } = await supabase
-      .from("reagents")
-      .update({
-        ended_at: new Date().toISOString(),
-        ended_by: currentUserId,
-      })
-      .eq("id", reagentId);
-    if (error) {
-      console.error("Error updating usage end:", error.message);
-    } else {
-      fetchReagents();
-    }
-  };
 
   // 試薬パッケージの展開・折りたたみを切り替える
   const toggleReagentExpand = (reagentId: number, e: React.MouseEvent) => {
@@ -458,108 +380,56 @@ export default function DashboardPage() {
     }
   };
 
+  // 使用開始登録：used, used_at, used_by を更新
+  const handleUsageStart = async (reagentId: number) => {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData.user) {
+      console.error("Error fetching user:", userError);
+      return;
+    }
+    const currentUserId = userData.user.id;
+    const { error } = await supabase
+      .from("reagents")
+      .update({
+        used: true,
+        used_at: new Date().toISOString(),
+        used_by: currentUserId,
+      })
+      .eq("id", reagentId);
+    if (error) {
+      console.error("Error updating usage start:", error.message);
+    } else {
+      fetchReagents();
+    }
+  };
+
+  // 使用終了登録：ended_at, ended_by を更新
+  const handleUsageEnd = async (reagentId: number) => {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData.user) {
+      console.error("Error fetching user:", userError);
+      return;
+    }
+    const currentUserId = userData.user.id;
+    const { error } = await supabase
+      .from("reagents")
+      .update({
+        ended_at: new Date().toISOString(),
+        ended_by: currentUserId,
+      })
+      .eq("id", reagentId);
+    if (error) {
+      console.error("Error updating usage end:", error.message);
+    } else {
+      fetchReagents();
+    }
+  };
+
   return (
     <TooltipProvider>
       <div style={{ backgroundColor: '#ffffff', minHeight: '100vh' }}>
-        <header className="bg-primary text-primary-foreground">
-          <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center">
-              <Beaker className="h-6 w-6 mr-2" />
-              <h1 className="text-xl font-bold">Clinical reagent manager</h1>
-            </div>
-            <div className="flex items-center space-x-2">
-              {/* ユーザー設定アイコン */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" onClick={() => router.push("/user-settings")}>
-                    <User className="h-6 w-6" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>ユーザー設定</p>
-                </TooltipContent>
-              </Tooltip>
-              {/* ホーム（ダッシュボード）アイコン */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => router.push("/depart")}
-                  >
-                    <Home className="h-6 w-6" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>ダッシュボード</p>
-                </TooltipContent>
-              </Tooltip>
-              {/* 通知アイコン */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="relative">
-                        <Bell className="h-5 w-5" />
-                        {notifications.length > 0 && (
-                          <span className="absolute top-0 right-0 h-4 w-4 bg-red-500 rounded-full text-xs text-white flex items-center justify-center">
-                            {notifications.length}
-                          </span>
-                        )}
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-80">
-                      {notifications.length > 0 ? (
-                        notifications.map((notification) => (
-                          <DropdownMenuItem key={notification.id} className="flex items-start">
-                            {notificationIcons[notification.type]}
-                            <div className="flex flex-col">
-                              <span>{notification.message}</span>
-                              <span className="text-xs text-muted-foreground">
-                                {notification.timestamp.toLocaleString()}
-                              </span>
-                            </div>
-                          </DropdownMenuItem>
-                        ))
-                      ) : (
-                        <DropdownMenuItem className="text-center">通知はありません</DropdownMenuItem>
-                      )}
-                      {notifications.length > 0 && (
-                        <>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => setNotifications([])}>
-                            すべて既読にする
-                          </DropdownMenuItem>
-                        </>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>通知</p>
-                </TooltipContent>
-              </Tooltip>
-              {/* ログアウトアイコン */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={async () => {
-                      await supabase.auth.signOut();
-                      router.push("/login");
-                    }}
-                  >
-                    <LogOut className="h-5 w-5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>ログアウト</p>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
-        </header>
+        {/* 共通ヘッダーコンポーネントを使用 */}
+        <AppHeader showBackButton={true} title="Clinical reagent manager" />
 
         <div className="bg-background border-b">
           <div className="container mx-auto px-4 py-4 flex justify-between items-center">
