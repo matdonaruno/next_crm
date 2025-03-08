@@ -1,6 +1,179 @@
----
-description: 
-globs: 
-alwaysApply: false
----
- 
+# コーディングガイドライン
+
+## 基本方針
+
+このプロジェクトでは、コードの品質と一貫性を保つために、以下のガイドラインに従ってください。すべてのコードはESLintのチェックをパスする必要があります。
+
+## ESLintエラーを防ぐためのルール
+
+### 型安全性
+
+- `any`型の使用を避け、具体的な型を指定する
+  ```typescript
+  // ❌ 避けるべき
+  const handleData = (data: any) => { ... }
+  
+  // ✅ 推奨
+  interface UserData { id: string; name: string }
+  const handleData = (data: UserData) => { ... }
+  ```
+
+- `unknown`型を使用する場合は、適切な型チェックを行う
+  ```typescript
+  // ❌ 避けるべき
+  try {
+    // 処理
+  } catch (err: unknown) {
+    console.error(err.message); // エラー: Objectは 'unknown' 型です
+  }
+  
+  // ✅ 推奨
+  try {
+    // 処理
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : '不明なエラーが発生しました';
+    console.error(errorMessage);
+  }
+  ```
+
+### 変数と関数
+
+- 未使用の変数や関数を作成しない
+  ```typescript
+  // ❌ 避けるべき
+  const [value, setValue] = useState(""); // valueが使用されていない
+  
+  // ✅ 推奨
+  const [value, setValue] = useState("");
+  // valueを実際に使用する
+  ```
+
+- 変数名は明確で一貫性のある命名規則に従う
+  ```typescript
+  // ❌ 避けるべき
+  const a = "user name";
+  
+  // ✅ 推奨
+  const userName = "user name";
+  ```
+
+### React コンポーネント
+
+- 副作用は`useEffect`内で適切に管理する
+  ```typescript
+  // ❌ 避けるべき
+  const Component = () => {
+    fetchData(); // コンポーネントがレンダリングされるたびに実行される
+    return <div>...</div>;
+  }
+  
+  // ✅ 推奨
+  const Component = () => {
+    useEffect(() => {
+      fetchData();
+    }, []); // 依存配列を適切に設定
+    return <div>...</div>;
+  }
+  ```
+
+- クリーンアップ関数を適切に実装する
+  ```typescript
+  // ❌ 避けるべき
+  useEffect(() => {
+    const subscription = subscribe();
+    // クリーンアップなし
+  }, []);
+  
+  // ✅ 推奨
+  useEffect(() => {
+    const subscription = subscribe();
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+  ```
+
+### Supabaseデータ操作
+
+- すべてのデータ操作に施設IDによるフィルタリングを適用する
+  ```typescript
+  // ❌ 避けるべき
+  const { data } = await supabase
+    .from("departments")
+    .select("*");
+  
+  // ✅ 推奨
+  const { data } = await supabase
+    .from("departments")
+    .select("*")
+    .eq("facility_id", profile.facility_id);
+  ```
+
+- エラーハンドリングを適切に行う
+  ```typescript
+  // ❌ 避けるべき
+  const { data } = await supabase.from("departments").select("*");
+  setDepartments(data);
+  
+  // ✅ 推奨
+  const { data, error } = await supabase.from("departments").select("*");
+  if (error) {
+    console.error("Error fetching departments:", error);
+  } else {
+    setDepartments(data || []);
+  }
+  ```
+
+## コードレビュー基準
+
+新しいコードを追加する際は、以下の基準を満たしているか確認してください：
+
+1. ESLintエラーがないこと
+2. 適切な型定義がされていること
+3. エラーハンドリングが適切に行われていること
+4. 未使用の変数や関数がないこと
+5. 施設IDによるデータフィルタリングが適用されていること
+
+## 実装例
+
+### 施設IDに基づくデータ取得の実装例
+
+```typescript
+const fetchDepartments = async () => {
+  try {
+    // ユーザーの施設IDを取得
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData.user) {
+      console.error("ユーザー情報の取得に失敗しました");
+      return;
+    }
+    
+    const { data: profileData, error: profileError } = await supabase
+      .from("profiles")
+      .select("facility_id")
+      .eq("id", userData.user.id)
+      .single();
+      
+    if (profileError || !profileData?.facility_id) {
+      console.error("施設情報の取得に失敗しました");
+      return;
+    }
+    
+    // 施設IDに基づいて部署を取得
+    const { data, error } = await supabase
+      .from("departments")
+      .select("id, name")
+      .eq("facility_id", profileData.facility_id)
+      .order("name");
+      
+    if (error) {
+      console.error("部署データの取得に失敗しました:", error);
+    } else {
+      setDepartments(data || []);
+    }
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : '不明なエラーが発生しました';
+    console.error("部署データの取得中にエラーが発生しました:", errorMessage);
+  }
+};
+``` 
