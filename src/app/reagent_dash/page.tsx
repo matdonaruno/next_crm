@@ -91,6 +91,8 @@ export default function DashboardPage() {
   const [expiryNotifications, setExpiryNotifications] = useState<Reagent[]>([]);
   // 試薬マスターデータ
   const [reagentMasterData, setReagentMasterData] = useState<Record<string, ReagentMaster>>({});
+  // ローディング状態を追加
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   // 背景色を白色に変更
   useEffect(() => {
@@ -118,6 +120,11 @@ export default function DashboardPage() {
   // 試薬マスターデータをCSVから読み込む
   const loadReagentMasterData = async () => {
     try {
+      // CSVが既に読み込まれている場合は再読み込みしない
+      if (Object.keys(reagentMasterData).length > 0) {
+        return;
+      }
+      
       const response = await fetch('/products.csv');
       const csvText = await response.text();
       
@@ -211,59 +218,48 @@ export default function DashboardPage() {
 
   // 試薬データの取得（profiles との join で各ユーザー情報を取得）
   const fetchReagents = useCallback(async () => {
-    if (!profile?.facility_id) return;
-
-    const { data, error } = await supabase
-      .from("reagents")
-      .select(`*, registeredBy (fullname), used_by (fullname), ended_by (fullname)`)
-      .eq("facility_id", profile.facility_id)
-      .order("registrationDate", { ascending: false });
-
-    if (error) {
-      console.error("Error fetching reagents:", error);
-    } else {
-      // 試薬名をマスターデータから取得して設定
-      const reagentsWithNames = (data || []).map(reagent => {
-        // nameフィールドがコードの場合、マスターデータから名前を取得
-        if (reagent.name && reagent.name.match(/^[A-Z0-9-]+$/)) {
-          return {
-            ...reagent,
-            originalCode: reagent.name, // 元のコードを保存
-            name: getReagentNameByCode(reagent.name) || reagent.name
-          };
-        }
-        return reagent;
-      });
-      
-      setReagents(reagentsWithNames);
-      
-      // 期限切れ通知を更新
-      checkExpiryNotifications(reagentsWithNames);
-      
-      // 試薬アイテムも取得
-      fetchReagentItems();
+    if (!profile?.facility_id) {
+      console.log("施設IDがないため、試薬データを取得できません");
+      return;
     }
-  }, [getReagentNameByCode, fetchReagentItems, profile?.facility_id]);
 
-  // 期限切れ間近（1ヶ月以内）の試薬を検出する関数
-  const checkExpiryNotifications = (reagents: Reagent[]) => {
-    const today = new Date();
-    const oneMonthLater = new Date();
-    oneMonthLater.setMonth(today.getMonth() + 1);
+    console.log("試薬データ取得を開始します。施設ID:", profile.facility_id);
     
-    const nearExpiryReagents = reagents.filter(reagent => {
-      if (!reagent.expirationDate) return false;
-      
-      // 使用終了した試薬は除外
-      if (reagent.ended_at) return false;
-      
-      const expiryDate = new Date(reagent.expirationDate);
-      // 有効期限が今日から1ヶ月以内で、かつ今日以降のもの
-      return expiryDate <= oneMonthLater && expiryDate >= today;
-    });
-    
-    setExpiryNotifications(nearExpiryReagents);
-  };
+    try {
+      const { data, error } = await supabase
+        .from("reagents")
+        .select(`*, registeredBy (fullname), used_by (fullname), ended_by (fullname)`)
+        .eq("facility_id", profile.facility_id)
+        .order("registrationDate", { ascending: false });
+
+      if (error) {
+        console.error("試薬データの取得エラー:", error);
+      } else {
+        console.log("取得した試薬データ:", data);
+        console.log("試薬の総数:", data?.length || 0);
+        
+        // 試薬名をマスターデータから取得して設定
+        const reagentsWithNames = (data || []).map(reagent => {
+          // nameフィールドがコードの場合、マスターデータから名前を取得
+          if (reagent.name && reagent.name.match(/^[A-Z0-9-]+$/)) {
+            return {
+              ...reagent,
+              originalCode: reagent.name, // 元のコードを保存
+              name: getReagentNameByCode(reagent.name) || reagent.name
+            };
+          }
+          return reagent;
+        });
+        
+        setReagents(reagentsWithNames);
+        
+        // 期限切れ通知を更新
+        checkExpiryNotifications(reagentsWithNames);
+      }
+    } catch (fetchError) {
+      console.error("試薬データ取得中に例外が発生しました:", fetchError);
+    }
+  }, [profile?.facility_id, getReagentNameByCode]);
 
   // カレントユーザーの氏名取得
   const fetchCurrentUserProfile = async () => {
@@ -286,17 +282,55 @@ export default function DashboardPage() {
     }
   };
 
-  useEffect(() => {
-    loadReagentMasterData(); // マスターデータを読み込む
-    fetchReagents();
-    fetchCurrentUserProfile();
-  }, [fetchReagents]);
+  // データ取得を一括で行う関数 - 依存配列を空にして無限ループを防止
+  const fetchAllData = useCallback(async () => {
+    console.log("データ取得を開始します");
+    setIsLoading(true); // ローディング状態を設定
+    
+    try {
+      // 直接関数を呼び出す（依存配列に含めない）
+      await loadReagentMasterData();
+      await fetchReagents();
+      await fetchReagentItems();
+      await fetchCurrentUserProfile();
+      
+      console.log("データ取得が完了しました");
+    } catch (error) {
+      console.error("データ取得中にエラーが発生しました:", error);
+    } finally {
+      setIsLoading(false); // ローディング状態を解除
+    }
+  }, []); // 依存配列を空にする
 
-  // useEffectの依存配列にfetchReagentsを追加
+  // 初回マウント時にのみデータを取得
   useEffect(() => {
+    let isMounted = true;
+    let isDataFetched = false;
+    
+    const loadInitialData = async () => {
+      if (isMounted && !isDataFetched) {
+        isDataFetched = true;
+        await fetchAllData();
+      }
+    };
+    
+    loadInitialData();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, []); // 依存配列を空にする
+
+  // タブがアクティブになったときのみデータを再取得
+  useEffect(() => {
+    let lastVisibilityChange = Date.now();
+    
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        fetchReagents();
+      const now = Date.now();
+      // 最後の更新から5秒以上経過している場合のみ更新
+      if (document.visibilityState === 'visible' && now - lastVisibilityChange > 5000) {
+        lastVisibilityChange = now;
+        fetchAllData();
       }
     };
 
@@ -304,7 +338,27 @@ export default function DashboardPage() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [fetchReagents]);
+  }, []); // 依存配列を空にする
+
+  // 期限切れ間近（1ヶ月以内）の試薬を検出する関数
+  const checkExpiryNotifications = (reagents: Reagent[]) => {
+    const today = new Date();
+    const oneMonthLater = new Date();
+    oneMonthLater.setMonth(today.getMonth() + 1);
+    
+    const nearExpiryReagents = reagents.filter(reagent => {
+      if (!reagent.expirationDate) return false;
+      
+      // 使用終了した試薬は除外
+      if (reagent.ended_at) return false;
+      
+      const expiryDate = new Date(reagent.expirationDate);
+      // 有効期限が今日から1ヶ月以内で、かつ今日以降のもの
+      return expiryDate <= oneMonthLater && expiryDate >= today;
+    });
+    
+    setExpiryNotifications(nearExpiryReagents);
+  };
 
   // 試薬パッケージの展開・折りたたみを切り替える
   const toggleReagentExpand = (reagentId: number, e: React.MouseEvent) => {
@@ -480,43 +534,17 @@ export default function DashboardPage() {
 
   return (
     <TooltipProvider>
-      <div style={{ backgroundColor: '#ffffff', minHeight: '100vh' }}>
+      <div className="flex flex-col min-h-screen" style={{ backgroundColor: '#ffffff' }}>
         {/* 共通ヘッダーコンポーネントを使用 */}
         <AppHeader showBackButton={true} title="Clinical reagent manager" />
 
         <div className="bg-background border-b">
-          <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-            <h2 className="text-2xl font-bold">Reagent Dashboard</h2>
-            {/* フィルター領域 */}
-            <div className="flex items-center space-x-4">
-              <div>
-                <label className="text-sm">部署フィルター: </label>
-                <select
-                  className="border rounded p-1 text-sm"
-                  value={selectedDepartment}
-                  onChange={(e) => setSelectedDepartment(e.target.value)}
-                >
-                  <option value="all">すべて</option>
-                  {departmentOptions.map((dept) => (
-                    <option key={dept} value={dept}>
-                      {dept}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-center">
-                <label className="text-sm mr-1">使用終了試薬表示:</label>
-                <input
-                  type="checkbox"
-                  checked={showEnded}
-                  onChange={(e) => setShowEnded(e.target.checked)}
-                />
-              </div>
-            </div>
+          <div className="container mx-auto px-4 py-4 flex justify-between items-center" style={{ boxShadow: 'none' }}>
+            <h2 className="text-2xl font-bold text-center w-full">Reagent Dashboard</h2>
           </div>
         </div>
 
-        <main className="flex-grow container mx-auto px-4 py-8" style={{ backgroundColor: '#ffffff' }}>
+        <main className="flex-grow container mx-auto px-4 py-8">
           {/* カレントユーザーの氏名表示 */}
           <div className="mb-4 text-right">
             {currentUserName && (
@@ -526,15 +554,42 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* 期限切れ通知エリア */}
+          {/* フィルター領域 - 右詰めに配置 */}
+          <div className="mb-4 flex justify-end items-center space-x-4">
+            <div>
+              <label className="text-sm">部署フィルター: </label>
+              <select
+                className="border rounded p-1 text-sm"
+                value={selectedDepartment}
+                onChange={(e) => setSelectedDepartment(e.target.value)}
+              >
+                <option value="all">すべて</option>
+                {departmentOptions.map((dept) => (
+                  <option key={dept} value={dept}>
+                    {dept}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center">
+              <label className="text-sm mr-1">使用終了試薬表示:</label>
+              <input
+                type="checkbox"
+                checked={showEnded}
+                onChange={(e) => setShowEnded(e.target.checked)}
+              />
+            </div>
+          </div>
+
+          {/* 期限切れ通知エリア - 左揃えに修正 */}
           {expiryNotifications.length > 0 && (
             <div className="mb-6 p-4 border border-yellow-300 bg-yellow-50 rounded-md">
-              <h3 className="text-lg font-semibold text-yellow-800 mb-2">
+              <h3 className="text-lg font-semibold text-yellow-800 mb-2 text-left">
                 <AlertTriangle className="inline-block mr-2 h-5 w-5" />
                 期限切れ間近の試薬 ({expiryNotifications.length}件)
               </h3>
               <div className="max-h-40 overflow-y-auto">
-                <ul className="list-disc pl-5">
+                <ul className="list-disc pl-5 text-left">
                   {expiryNotifications.map((reagent) => (
                     <li key={`expiry-${reagent.id}`} className="text-sm text-yellow-700 mb-1">
                       <span className="font-medium">{reagent.name}</span> (Lot: {reagent.lotNo}) - 
@@ -562,15 +617,7 @@ export default function DashboardPage() {
                 onClick={() => setCompactMode(!compactMode)}
                 className="flex items-center"
               >
-                {compactMode ? (
-                  <>
-                    <span>標準表示</span>
-                  </>
-                ) : (
-                  <>
-                    <span>コンパクト表示</span>
-                  </>
-                )}
+                {compactMode ? "標準表示" : "コンパクト表示"}
               </Button>
               <Button
                 variant="outline"
@@ -578,15 +625,7 @@ export default function DashboardPage() {
                 onClick={expandAllRows}
                 className="flex items-center"
               >
-                {allExpanded ? (
-                  <>
-                    <span>すべて折りたたむ</span>
-                  </>
-                ) : (
-                  <>
-                    <span>すべて展開</span>
-                  </>
-                )}
+                {allExpanded ? "すべて折りたたむ" : "すべて展開"}
               </Button>
             </div>
             <Button
@@ -597,172 +636,182 @@ export default function DashboardPage() {
             </Button>
           </div>
 
-          <Card>
-            <div className="overflow-x-auto">
-              <Table className={`w-max min-w-full ${compactMode ? 'text-xs' : ''}`}>
-                <TableHeader>
-                  <TableRow className="whitespace-nowrap">
-                    <TableHead className={compactMode ? "w-8" : "w-10"}></TableHead> {/* 展開ボタン用 */}
-                    <TableHead className={compactMode ? "min-w-[150px] max-w-[300px]" : "min-w-[200px] max-w-[400px]"}>試薬名</TableHead>
-                    <TableHead className={compactMode ? "min-w-[80px]" : "min-w-[100px]"}>Lot No.</TableHead>
-                    <TableHead className={compactMode ? "min-w-[80px]" : "min-w-[100px]"}>規格</TableHead>
-                    <TableHead className={compactMode ? "min-w-[60px]" : "min-w-[80px]"}>単位</TableHead>
-                    <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>有効期限</TableHead>
-                    <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"} style={{ backgroundColor: 'rgba(var(--primary), 0.1)' }}>使用開始日</TableHead>
-                    <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"} style={{ backgroundColor: 'rgba(var(--primary), 0.1)' }}>使用終了日</TableHead>
-                    <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>使用入力者</TableHead>
-                    <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>終了入力者</TableHead>
-                    <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>登録日</TableHead>
-                    <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>登録者</TableHead>
-                    <TableHead className={compactMode ? "min-w-[150px]" : "min-w-[200px]"}>操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredReagents.map((reagent) => {
-                    // この試薬パッケージに関連するアイテムを取得
-                    const items = reagentItems.filter(item => item.reagent_package_id === reagent.id);
-                    const hasItems = items.length > 0;
-                    const isExpanded = expandedReagents[reagent.id] || false;
-                    
-                    return (
-                      <React.Fragment key={reagent.id}>
-                        <TableRow
-                          onClick={() => handleRowClick(reagent)}
-                          className={`cursor-pointer hover:bg-gray-50 whitespace-nowrap ${compactMode ? 'h-8' : ''}`}
-                        >
-                          <TableCell>
-                            {hasItems && (
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="p-0 h-6 w-6"
-                                onClick={(e) => toggleReagentExpand(reagent.id, e)}
-                              >
-                                {isExpanded ? '−' : '+'}
-                              </Button>
-                            )}
-                          </TableCell>
-                          <TableCell>{reagent.name}</TableCell>
-                          <TableCell>{reagent.lotNo}</TableCell>
-                          <TableCell>{reagent.specification}</TableCell>
-                          <TableCell>{reagent.unit || "-"}</TableCell>
-                          <TableCell>{formatDateTime(reagent.expirationDate)}</TableCell>
-                          <TableCell>{formatDateTime(reagent.used_at)}</TableCell>
-                          <TableCell>{formatDateTime(reagent.ended_at)}</TableCell>
-                          <TableCell>
-                            {reagent.used_by
-                              ? typeof reagent.used_by === "object"
-                                ? reagent.used_by.fullname
-                                : reagent.used_by
-                              : "-"}
-                          </TableCell>
-                          <TableCell>
-                            {reagent.ended_by
-                              ? typeof reagent.ended_by === "object"
-                                ? reagent.ended_by.fullname
-                                : reagent.ended_by
-                              : "-"}
-                          </TableCell>
-                          <TableCell>{formatDateTime(reagent.registrationDate)}</TableCell>
-                          <TableCell>
-                            {typeof reagent.registeredBy === "object"
-                              ? reagent.registeredBy.fullname
-                              : reagent.registeredBy}
-                          </TableCell>
-                          <TableCell className="space-x-1 whitespace-nowrap">
-                            {!reagent.used && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleUsageStart(reagent.id);
-                                }}
-                              >
-                                使用開始
-                              </Button>
-                            )}
-                            {reagent.used && !reagent.ended_at && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleUsageEnd(reagent.id);
-                                }}
-                              >
-                                使用終了
-                              </Button>
-                            )}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                router.push(`/reagent/${reagent.id}`);
-                              }}
-                              className="ml-1"
-                            >
-                              アイテム追加
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                        
-                        {/* アイテム行（展開時のみ表示） */}
-                        {isExpanded && items.map(item => (
-                          <TableRow key={`item-${item.id}`} className={`bg-gray-50 whitespace-nowrap ${compactMode ? 'h-7 text-xs' : ''}`}>
-                            <TableCell></TableCell>
-                            <TableCell className="pl-8 font-medium text-sm">
-                              └ {item.name}
-                            </TableCell>
-                            <TableCell colSpan={3}></TableCell>
-                            <TableCell className="text-sm">
-                              {item.usagestartdate
-                                ? new Date(item.usagestartdate).toLocaleString()
-                                : "未設定"}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {item.ended_at
-                                ? new Date(item.ended_at).toLocaleString()
-                                : ""}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {item.user_fullname || item.user}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {item.ended_by_fullname || (item.ended_by ? item.ended_by : "")}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {new Date(item.created_at).toLocaleString()}
-                            </TableCell>
-                            <TableCell></TableCell>
-                            <TableCell className="space-x-1 whitespace-nowrap">
-                              {!item.ended_at && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={(e) => handleItemUsageEnd(item.id, e)}
-                                >
-                                  使用終了
-                                </Button>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </React.Fragment>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+          {/* ローディング表示 */}
+          {isLoading ? (
+            <div className="flex items-center justify-center p-12">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
+                <p className="text-gray-600">データを読み込み中...</p>
+              </div>
             </div>
-          </Card>
+          ) : (
+            /* テーブルコンテナ */
+            <Card className="border shadow-none">
+              <div className="overflow-x-auto">
+                <Table className={`w-max min-w-full ${compactMode ? 'text-xs' : ''}`}>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className={compactMode ? "w-8" : "w-10"}></TableHead>
+                      <TableHead className={compactMode ? "min-w-[150px] max-w-[300px]" : "min-w-[200px] max-w-[400px]"}>試薬名</TableHead>
+                      <TableHead className={compactMode ? "min-w-[80px]" : "min-w-[100px]"}>Lot No.</TableHead>
+                      <TableHead className={compactMode ? "min-w-[80px]" : "min-w-[100px]"}>規格</TableHead>
+                      <TableHead className={compactMode ? "min-w-[60px]" : "min-w-[80px]"}>単位</TableHead>
+                      <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>有効期限</TableHead>
+                      <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"} style={{ backgroundColor: 'rgba(var(--primary), 0.1)' }}>使用開始日</TableHead>
+                      <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"} style={{ backgroundColor: 'rgba(var(--primary), 0.1)' }}>使用終了日</TableHead>
+                      <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>使用入力者</TableHead>
+                      <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>終了入力者</TableHead>
+                      <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>登録日</TableHead>
+                      <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>登録者</TableHead>
+                      <TableHead className={compactMode ? "min-w-[150px]" : "min-w-[200px]"}>操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredReagents.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={13} className="text-center py-4">
+                          <div>
+                            <p className="mb-2">データがありません</p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => fetchAllData()}
+                            >
+                              データを再読み込み
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredReagents.map((reagent) => {
+                        // この試薬パッケージに関連するアイテムを取得
+                        const items = reagentItems.filter(item => item.reagent_package_id === reagent.id);
+                        const hasItems = items.length > 0;
+                        const isExpanded = expandedReagents[reagent.id] || false;
+                        
+                        return (
+                          <React.Fragment key={reagent.id}>
+                            <TableRow
+                              onClick={() => handleRowClick(reagent)}
+                              className={`cursor-pointer hover:bg-gray-50 ${compactMode ? 'h-8' : ''}`}
+                            >
+                              <TableCell>
+                                {hasItems && (
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    className="p-0 h-6 w-6"
+                                    onClick={(e) => toggleReagentExpand(reagent.id, e)}
+                                  >
+                                    {isExpanded ? '−' : '+'}
+                                  </Button>
+                                )}
+                              </TableCell>
+                              <TableCell>{reagent.name}</TableCell>
+                              <TableCell>{reagent.lotNo}</TableCell>
+                              <TableCell>{reagent.specification}</TableCell>
+                              <TableCell>{reagent.unit || "-"}</TableCell>
+                              <TableCell>{formatDateTime(reagent.expirationDate)}</TableCell>
+                              <TableCell>{formatDateTime(reagent.used_at)}</TableCell>
+                              <TableCell>{formatDateTime(reagent.ended_at)}</TableCell>
+                              <TableCell>
+                                {reagent.used_by
+                                  ? typeof reagent.used_by === "object"
+                                    ? reagent.used_by.fullname
+                                    : reagent.used_by
+                                  : "-"}
+                              </TableCell>
+                              <TableCell>
+                                {reagent.ended_by
+                                  ? typeof reagent.ended_by === "object"
+                                    ? reagent.ended_by.fullname
+                                    : reagent.ended_by
+                                  : "-"}
+                              </TableCell>
+                              <TableCell>{formatDateTime(reagent.registrationDate)}</TableCell>
+                              <TableCell>
+                                {typeof reagent.registeredBy === "object"
+                                  ? reagent.registeredBy.fullname
+                                  : reagent.registeredBy}
+                              </TableCell>
+                              <TableCell>
+                                {!reagent.used && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleUsageStart(reagent.id);
+                                    }}
+                                  >
+                                    使用開始
+                                  </Button>
+                                )}
+                                {reagent.used && !reagent.ended_at && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleUsageEnd(reagent.id);
+                                    }}
+                                  >
+                                    使用終了
+                                  </Button>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                            {/* アイテム行（展開時のみ表示） */}
+                            {isExpanded && items.map(item => (
+                              <TableRow key={`item-${item.id}`} className={`bg-gray-50 whitespace-nowrap ${compactMode ? 'h-7 text-xs' : ''}`}>
+                                <TableCell></TableCell>
+                                <TableCell className="pl-8 font-medium text-sm">
+                                  └ {item.name}
+                                </TableCell>
+                                <TableCell colSpan={3}></TableCell>
+                                <TableCell className="text-sm">
+                                  {item.usagestartdate
+                                    ? new Date(item.usagestartdate).toLocaleString()
+                                    : "未設定"}
+                                </TableCell>
+                                <TableCell className="text-sm">
+                                  {item.ended_at
+                                    ? new Date(item.ended_at).toLocaleString()
+                                    : ""}
+                                </TableCell>
+                                <TableCell className="text-sm">
+                                  {item.user_fullname || item.user}
+                                </TableCell>
+                                <TableCell className="text-sm">
+                                  {item.ended_by_fullname || (item.ended_by ? item.ended_by : "")}
+                                </TableCell>
+                                <TableCell className="text-sm">
+                                  {new Date(item.created_at).toLocaleString()}
+                                </TableCell>
+                                <TableCell></TableCell>
+                                <TableCell className="space-x-1 whitespace-nowrap">
+                                  {!item.ended_at && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={(e) => handleItemUsageEnd(item.id, e)}
+                                    >
+                                      使用終了
+                                    </Button>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </React.Fragment>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </Card>
+          )}
         </main>
-
-        <footer className="bg-background border-t">
-          <div className="container mx-auto px-4 py-4 text-center text-sm text-muted-foreground">
-            © 2025 Your side partner. All rights reserved.
-          </div>
-        </footer>
       </div>
     </TooltipProvider>
   );

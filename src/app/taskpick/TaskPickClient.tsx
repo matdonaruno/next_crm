@@ -1,81 +1,244 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ThermometerSnowflake, Wrench, ChartLine, FlaskRound, AlertTriangle } from 'lucide-react';
+import { ThermometerSnowflake, Wrench, ChartLine, FlaskRound, Loader2 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
-import { useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/contexts/AuthContext';
+import { LucideIcon } from 'lucide-react';
 import { AppHeader } from '@/components/ui/app-header';
 
-// 通知の型定義
-interface Notification {
-  id: number;
-  type: 'info' | 'warning' | 'error';
-  message: string;
-  timestamp: Date;
+// タスクの型定義
+interface Task {
+  id: string;
+  title: string;
+  description: string;
+  created_at: string;
+  [key: string]: unknown;
 }
 
-// カスタムツールチップスタイル
-const tooltipContentClass = "bg-primary border-primary";
-const tooltipStyle = { backgroundColor: '#8167a9', color: 'white', border: '1px solid #8167a9' };
-const tooltipTextStyle = { color: 'white' };
+// アイコンマッピング
+const iconMapping: Record<string, LucideIcon> = {
+  'Temperature Records': ThermometerSnowflake,
+  'Equipment Maintenance': Wrench,
+  'Quality Control': ChartLine,
+  'Reagent Management': FlaskRound,
+  // デフォルトアイコン
+  'default': ChartLine
+};
 
-const menuItems = [
-  {
-    title: 'Temperature Records',
-    description: 'Monitor and record temperature data',
-    icon: ThermometerSnowflake,
-    path: '/temperature',
-    color: 'bg-dashboard-pink',
-    tooltip: '温度記録の管理'
-  },
-  {
-    title: 'Equipment Maintenance',
-    description: 'Track and log maintenance tasks',
-    icon: Wrench,
-    path: '/equipment',
-    color: 'bg-dashboard-purple',
-    tooltip: '機器メンテナンス管理'
-  },
-  {
-    title: 'Quality Control',
-    description: 'Manage quality control processes',
-    icon: ChartLine,
-    path: '/quality',
-    color: 'bg-dashboard-pink',
-    tooltip: '品質管理プロセス'
-  },
-  {
-    title: 'Reagent Management',
-    description: 'Track reagent inventory and usage',
-    icon: FlaskRound,
-    path: '/reagent_dash',
-    color: 'bg-dashboard-purple',
-    tooltip: '試薬在庫管理'
-  },
-];
+// パスマッピング
+const pathMapping: Record<string, string> = {
+  'Temperature Records': '/temperature',
+  'Equipment Maintenance': '/equipment',
+  'Quality Control': '/quality',
+  'Reagent Management': '/reagent_dash',
+  // デフォルトパス
+  'default': '/'
+};
+
+// 色のマッピング（交互に色を変える）
+const getCardColor = (index: number): string => {
+  return index % 2 === 0 ? 'bg-dashboard-pink' : 'bg-dashboard-purple';
+};
 
 export default function TaskPickClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user, profile, loading } = useAuth();
+  const [isLoading, setIsLoading] = useState(true);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [cachedTasks, setCachedTasks] = useState<Task[] | null>(null);
+  
   const departmentName = searchParams?.get('department') || 'Department';
   const departmentId = searchParams?.get('departmentId') || '';
-  // サンプル通知
-  const [notifications] = useState<Notification[]>([
-    {
-      id: 1,
-      type: 'warning',
-      message: '温度記録が3日間更新されていません',
-      timestamp: new Date(),
-    },
-    {
-      id: 2,
-      type: 'info',
-      message: '新しい試薬が登録されました',
-      timestamp: new Date(),
+  const currentUserName = profile?.fullname || '';
+
+  // キャッシュからタスクを取得する関数
+  const getCachedTasks = () => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const cachedTasksStr = localStorage.getItem('cached_tasks');
+      const cachedFacilityId = localStorage.getItem('cached_facility_id');
+      
+      // 施設IDが一致する場合のみキャッシュを使用
+      if (cachedTasksStr && cachedFacilityId === profile?.facility_id) {
+        console.log("キャッシュからタスクデータを取得します");
+        return JSON.parse(cachedTasksStr) as Task[];
+      }
+      return null;
+    } catch (error) {
+      console.error("キャッシュからのタスク取得エラー:", error);
+      return null;
     }
-  ]);
+  };
+
+  // タスクをキャッシュに保存する関数
+  const cacheTasks = (tasksToCache: Task[]) => {
+    if (typeof window === 'undefined' || !profile?.facility_id) return;
+    try {
+      localStorage.setItem('cached_tasks', JSON.stringify(tasksToCache));
+      localStorage.setItem('cached_facility_id', profile.facility_id);
+      console.log("タスクデータをキャッシュに保存しました");
+    } catch (error) {
+      console.error("タスクキャッシュ保存エラー:", error);
+    }
+  };
+
+  // 初回マウント時にキャッシュからタスクを取得
+  useEffect(() => {
+    const cached = getCachedTasks();
+    if (cached) {
+      setCachedTasks(cached);
+      // キャッシュがあれば一時的に表示（後で最新データで更新）
+      setTasks(cached);
+      setIsLoading(false);
+    }
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // タスクデータの取得
+  useEffect(() => {
+    let isMounted = true;
+    
+    const fetchTasks = async () => {
+      // 認証情報のロード中は何もしない（別のuseEffectで処理）
+      if (loading) {
+        console.log("認証情報のロード中です。タスクデータの取得を待機します。");
+        return;
+      }
+
+      if (!user) {
+        console.log("ユーザーが認証されていません。ログインページにリダイレクトします。");
+        router.push('/login');
+        return;
+      }
+
+      if (!profile?.facility_id) {
+        console.warn("施設IDが設定されていません。タスクデータを取得できない可能性があります。");
+        if (isMounted) setIsLoading(false);
+        return;
+      }
+
+      try {
+        if (isMounted) setIsLoading(true);
+        console.log("タスクデータの取得を開始します。施設ID:", profile.facility_id);
+
+        // まず、タスクの総数を確認
+        console.log("タスクの総数を確認します...");
+        const { count, error: countError } = await supabase
+          .from('tasks')
+          .select('*', { count: 'exact', head: true })
+          .eq('facility_id', profile.facility_id);
+
+        if (countError) {
+          console.error("タスク数の取得エラー:", countError);
+        } else {
+          console.log("タスクの総数:", count);
+        }
+
+        // タスクデータの取得
+        console.log("Supabaseクエリを実行します...");
+        const { data: tasksData, error: tasksError } = await supabase
+          .from('tasks')
+          .select('id, title, description, created_at, status')
+          .eq('facility_id', profile.facility_id)
+          .order('created_at', { ascending: false });
+
+        if (tasksError) {
+          console.error("タスクデータの取得エラー:", tasksError);
+          console.error("エラーの詳細:", tasksError.message, tasksError.details, tasksError.hint);
+          
+          // エラー発生時にキャッシュがあればそれを使用、なければサンプルタスク
+          if (cachedTasks && cachedTasks.length > 0) {
+            console.log("エラーが発生したため、キャッシュからのタスクデータを使用します");
+            if (isMounted) setTasks(cachedTasks);
+          } else {
+            if (isMounted) setTasks(getSampleTasks());
+          }
+        } else {
+          console.log("取得したタスクデータ:", tasksData);
+          console.log("タスクの総数:", tasksData?.length || 0);
+          
+          // データが空の場合
+          if (!tasksData || tasksData.length === 0) {
+            console.log("タスクデータが見つかりませんでした。");
+            
+            // キャッシュがあればそれを使用、なければサンプルタスク
+            if (cachedTasks && cachedTasks.length > 0) {
+              console.log("キャッシュからのタスクデータを使用します");
+              if (isMounted) setTasks(cachedTasks);
+            } else {
+              console.log("サンプルタスクを使用します");
+              if (isMounted) setTasks(getSampleTasks());
+            }
+          } else {
+            // 取得したデータをキャッシュに保存
+            cacheTasks(tasksData);
+            if (isMounted) setTasks(tasksData);
+          }
+        }
+      } catch (error) {
+        console.error("タスクデータ取得中にエラーが発生しました:", error);
+        // エラーの詳細をログに出力
+        if (error instanceof Error) {
+          console.error("エラーメッセージ:", error.message);
+          console.error("エラースタック:", error.stack);
+        }
+        
+        // エラー発生時にキャッシュがあればそれを使用、なければサンプルタスク
+        if (cachedTasks && cachedTasks.length > 0) {
+          console.log("エラーが発生したため、キャッシュからのタスクデータを使用します");
+          if (isMounted) setTasks(cachedTasks);
+        } else {
+          if (isMounted) setTasks(getSampleTasks());
+        }
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    // 認証情報のロードが完了したらタスクを取得
+    if (!loading) {
+      fetchTasks();
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user, profile, loading, router, cachedTasks]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // サンプルタスクを取得する関数
+  const getSampleTasks = (): Task[] => {
+    return [
+      {
+        id: "sample-1",
+        title: "Temperature Records",
+        description: "温度記録管理",
+        created_at: new Date().toISOString()
+      },
+      {
+        id: "sample-2",
+        title: "Equipment Maintenance",
+        description: "機器メンテナンス",
+        created_at: new Date().toISOString()
+      },
+      {
+        id: "sample-3",
+        title: "Quality Control",
+        description: "品質管理",
+        created_at: new Date().toISOString()
+      },
+      {
+        id: "sample-4",
+        title: "Reagent Management",
+        description: "試薬管理",
+        created_at: new Date().toISOString()
+      }
+    ];
+  };
 
   const handleCardClick = (path: string) => {
     router.push(
@@ -83,52 +246,47 @@ export default function TaskPickClient() {
     );
   };
 
-  return (
-    <TooltipProvider 
-      delayDuration={300}
-      skipDelayDuration={0}
-    >
-      <style jsx global>{`
-        .tooltip-content {
-          background-color: #8167a9 !important;
-          color: white !important;
-          border: 1px solid #8167a9 !important;
-        }
-        .tooltip-content p {
-          color: white !important;
-        }
-      `}</style>
-      <div className="min-h-screen w-full flex flex-col bg-gradient-to-b from-[#fde3f1] to-[#e9ddfc]">
-        {/* 共通ヘッダーコンポーネントを使用 */}
+  // ローディング表示
+  if (isLoading) {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center justify-center bg-gradient-to-b from-[#fde3f1] to-[#e9ddfc]">
         <AppHeader showBackButton={true} />
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-[#8167a9] mx-auto mb-4" />
+          <p className="text-[#8167a9]">データを読み込み中...</p>
+        </div>
+      </div>
+    );
+  }
 
-        {/* 通知欄 */}
-        {notifications.length > 0 && (
-          <div className="w-full px-4 py-3 mt-2">
-            <div className="p-4 border border-yellow-300 bg-yellow-50 rounded-md">
-              <h3 className="text-lg font-semibold text-yellow-800 mb-2 text-left">
-                <AlertTriangle className="inline-block mr-2 h-5 w-5" />
-                通知 ({notifications.length}件)
-              </h3>
-              <div className="max-h-40 overflow-y-auto">
-                <ul className="list-disc pl-5 text-left">
-                  {notifications.map((notification) => (
-                    <li key={`notification-${notification.id}`} className="text-sm text-yellow-700 mb-1">
-                      {notification.message}
-                      <span className="text-xs text-muted-foreground ml-2">
-                        {notification.timestamp.toLocaleString()}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
+  return (
+    <TooltipProvider>
+      <div className="min-h-screen w-full flex flex-col bg-gradient-to-b from-[#fde3f1] to-[#e9ddfc]">
+        <AppHeader showBackButton={true} />
+        
+        <div className="container mx-auto px-4 py-4">
+          {/* 通知エリア */}
+          <div className="mb-6 p-4 border border-yellow-300 bg-yellow-50 rounded-md">
+            <h3 className="text-lg font-semibold text-yellow-800 mb-2 text-left">
+              お知らせ
+            </h3>
+            <p className="text-sm text-yellow-700 text-left">
+              システムメンテナンスを予定しています。詳細は管理者にお問い合わせください。
+            </p>
           </div>
-        )}
-
-        {/* メインコンテンツ */}
-        <div className="flex-grow flex flex-col items-center justify-center py-12 px-4">
-          <div className="max-w-7xl mx-auto">
+          
+          {/* カレントユーザーの氏名表示 */}
+          <div className="mb-4 text-right">
+            {currentUserName && (
+              <p className="text-sm text-gray-600">
+                {currentUserName}さんがログインしています！
+              </p>
+            )}
+          </div>
+        </div>
+        
+        <div className="flex-grow flex flex-col items-center justify-center py-4 px-4">
+          <div className="max-w-7xl mx-auto w-full">
             <div className="text-center mb-10">
               <h1
                 className="titlefont text-4xl font-bold mb-4"
@@ -155,91 +313,105 @@ export default function TaskPickClient() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {menuItems.map((item, index) => (
-                <Tooltip key={item.title}>
-                  <TooltipTrigger asChild>
-                    <motion.div
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.1 }}
-                      onClick={() => handleCardClick(item.path)}
-                      className="cursor-pointer"
-                    >
-                      <Card
-                        className={`relative overflow-hidden group cursor-pointer transition-all duration-300 hover:shadow-lg ${item.color} hover:bg-dashboard-hover`}
-                      >
-                        {/* --- SVG 波形 --- */}
-                        <div className="absolute left-0 w-full pointer-events-none z-0 top-auto bottom-0 h-15">
-                          <svg
-                            className="waves w-full h-auto"
-                            xmlns="http://www.w3.org/2000/svg"
-                            xmlnsXlink="http://www.w3.org/1999/xlink"
-                            viewBox="0 24 150 28"
-                            preserveAspectRatio="none"
-                            shapeRendering="auto"
+            {tasks.length === 0 ? (
+              <div className="text-center py-12 bg-white/80 rounded-lg p-6">
+                <p className="text-gray-600 mb-4">タスクが登録されていません</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {tasks.map((task, index) => {
+                  // タイトルに基づいてアイコンとパスを選択
+                  const IconComponent = iconMapping[task.title] || iconMapping.default;
+                  const path = pathMapping[task.title] || pathMapping.default;
+                  // インデックスに基づいて色を選択
+                  const cardColor = getCardColor(index);
+                  
+                  return (
+                    <Tooltip key={task.id}>
+                      <TooltipTrigger asChild>
+                        <motion.div
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.1 }}
+                          onClick={() => handleCardClick(path)}
+                          className="cursor-pointer"
+                        >
+                          <Card
+                            className={`relative overflow-hidden group cursor-pointer transition-all duration-300 hover:shadow-lg ${cardColor} hover:bg-dashboard-hover`}
                           >
-                            <defs>
-                              <path
-                                id="gentle-wave"
-                                d="M-160 44c30 0 58-18 88-18s58 18 88 18
-                                   58-18 88-18 58 18 88 18 v44h-352z"
-                              />
-                            </defs>
-                            <g className="parallax">
-                              <use
-                                xlinkHref="#gentle-wave"
-                                x="48"
-                                y="0"
-                                fill="rgba(255,255,255,0.7)"
-                              />
-                              <use
-                                xlinkHref="#gentle-wave"
-                                x="48"
-                                y="3"
-                                fill="rgba(255,255,255,0.5)"
-                              />
-                              <use
-                                xlinkHref="#gentle-wave"
-                                x="48"
-                                y="5"
-                                fill="rgba(255,255,255,0.3)"
-                              />
-                              <use
-                                xlinkHref="#gentle-wave"
-                                x="48"
-                                y="7"
-                                fill="#fff"
-                              />
-                            </g>
-                          </svg>
-                        </div>
-                        {/* --- /SVG 波形 --- */}
-
-                        <div className="p-6 flex flex-col items-center text-center gap-4 relative z-10">
-                          <div className="relative">
-                            <div className="w-12 h-12 rounded-full bg-white/80 backdrop-blur-sm flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-                              <item.icon className="w-6 h-6 text-[#8167a9] group-hover:text-pink-500 transition-colors duration-300" />
+                            {/* --- SVG 波形 --- */}
+                            <div className="absolute left-0 w-full pointer-events-none z-0 top-auto bottom-0 h-15">
+                              <svg
+                                className="waves w-full h-auto"
+                                xmlns="http://www.w3.org/2000/svg"
+                                xmlnsXlink="http://www.w3.org/1999/xlink"
+                                viewBox="0 24 150 28"
+                                preserveAspectRatio="none"
+                                shapeRendering="auto"
+                              >
+                                <defs>
+                                  <path
+                                    id="gentle-wave"
+                                    d="M-160 44c30 0 58-18 88-18s58 18 88 18
+                                      58-18 88-18 58 18 88 18 v44h-352z"
+                                  />
+                                </defs>
+                                <g className="parallax">
+                                  <use
+                                    xlinkHref="#gentle-wave"
+                                    x="48"
+                                    y="0"
+                                    fill="rgba(255,255,255,0.7)"
+                                  />
+                                  <use
+                                    xlinkHref="#gentle-wave"
+                                    x="48"
+                                    y="3"
+                                    fill="rgba(255,255,255,0.5)"
+                                  />
+                                  <use
+                                    xlinkHref="#gentle-wave"
+                                    x="48"
+                                    y="5"
+                                    fill="rgba(255,255,255,0.3)"
+                                  />
+                                  <use
+                                    xlinkHref="#gentle-wave"
+                                    x="48"
+                                    y="7"
+                                    fill="#fff"
+                                  />
+                                </g>
+                              </svg>
                             </div>
-                          </div>
-                          <div>
-                            <h3 className="text-lg font-semibold text-[#8167a9] mb-2 group-hover:text-pink-600 transition-colors duration-300">
-                              {item.title}
-                            </h3>
-                            <p className="text-sm text-[#8167a9] group-hover:text-gray-900 transition-colors duration-300">
-                              {item.description}
-                            </p>
-                          </div>
-                        </div>
-                      </Card>
-                    </motion.div>
-                  </TooltipTrigger>
-                  <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
-                    <p style={tooltipTextStyle}>{item.tooltip}</p>
-                  </TooltipContent>
-                </Tooltip>
-              ))}
-            </div>
+                            {/* --- /SVG 波形 --- */}
+
+                            <div className="p-6 flex flex-col items-center text-center gap-4 relative z-10">
+                              <div className="relative">
+                                <div className="w-12 h-12 rounded-full bg-white/80 backdrop-blur-sm flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                                  <IconComponent className="w-6 h-6 text-[#8167a9] group-hover:text-pink-500 transition-colors duration-300" />
+                                </div>
+                              </div>
+                              <div>
+                                <h3 className="text-lg font-semibold text-[#8167a9] mb-2 group-hover:text-pink-600 transition-colors duration-300">
+                                  {task.title}
+                                </h3>
+                                <p className="text-sm text-[#8167a9] group-hover:text-gray-900 transition-colors duration-300">
+                                  {task.description}
+                                </p>
+                              </div>
+                            </div>
+                          </Card>
+                        </motion.div>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{task.title}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>

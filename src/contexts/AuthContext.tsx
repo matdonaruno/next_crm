@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import type { User } from '@supabase/supabase-js';
 
 interface UserProfile {
   id: string;
@@ -10,54 +11,157 @@ interface UserProfile {
   facility_id: string | null;
 }
 
+// エラーの型を定義
+interface ErrorType {
+  message: string;
+  status?: number;
+  [key: string]: unknown;
+}
+
 interface AuthContextType {
-  user: any | null;
+  user: User | null;
   profile: UserProfile | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: any | null }>;
+  signIn: (email: string, password: string) => Promise<{ error: ErrorType | null }>;
   signOut: () => Promise<void>;
-  updateProfile: (data: Partial<UserProfile>) => Promise<{ error: any | null }>;
+  updateProfile: (data: Partial<UserProfile>) => Promise<{ error: ErrorType | null }>;
+  refreshUserData: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// ローカルストレージのキー
+const USER_CACHE_KEY = 'supabase_user';
+const PROFILE_CACHE_KEY = 'user_profile';
+const CACHE_TIMESTAMP_KEY = 'cache_timestamp';
+
+// キャッシュの有効期間（1時間 = 60分 * 60秒 * 1000ミリ秒）
+const CACHE_DURATION = 60 * 60 * 1000;
+
+// ユーザー情報をキャッシュに保存する関数
+const cacheUserData = (user: User, profile: UserProfile | null) => {
+  if (typeof window === 'undefined') return;
+  
+  try {
+    localStorage.setItem(USER_CACHE_KEY, JSON.stringify(user));
+    localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile));
+    localStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
+    console.log('ユーザー情報をキャッシュに保存しました');
+  } catch (error) {
+    console.error('キャッシュ保存エラー:', error);
+  }
+};
+
+// キャッシュからユーザー情報を取得する関数
+const getCachedUserData = () => {
+  if (typeof window === 'undefined') return { user: null, profile: null, isValid: false };
+  
+  try {
+    const timestampStr = localStorage.getItem(CACHE_TIMESTAMP_KEY);
+    if (!timestampStr) return { user: null, profile: null, isValid: false };
+    
+    const timestamp = parseInt(timestampStr, 10);
+    const now = Date.now();
+    const isValid = now - timestamp < CACHE_DURATION;
+    
+    if (!isValid) {
+      // キャッシュが期限切れの場合、削除する
+      localStorage.removeItem(USER_CACHE_KEY);
+      localStorage.removeItem(PROFILE_CACHE_KEY);
+      localStorage.removeItem(CACHE_TIMESTAMP_KEY);
+      console.log('キャッシュが期限切れのため削除しました');
+      return { user: null, profile: null, isValid: false };
+    }
+    
+    const userStr = localStorage.getItem(USER_CACHE_KEY);
+    const profileStr = localStorage.getItem(PROFILE_CACHE_KEY);
+    
+    const user = userStr ? JSON.parse(userStr) as User : null;
+    const profile = profileStr ? JSON.parse(profileStr) as UserProfile : null;
+    
+    console.log('キャッシュからユーザー情報を取得しました');
+    return { user, profile, isValid: true };
+  } catch (error) {
+    console.error('キャッシュ取得エラー:', error);
+    return { user: null, profile: null, isValid: false };
+  }
+};
+
+// キャッシュを削除する関数
+const clearUserCache = () => {
+  if (typeof window === 'undefined') return;
+  
+  try {
+    localStorage.removeItem(USER_CACHE_KEY);
+    localStorage.removeItem(PROFILE_CACHE_KEY);
+    localStorage.removeItem(CACHE_TIMESTAMP_KEY);
+    console.log('ユーザーキャッシュを削除しました');
+  } catch (error) {
+    console.error('キャッシュ削除エラー:', error);
+  }
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<any | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
   // ユーザー情報とプロファイル情報を取得
-  const fetchUserAndProfile = async () => {
+  const fetchUserAndProfile = async (skipCache = false) => {
     try {
-      const { data: { user }, error } = await supabase.auth.getUser();
+      // キャッシュをチェック（skipCacheがtrueの場合はスキップ）
+      if (!skipCache) {
+        const { user: cachedUser, profile: cachedProfile, isValid } = getCachedUserData();
+        if (isValid && cachedUser && cachedProfile) {
+          setUser(cachedUser);
+          setProfile(cachedProfile);
+          setLoading(false);
+          return;
+        }
+      }
+
+      console.log('Supabaseからユーザー情報を取得します');
+      const { data: { user: supabaseUser }, error } = await supabase.auth.getUser();
       
-      if (error || !user) {
+      if (error || !supabaseUser) {
         setUser(null);
         setProfile(null);
+        clearUserCache();
         return;
       }
 
-      setUser(user);
+      setUser(supabaseUser);
 
       // プロファイル情報を取得
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('id, fullname, facility_id')
-        .eq('id', user.id)
+        .eq('id', supabaseUser.id)
         .single();
 
       if (profileError) {
-        console.error('Error fetching profile:', profileError);
+        console.error('プロファイル取得エラー:', profileError);
         setProfile(null);
+        clearUserCache();
       } else {
         setProfile(profileData);
+        // ユーザー情報とプロファイル情報をキャッシュに保存
+        cacheUserData(supabaseUser, profileData);
       }
     } catch (error) {
-      console.error('Error in fetchUserAndProfile:', error);
+      console.error('fetchUserAndProfileでエラー:', error);
+      clearUserCache();
     } finally {
       setLoading(false);
     }
+  };
+
+  // 強制的にユーザーデータを更新する関数
+  const refreshUserData = async () => {
+    setLoading(true);
+    await fetchUserAndProfile(true); // キャッシュをスキップして強制的に更新
+    setLoading(false);
   };
 
   // 初期化時とauth状態変更時にユーザー情報を取得
@@ -67,12 +171,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // auth状態変更のリスナー
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('認証状態変更:', event);
         if (session?.user) {
           setUser(session.user);
-          await fetchUserAndProfile();
+          await fetchUserAndProfile(true); // 認証状態変更時は常に最新データを取得
         } else {
           setUser(null);
           setProfile(null);
+          clearUserCache();
         }
         setLoading(false);
       }
@@ -92,13 +198,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       if (!error) {
-        await fetchUserAndProfile();
+        await fetchUserAndProfile(true); // ログイン時は常に最新データを取得
       }
 
-      return { error };
+      return { error: error as ErrorType | null };
     } catch (error) {
-      console.error('Error signing in:', error);
-      return { error };
+      console.error('ログインエラー:', error);
+      return { error: { message: 'ログイン処理中に予期せぬエラーが発生しました' } };
     }
   };
 
@@ -108,16 +214,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await supabase.auth.signOut();
       setUser(null);
       setProfile(null);
+      clearUserCache();
       router.push('/login');
     } catch (error) {
-      console.error('Error signing out:', error);
+      console.error('ログアウトエラー:', error);
     }
   };
 
   // プロファイル更新処理
   const updateProfile = async (data: Partial<UserProfile>) => {
     try {
-      if (!user) return { error: new Error('User not authenticated') };
+      if (!user) return { error: { message: '認証されていません' } };
 
       const { error } = await supabase
         .from('profiles')
@@ -125,13 +232,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq('id', user.id);
 
       if (!error) {
-        setProfile(prev => prev ? { ...prev, ...data } : null);
+        const updatedProfile = { ...profile, ...data } as UserProfile;
+        setProfile(updatedProfile);
+        // 更新したプロファイル情報をキャッシュに保存
+        cacheUserData(user, updatedProfile);
       }
 
-      return { error };
+      return { error: error as ErrorType | null };
     } catch (error) {
-      console.error('Error updating profile:', error);
-      return { error };
+      console.error('プロファイル更新エラー:', error);
+      return { error: { message: 'プロファイル更新中に予期せぬエラーが発生しました' } };
     }
   };
 
@@ -142,6 +252,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signIn,
     signOut,
     updateProfile,
+    refreshUserData,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

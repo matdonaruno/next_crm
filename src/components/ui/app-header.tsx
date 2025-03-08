@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { User, Home, LogOut, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface AppHeaderProps {
   showBackButton?: boolean;
@@ -18,6 +19,7 @@ const tooltipTextStyle = { color: 'white' };
 
 export function AppHeader({ showBackButton = true, title, onBackClick }: AppHeaderProps) {
   const router = useRouter();
+  const { signOut } = useAuth();
 
   // 前の画面に戻る関数
   const handleGoBack = () => {
@@ -26,6 +28,12 @@ export function AppHeader({ showBackButton = true, title, onBackClick }: AppHead
     } else {
       router.back();
     }
+  };
+
+  // ログアウト処理を実行する関数
+  const handleLogout = async () => {
+    await signOut();
+    // signOut関数内でルーティングを処理するため、ここでは追加のルーティングは不要
   };
 
   return (
@@ -56,7 +64,7 @@ export function AppHeader({ showBackButton = true, title, onBackClick }: AppHead
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" onClick={() => router.push("/user-settings")}>
-                  <User className="h-6 w-6" />
+                  <User className="h-6 w-6 mx-2" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
@@ -70,7 +78,7 @@ export function AppHeader({ showBackButton = true, title, onBackClick }: AppHead
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" onClick={() => router.push("/depart")}>
-                  <Home className="h-6 w-6" />
+                  <Home className="h-6 w-6 mx-2" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
@@ -83,8 +91,8 @@ export function AppHeader({ showBackButton = true, title, onBackClick }: AppHead
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={() => router.push("/login")}>
-                  <LogOut className="h-5 w-5" />
+                <Button variant="ghost" size="icon" onClick={handleLogout}>
+                  <LogOut className="h-5 w-5 mx-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
