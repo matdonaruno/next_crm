@@ -340,6 +340,12 @@ export default function DashboardPage() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 手動更新用の関数を追加
+  const handleManualRefresh = () => {
+    console.log("データを手動で更新します...");
+    fetchAllData();
+  };
+
   // 期限切れ間近（1ヶ月以内）の試薬を検出する関数
   const checkExpiryNotifications = (reagents: Reagent[]) => {
     const today = new Date();
@@ -579,6 +585,19 @@ export default function DashboardPage() {
                 onChange={(e) => setShowEnded(e.target.checked)}
               />
             </div>
+            {/* 更新ボタン */}
+            <button 
+              onClick={handleManualRefresh}
+              className="flex items-center gap-1 px-3 py-1 text-sm bg-white rounded border hover:bg-gray-50"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 2v6h-6"></path>
+                <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+                <path d="M3 22v-6h6"></path>
+                <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+              </svg>
+              更新
+            </button>
           </div>
 
           {/* 期限切れ通知エリア - 左揃えに修正 */}

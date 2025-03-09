@@ -11,6 +11,17 @@ import { useAuth } from '@/contexts/AuthContext';
 import { LucideIcon } from 'lucide-react';
 import { AppHeader } from '@/components/ui/app-header';
 
+// カスタムツールチップスタイル
+const tooltipContentClass = "bg-white text-pink-600";
+const tooltipStyle = { 
+  backgroundColor: 'white', 
+  color: '#db2777', // text-pink-600の色コード
+  border: '1px solid #f9d5e5',
+  boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+  padding: '8px 12px',
+  borderRadius: '6px'
+};
+
 // タスクの型定義
 interface Task {
   id: string;
@@ -25,7 +36,7 @@ const iconMapping: Record<string, LucideIcon> = {
   'Temperature Records': ThermometerSnowflake,
   'Equipment Maintenance': Wrench,
   'Quality Control': ChartLine,
-  'Reagent Management': FlaskRound,
+  'Clinical reagent manager': FlaskRound,
   // デフォルトアイコン
   'default': ChartLine
 };
@@ -35,7 +46,7 @@ const pathMapping: Record<string, string> = {
   'Temperature Records': '/temperature',
   'Equipment Maintenance': '/equipment',
   'Quality Control': '/quality',
-  'Reagent Management': '/reagent_dash',
+  'Clinical reagent manager': '/reagent_dash',
   // デフォルトパス
   'default': '/'
 };
@@ -51,7 +62,6 @@ export default function TaskPickClient() {
   const { user, profile, loading } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [cachedTasks, setCachedTasks] = useState<Task[] | null>(null);
   
   const departmentName = searchParams?.get('department') || 'Department';
   const departmentId = searchParams?.get('departmentId') || '';
@@ -88,23 +98,18 @@ export default function TaskPickClient() {
     }
   };
 
-  // 初回マウント時にキャッシュからタスクを取得
-  useEffect(() => {
-    const cached = getCachedTasks();
-    if (cached) {
-      setCachedTasks(cached);
-      // キャッシュがあれば一時的に表示（後で最新データで更新）
-      setTasks(cached);
-      setIsLoading(false);
-    }
-  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
-
   // タスクデータの取得
   useEffect(() => {
     let isMounted = true;
+    let isDataFetched = false; // データ取得完了フラグを追加
     
     const fetchTasks = async () => {
-      // 認証情報のロード中は何もしない（別のuseEffectで処理）
+      // すでにデータ取得が完了している場合はスキップ
+      if (isDataFetched) {
+        return;
+      }
+      
+      // 認証情報のロード中は何もしない
       if (loading) {
         console.log("認証情報のロード中です。タスクデータの取得を待機します。");
         return;
@@ -122,28 +127,30 @@ export default function TaskPickClient() {
         return;
       }
 
+      // キャッシュチェック（初回のみ）
+      if (!isDataFetched && !isLoading) {
+        const cached = getCachedTasks();
+        if (cached && cached.length > 0) {
+          console.log("キャッシュからタスクデータを表示します（" + cached.length + "件）");
+          if (isMounted) {
+            setTasks(cached);
+            setIsLoading(false);
+            isDataFetched = true;
+            return;
+          }
+        }
+      }
+
       try {
         if (isMounted) setIsLoading(true);
-        console.log("タスクデータの取得を開始します。施設ID:", profile.facility_id);
+        
+        console.log("Supabaseからタスクデータを取得します...");
+        console.log("施設ID:", profile.facility_id);
 
-        // まず、タスクの総数を確認
-        console.log("タスクの総数を確認します...");
-        const { count, error: countError } = await supabase
-          .from('tasks')
-          .select('*', { count: 'exact', head: true })
-          .eq('facility_id', profile.facility_id);
-
-        if (countError) {
-          console.error("タスク数の取得エラー:", countError);
-        } else {
-          console.log("タスクの総数:", count);
-        }
-
-        // タスクデータの取得
-        console.log("Supabaseクエリを実行します...");
+        // 直接tasksテーブルを使用する（tasks_with_usersビューは使わない）
         const { data: tasksData, error: tasksError } = await supabase
           .from('tasks')
-          .select('id, title, description, created_at, status')
+          .select('id, title, description, created_at, status, department_id')
           .eq('facility_id', profile.facility_id)
           .order('created_at', { ascending: false });
 
@@ -151,11 +158,14 @@ export default function TaskPickClient() {
           console.error("タスクデータの取得エラー:", tasksError);
           console.error("エラーの詳細:", tasksError.message, tasksError.details, tasksError.hint);
           
-          // エラー発生時にキャッシュがあればそれを使用、なければサンプルタスク
-          if (cachedTasks && cachedTasks.length > 0) {
+          // エラー発生時にキャッシュがあればそれを使用
+          const cached = getCachedTasks();
+          if (cached && cached.length > 0) {
             console.log("エラーが発生したため、キャッシュからのタスクデータを使用します");
-            if (isMounted) setTasks(cachedTasks);
+            if (isMounted) setTasks(cached);
           } else {
+            // キャッシュもなければサンプルタスク
+            console.log("エラーが発生し、キャッシュもないため、サンプルタスクを使用します");
             if (isMounted) setTasks(getSampleTasks());
           }
         } else {
@@ -166,11 +176,13 @@ export default function TaskPickClient() {
           if (!tasksData || tasksData.length === 0) {
             console.log("タスクデータが見つかりませんでした。");
             
-            // キャッシュがあればそれを使用、なければサンプルタスク
-            if (cachedTasks && cachedTasks.length > 0) {
+            // キャッシュがあればそれを使用
+            const cached = getCachedTasks();
+            if (cached && cached.length > 0) {
               console.log("キャッシュからのタスクデータを使用します");
-              if (isMounted) setTasks(cachedTasks);
+              if (isMounted) setTasks(cached);
             } else {
+              // キャッシュもなければサンプルタスク
               console.log("サンプルタスクを使用します");
               if (isMounted) setTasks(getSampleTasks());
             }
@@ -180,6 +192,9 @@ export default function TaskPickClient() {
             if (isMounted) setTasks(tasksData);
           }
         }
+        
+        // データ取得完了フラグをセット
+        isDataFetched = true;
       } catch (error) {
         console.error("タスクデータ取得中にエラーが発生しました:", error);
         // エラーの詳細をログに出力
@@ -188,27 +203,28 @@ export default function TaskPickClient() {
           console.error("エラースタック:", error.stack);
         }
         
-        // エラー発生時にキャッシュがあればそれを使用、なければサンプルタスク
-        if (cachedTasks && cachedTasks.length > 0) {
-          console.log("エラーが発生したため、キャッシュからのタスクデータを使用します");
-          if (isMounted) setTasks(cachedTasks);
+        // エラー発生時にキャッシュがあればそれを使用
+        const cached = getCachedTasks();
+        if (cached && cached.length > 0) {
+          console.log("例外が発生したため、キャッシュからのタスクデータを使用します");
+          if (isMounted) setTasks(cached);
         } else {
+          // キャッシュもなければサンプルタスク
+          console.log("例外が発生し、キャッシュもないため、サンプルタスクを使用します");
           if (isMounted) setTasks(getSampleTasks());
         }
       } finally {
+        // どのルートでも最終的にローディング状態を解除
         if (isMounted) setIsLoading(false);
       }
     };
 
-    // 認証情報のロードが完了したらタスクを取得
-    if (!loading) {
-      fetchTasks();
-    }
+    fetchTasks();
 
     return () => {
       isMounted = false;
     };
-  }, [user, profile, loading, router, cachedTasks]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user, profile, loading, router]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // サンプルタスクを取得する関数
   const getSampleTasks = (): Task[] => {
@@ -233,7 +249,7 @@ export default function TaskPickClient() {
       },
       {
         id: "sample-4",
-        title: "Reagent Management",
+        title: "Clinical reagent manager",
         description: "試薬管理",
         created_at: new Date().toISOString()
       }
@@ -271,7 +287,7 @@ export default function TaskPickClient() {
               お知らせ
             </h3>
             <p className="text-sm text-yellow-700 text-left">
-              システムメンテナンスを予定しています。詳細は管理者にお問い合わせください。
+              現在、システムメンテナンスを予定しています。詳細は管理者にお問い合わせください。
             </p>
           </div>
           
@@ -404,7 +420,7 @@ export default function TaskPickClient() {
                           </Card>
                         </motion.div>
                       </TooltipTrigger>
-                      <TooltipContent>
+                      <TooltipContent className={tooltipContentClass} style={tooltipStyle}>
                         <p>{task.title}</p>
                       </TooltipContent>
                     </Tooltip>

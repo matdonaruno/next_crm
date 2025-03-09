@@ -22,9 +22,23 @@ const AuthForm = () => {
   // ユーザーが既にログインしている場合はリダイレクト
   useEffect(() => {
     if (!loading && user) {
+      console.log("ユーザーが既にログインしています。リダイレクトします。");
       router.push('/depart');
     }
   }, [user, loading, router]);
+
+  // タイムアウト処理を追加
+  useEffect(() => {
+    // 10秒後にもまだローディング中の場合、強制的にリフレッシュ
+    const timeoutId = setTimeout(() => {
+      if (loading) {
+        console.log("認証処理がタイムアウトしました。ページをリフレッシュします。");
+        window.location.reload();
+      }
+    }, 10000);
+    
+    return () => clearTimeout(timeoutId);
+  }, [loading]);
 
   const handleAuth = async () => {
     try {
@@ -74,16 +88,21 @@ const AuthForm = () => {
         setIsSignUp(false);
       } else {
         // ログインの場合
+        console.log("ログイン処理を開始します...");
         const { error } = await signIn(email, password);
         
         if (error) {
+          console.error("ログインエラー:", error.message);
           setError(error.message);
           return;
         }
 
-        // ログイン成功後、AuthContextのuseEffectでリダイレクトされる
+        console.log("ログイン成功。リダイレクトします...");
+        // 明示的にリダイレクト
+        router.push('/depart');
       }
     } catch (error: unknown) {
+      console.error("認証中に例外が発生:", error);
       if (error instanceof Error) {
         setError(error.message);
       } else {
@@ -97,8 +116,10 @@ const AuthForm = () => {
   // ローディング中はローディング表示
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-100">
-        <p>読み込み中...</p>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-[#fde3f1] to-[#e9ddfc]">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mb-4"></div>
+        <p className="text-gray-700">認証情報を確認中...</p>
+        <p className="text-sm text-gray-500 mt-2">長時間このままの場合は、ページを再読み込みしてください</p>
       </div>
     );
   }
