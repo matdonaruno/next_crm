@@ -85,8 +85,9 @@ export default function ReagentUse() {
       setTimeout(() => {
         router.push("/reagent_dash");
       }, 2000);
-    } catch (err: any) {
-      setError(err.message || "エラーが発生しました");
+    } catch (err: Error | unknown) {
+      const errorMessage = err instanceof Error ? err.message : "エラーが発生しました";
+      setError(errorMessage);
     }
   };
 

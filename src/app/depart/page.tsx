@@ -358,9 +358,12 @@ export default function Home() {
                           block
                           text-white
                           hover:bg-white/10
-                          bg-transparent
+                          ${activeDept === dept.id
+                            ? 'bg-white/20'
+                            : 'bg-transparent'
                           }
                         `}
+                        onClick={() => setActiveDept(dept.id)}
                       >
                         {dept.name}
                       </Link>

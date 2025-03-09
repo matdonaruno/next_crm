@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
-import { supabase } from "@/lib/supabaseClient";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -56,9 +55,9 @@ export default function UserSettings() {
         
         // JSONデータを配列に変換
         const facilitiesArray: Facility[] = Object.entries(data.facilities).map(
-          ([id, facility]: [string, any]) => ({
+          ([id, facility]) => ({
             id,
-            name: facility.name
+            name: (facility as { name: string }).name
           })
         );
         
@@ -144,8 +143,9 @@ export default function UserSettings() {
       } else {
         setMessage("プロファイル情報が更新されました");
       }
-    } catch (err: any) {
-      setError(err.message || "更新中にエラーが発生しました");
+    } catch (err: Error | unknown) {
+      const errorMessage = err instanceof Error ? err.message : "更新中にエラーが発生しました";
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

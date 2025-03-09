@@ -300,7 +300,7 @@ export default function DashboardPage() {
     } finally {
       setIsLoading(false); // ローディング状態を解除
     }
-  }, []); // 依存配列を空にする
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 初回マウント時にのみデータを取得
   useEffect(() => {
@@ -319,7 +319,7 @@ export default function DashboardPage() {
     return () => {
       isMounted = false;
     };
-  }, []); // 依存配列を空にする
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // タブがアクティブになったときのみデータを再取得
   useEffect(() => {
@@ -338,7 +338,7 @@ export default function DashboardPage() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []); // 依存配列を空にする
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 期限切れ間近（1ヶ月以内）の試薬を検出する関数
   const checkExpiryNotifications = (reagents: Reagent[]) => {

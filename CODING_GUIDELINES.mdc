@@ -1,3 +1,8 @@
+---
+description: for crm project
+globs: 
+alwaysApply: false
+---
 # コーディングガイドライン
 
 ## 基本方針
