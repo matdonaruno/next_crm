@@ -103,7 +103,7 @@ export default function DashboardPage() {
     const originalColor = body.style.color;
     
     // このページ用にbodyスタイルを変更
-    body.style.backgroundColor = '#ffffff'; // 白色に変更
+    body.style.backgroundColor = 'white'; // 白色に変更
     body.style.backgroundImage = 'none';
     body.style.color = '#333333';
 
@@ -484,7 +484,7 @@ export default function DashboardPage() {
 
   return (
     <TooltipProvider>
-      <div style={{ backgroundColor: '#ffffff', minHeight: '100vh' }}>
+      <div style={{ backgroundColor: 'white', minHeight: '100vh' }}>
         {/* 共通ヘッダーコンポーネントを使用 */}
         <AppHeader showBackButton={true} title="Clinical reagent manager" />
 
@@ -606,7 +606,9 @@ export default function DashboardPage() {
               <Table className={`w-max min-w-full ${compactMode ? 'text-xs' : ''}`}>
                 <TableHeader>
                   <TableRow className="whitespace-nowrap">
-                    <TableHead className={compactMode ? "w-8" : "w-10"}></TableHead> {/* 展開ボタン用 */}
+                    <TableHead className={compactMode ? "w-8" : "w-10"}>
+                      {/* 展開ボタン用 */}
+                    </TableHead>
                     <TableHead className={compactMode ? "min-w-[150px] max-w-[300px]" : "min-w-[200px] max-w-[400px]"}>試薬名</TableHead>
                     <TableHead className={compactMode ? "min-w-[80px]" : "min-w-[100px]"}>Lot No.</TableHead>
                     <TableHead className={compactMode ? "min-w-[80px]" : "min-w-[100px]"}>規格</TableHead>
