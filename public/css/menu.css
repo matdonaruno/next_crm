@@ -267,7 +267,6 @@ a:hover {
 	width: 5px;
 	height: 0;
 	opacity: 0;
-	background-color: #8167a9;
 	z-index: 1;
     -webkit-transition: all 200ms linear;
     transition: all 200ms linear; 
@@ -330,7 +329,7 @@ body.nav-active .nav:before, body.nav-active .nav:after {
 body.nav-active .nav:before, 
 body.nav-active .nav:after {
   width: 300px;
-  height: calc(100vh - 40px);
+  height: 80vh;
   border-radius: 15px;
 }
 body.nav-active .nav__list-item {

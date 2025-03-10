@@ -243,7 +243,8 @@ export default function DashboardPage() {
       // 試薬アイテムも取得
       fetchReagentItems();
     }
-  }, [profile?.facility_id, getReagentNameByCode, fetchReagentItems]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.facility_id]);
 
   // 期限切れ間近（1ヶ月以内）の試薬を検出する関数
   const checkExpiryNotifications = (reagents: Reagent[]) => {
@@ -286,13 +287,15 @@ export default function DashboardPage() {
     }
   };
 
+  // メインのuseEffect
   useEffect(() => {
     loadReagentMasterData(); // マスターデータを読み込む
     fetchReagents();
     fetchCurrentUserProfile();
-  }, [fetchReagents]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // useEffectの依存配列にfetchReagentsを追加
+  // visibilitychangeイベントのリスナー
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -304,7 +307,8 @@ export default function DashboardPage() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [fetchReagents]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 試薬パッケージの展開・折りたたみを切り替える
   const toggleReagentExpand = (reagentId: number, e: React.MouseEvent) => {

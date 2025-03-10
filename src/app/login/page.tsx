@@ -22,6 +22,7 @@ const AuthForm = () => {
   // ユーザーが既にログインしている場合はリダイレクト
   useEffect(() => {
     if (!loading && user) {
+      console.log("ユーザーは既にログイン済み、リダイレクトします");
       router.push('/depart');
     }
   }, [user, loading, router]);
@@ -74,23 +75,43 @@ const AuthForm = () => {
         setIsSignUp(false);
       } else {
         // ログインの場合
-        const { error } = await signIn(email, password);
+        console.log("ログイン処理を開始します");
+        setAuthLoading(true);
         
-        if (error) {
-          setError(error.message);
-          return;
-        }
+        try {
+          const { error } = await signIn(email, password);
+          
+          if (error) {
+            console.error("ログイン失敗:", error.message);
+            setError(error.message || "ログインに失敗しました");
+            setAuthLoading(false);
+            return;
+          }
 
-        // ログイン成功後、AuthContextのuseEffectでリダイレクトされる
+          console.log("ログイン成功、リダイレクトします");
+          
+          // 明示的にリダイレクト
+          router.push('/depart');
+        } catch (loginError) {
+          console.error("ログイン処理中に例外が発生:", loginError);
+          setError("ログイン処理中にエラーが発生しました");
+          setAuthLoading(false);
+        }
       }
     } catch (error: unknown) {
+      console.error("認証処理中に例外が発生:", error);
       if (error instanceof Error) {
         setError(error.message);
       } else {
         setError("認証中にエラーが発生しました");
       }
-    } finally {
       setAuthLoading(false);
+    } finally {
+      // 新規登録の場合のみここでローディングを終了
+      // ログインの場合はリダイレクト後に終了するため、ここでは終了しない
+      if (isSignUp) {
+        setAuthLoading(false);
+      }
     }
   };
 

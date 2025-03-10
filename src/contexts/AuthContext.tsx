@@ -30,15 +30,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ユーザー情報とプロファイル情報を取得
   const fetchUserAndProfile = async () => {
     try {
+      console.log("ユーザー情報とプロファイル情報の取得を開始");
       const { data: { user }, error } = await supabase.auth.getUser();
       
       if (error || !user) {
+        console.error("ユーザー情報の取得に失敗:", error);
         setUser(null);
         setProfile(null);
         setLoading(false); // エラー時もローディング状態を解除
         return;
       }
 
+      console.log("ユーザー情報を取得:", user.id);
       setUser(user);
 
       // プロファイル情報を取得
@@ -49,14 +52,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .single();
 
       if (profileError) {
-        console.error('Error fetching profile:', profileError);
+        console.error('プロファイル情報の取得に失敗:', profileError);
         setProfile(null);
       } else {
+        console.log("プロファイル情報を取得:", profileData);
         setProfile(profileData);
       }
     } catch (error) {
-      console.error('Error in fetchUserAndProfile:', error);
+      console.error('fetchUserAndProfile内でエラー発生:', error);
     } finally {
+      console.log("ユーザー情報とプロファイル情報の取得を完了");
       setLoading(false); // 常にロード完了時にloadingをfalseに設定
     }
   };
@@ -87,21 +92,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ログイン処理
   const signIn = async (email: string, password: string) => {
     try {
+      console.log("ログイン処理を開始");
       setLoading(true); // ログイン処理開始時にloadingをtrueに設定
-      const { error } = await supabase.auth.signInWithPassword({
+      
+      // 直接fetchUserAndProfileを呼び出さず、認証とプロファイル取得を直接行う
+      console.log("Supabaseで認証を実行");
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
-      if (!error) {
-        await fetchUserAndProfile();
-      } else {
+      if (error) {
+        console.error("ログインエラー:", error.message);
         setLoading(false); // エラー時はloadingをfalseに設定
+        return { error };
       }
 
-      return { error };
+      if (!data || !data.user) {
+        console.error("ユーザーデータが取得できませんでした");
+        setLoading(false);
+        return { error: new Error("ユーザーデータが取得できませんでした") };
+      }
+
+      console.log("ログイン成功、ユーザー情報:", data.user.id);
+      
+      // ユーザー情報を設定
+      setUser(data.user);
+      
+      try {
+        // プロファイル情報を取得
+        console.log("プロファイル情報を取得中...");
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, fullname, facility_id')
+          .eq('id', data.user.id)
+          .single();
+
+        if (profileError) {
+          console.error('プロファイル情報の取得に失敗:', profileError);
+          setProfile(null);
+        } else {
+          console.log("プロファイル情報を取得:", profileData);
+          setProfile(profileData);
+        }
+      } catch (profileError) {
+        console.error("プロファイル取得中にエラー:", profileError);
+        // プロファイル取得に失敗しても認証自体は成功とする
+      }
+      
+      console.log("認証処理完了、loading状態をfalseに設定");
+      setLoading(false);
+      return { error: null };
     } catch (error) {
-      console.error('Error signing in:', error);
+      console.error('ログイン処理中に例外が発生:', error);
       setLoading(false); // 例外発生時もloadingをfalseに設定
       return { error };
     }

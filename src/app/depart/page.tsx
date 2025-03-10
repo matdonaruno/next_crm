@@ -86,7 +86,8 @@ export default function Home() {
         if (cached && cached.length > 0) {
           console.log("エラーが発生したため、キャッシュから部署データを使用します");
           setDepartments(cached);
-          setActiveDept(cached[0].id);
+          // 最初の部署を自動選択しない
+          // setActiveDept(cached[0].id);
         }
         
         setIsLoading(false);
@@ -100,7 +101,6 @@ export default function Home() {
         // 取得したデータをキャッシュに保存
         cacheDepartments(data);
         setDepartments(data);
-        setActiveDept(data[0].id);
       } else {
         console.log("施設IDに一致する部署が見つかりません");
         // バックアップとして、すべての部署を試す
@@ -112,7 +112,6 @@ export default function Home() {
           console.log("すべての部署データを表示します:", allDepts);
           cacheDepartments(allDepts);
           setDepartments(allDepts);
-          setActiveDept(allDepts[0].id);
         }
       }
     } catch (fetchError) {
@@ -123,7 +122,8 @@ export default function Home() {
       if (cached && cached.length > 0) {
         console.log("例外が発生したため、キャッシュから部署データを使用します");
         setDepartments(cached);
-        setActiveDept(cached[0].id);
+        // 最初の部署を自動選択しない
+        // setActiveDept(cached[0].id);
       }
     } finally {
       setIsLoading(false);
@@ -147,7 +147,8 @@ export default function Home() {
         if (cached && cached.length > 0) {
           console.log("タイムアウトのため、キャッシュから部署データを使用します");
           setDepartments(cached);
-          setActiveDept(cached[0].id);
+          // 最初の部署を自動選択しない
+          // setActiveDept(cached[0].id);
         }
         
         setIsLoading(false);
@@ -256,31 +257,48 @@ export default function Home() {
         transition: 'all 0.3s ease-in-out',
       }}>
         <div className="nav__content">
-          <ul className="nav__list">
-            {departments.map((dept) => (
-              <li key={dept.id} className="nav__list-item" style={{
-                padding: '0.5rem 0',
-              }}>
-                <Link
-                  href={`/taskpick?department=${encodeURIComponent(dept.name)}&departmentId=${dept.id}`}
-                  className={`
-                    px-6 py-2 
-                    rounded-lg 
-                    transition-colors
-                    block
-                    text-white
-                    hover:bg-white/10
-                    ${activeDept === dept.id
-                      ? 'bg-white/20'
-                      : ''
-                    }
-                  `}
-                >
-                  {dept.name}
-                </Link>
-              </li>
-            ))}
-          </ul>
+          {/* 部署一覧の見出し */}
+          <div className="text-white text-xl font-bold px-6 py-4 border-b border-white/20">
+            部署一覧 (全{departments.length}件)
+          </div>
+          
+          {/* スクロール可能なリスト */}
+          <div 
+            className="custom-scrollbar"
+            style={{
+              maxHeight: 'calc(100vh - 120px)',
+              overflowY: 'auto',
+              paddingBottom: '2rem',
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'rgba(255, 255, 255, 0.3) rgba(255, 255, 255, 0.1)'
+            }}
+          >
+            <ul className="nav__list">
+              {departments.map((dept) => (
+                <li key={dept.id} className="nav__list-item" style={{
+                  padding: '0.5rem 0',
+                }}>
+                  <Link
+                    href={`/taskpick?department=${encodeURIComponent(dept.name)}&departmentId=${dept.id}`}
+                    className={`
+                      px-6 py-2 
+                      rounded-lg 
+                      transition-colors
+                      block
+                      text-white
+                      hover:bg-white/10
+                      ${activeDept === dept.id
+                        ? 'bg-white/20'
+                        : ''
+                      }
+                    `}
+                  >
+                    {dept.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       </div>
 

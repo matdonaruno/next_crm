@@ -6,6 +6,25 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* カスタムスクロールバースタイル */
+.nav__content div::-webkit-scrollbar {
+  width: 6px;
+}
+
+.nav__content div::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.nav__content div::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 10px;
+}
+
+.nav__content div::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
