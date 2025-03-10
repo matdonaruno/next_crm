@@ -243,7 +243,7 @@ export default function DashboardPage() {
       // 試薬アイテムも取得
       fetchReagentItems();
     }
-  }, [profile?.facility_id, getReagentNameByCode]);
+  }, [profile?.facility_id, getReagentNameByCode, fetchReagentItems]);
 
   // 期限切れ間近（1ヶ月以内）の試薬を検出する関数
   const checkExpiryNotifications = (reagents: Reagent[]) => {
@@ -290,7 +290,7 @@ export default function DashboardPage() {
     loadReagentMasterData(); // マスターデータを読み込む
     fetchReagents();
     fetchCurrentUserProfile();
-  }, []);
+  }, [fetchReagents]);
 
   // useEffectの依存配列にfetchReagentsを追加
   useEffect(() => {

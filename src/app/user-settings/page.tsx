@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
-import { supabase } from "@/lib/supabaseClient";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";

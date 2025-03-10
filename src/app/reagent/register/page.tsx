@@ -205,6 +205,7 @@ export default function ReagentRegistration() {
   useEffect(() => {
     addDebugLog("ページロード完了。カメラを自動起動します。");
     setShowCamera(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 部署一覧取得（supabaseから）
@@ -246,6 +247,7 @@ export default function ReagentRegistration() {
       }
     };
     fetchDepartments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 商品CSV（マスタ）の読み込み
@@ -343,7 +345,8 @@ export default function ReagentRegistration() {
         Quagga.stop();
       };
     }
-  }, [showCamera, manualCaptureMode, addDebugLog, failCount, parseGS1Barcode, stopCamera]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCamera, manualCaptureMode]);
 
   // 高解像度カメラの初期化と停止を管理
   useEffect(() => {

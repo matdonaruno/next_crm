@@ -21,7 +21,6 @@ export default function Home() {
   const [activeDept, setActiveDept] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isMenuActive, setIsMenuActive] = useState(false);
-  const [dataFetchAttempted, setDataFetchAttempted] = useState(false);
   const menuIconRef = useRef<HTMLDivElement>(null);
   
   // 認証とプロファイルチェック
@@ -55,8 +54,6 @@ export default function Home() {
   
   // 部署データの取得
   const fetchDepartments = useCallback(async () => {
-    setDataFetchAttempted(true);
-    
     if (loading) {
       console.log("認証情報のロード中です。部署データの取得を待機します。");
       return;
