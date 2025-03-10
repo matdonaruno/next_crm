@@ -35,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error || !user) {
         setUser(null);
         setProfile(null);
+        setLoading(false); // エラー時もローディング状態を解除
         return;
       }
 
@@ -56,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('Error in fetchUserAndProfile:', error);
     } finally {
-      setLoading(false);
+      setLoading(false); // 常にロード完了時にloadingをfalseに設定
     }
   };
 
@@ -86,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ログイン処理
   const signIn = async (email: string, password: string) => {
     try {
+      setLoading(true); // ログイン処理開始時にloadingをtrueに設定
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -93,11 +95,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!error) {
         await fetchUserAndProfile();
+      } else {
+        setLoading(false); // エラー時はloadingをfalseに設定
       }
 
       return { error };
     } catch (error) {
       console.error('Error signing in:', error);
+      setLoading(false); // 例外発生時もloadingをfalseに設定
       return { error };
     }
   };

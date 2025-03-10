@@ -11,8 +11,12 @@ export default function Home() {
         <center>
           <div className="text-2xl font-bold">Labo Logbook</div>
           <div className="mt-20">
-            <Link href="/login" className="px-6 py-3 text-lg font-medium bg-opacity-80 bg-white backdrop-filter backdrop-blur-sm border-2 text-pink-700 rounded-md hover:bg-gray-200 hover:bg-opacity-90 hover:text-pink-800 transition-all font-sans" role="button">
-            &nbsp;Login&nbsp;
+            <Link 
+              href="/login" 
+              className="px-6 py-3 text-lg font-medium border-2 border-white text-white rounded-lg hover:bg-white/20 transition-all font-sans" 
+              role="button"
+            >
+              &nbsp;Login&nbsp;
             </Link>
           </div>
         </center>

@@ -1,11 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient'; 
 import { useAuth } from '@/contexts/AuthContext';
 import { AppHeader } from '@/components/ui/app-header';
+import { cacheDepartments, getCachedDepartments } from '@/lib/departmentCache';
 
 interface Department {
     id: string;
@@ -20,6 +21,7 @@ export default function Home() {
   const [activeDept, setActiveDept] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isMenuActive, setIsMenuActive] = useState(false);
+  const [dataFetchAttempted, setDataFetchAttempted] = useState(false);
   const menuIconRef = useRef<HTMLDivElement>(null);
   
   // 認証とプロファイルチェック
@@ -52,35 +54,111 @@ export default function Home() {
   }, [user, profile, loading, router]);
   
   // 部署データの取得
-  useEffect(() => {
-    const fetchDepartmentsData = async () => {
-      // 認証状態のロードが完了していない場合や、プロファイルがない場合は処理しない
-      if (loading || !profile?.facility_id) return;
-
-      try {
-        // 施設IDに基づいて部署を取得
-        const { data, error } = await supabase
-          .from("departments")
-          .select('*')
-          .eq('facility_id', profile.facility_id);
-          
-        if (error) {
-          console.error("Error fetching departments:", error);
-        } else if (data) {
-          setDepartments(data);
-          if (data.length > 0) {
-            setActiveDept(data[0].id);
-          }
+  const fetchDepartments = useCallback(async () => {
+    setDataFetchAttempted(true);
+    
+    if (loading) {
+      console.log("認証情報のロード中です。部署データの取得を待機します。");
+      return;
+    }
+    
+    if (!profile?.facility_id) {
+      console.log("施設IDが設定されていません。部署データを取得できません。");
+      setIsLoading(false);
+      return;
+    }
+    
+    try {
+      console.log("部署データ取得を開始します");
+      
+      // 施設IDの前後の空白を削除
+      const cleanFacilityId = profile.facility_id.trim();
+      console.log("クリーニングした施設ID:", cleanFacilityId);
+      
+      // 施設IDに基づいて部署を取得（直接クエリ）
+      const { data, error } = await supabase
+        .from("departments")
+        .select('*')
+        .eq('facility_id', cleanFacilityId);
+        
+      if (error) {
+        console.error("部署データの取得エラー:", error);
+        
+        // エラー時にキャッシュデータを使用
+        const cached = getCachedDepartments();
+        if (cached && cached.length > 0) {
+          console.log("エラーが発生したため、キャッシュから部署データを使用します");
+          setDepartments(cached);
+          setActiveDept(cached[0].id);
         }
-      } catch (error) {
-        console.error("部署データ取得エラー:", error);
-      } finally {
+        
+        setIsLoading(false);
+        return;
+      }
+      
+      console.log("取得した部署データ:", data);
+      console.log("部署の総数:", data?.length || 0);
+      
+      if (data && data.length > 0) {
+        // 取得したデータをキャッシュに保存
+        cacheDepartments(data);
+        setDepartments(data);
+        setActiveDept(data[0].id);
+      } else {
+        console.log("施設IDに一致する部署が見つかりません");
+        // バックアップとして、すべての部署を試す
+        const { data: allDepts, error: allError } = await supabase
+          .from("departments")
+          .select('*');
+          
+        if (!allError && allDepts && allDepts.length > 0) {
+          console.log("すべての部署データを表示します:", allDepts);
+          cacheDepartments(allDepts);
+          setDepartments(allDepts);
+          setActiveDept(allDepts[0].id);
+        }
+      }
+    } catch (fetchError) {
+      console.error("部署データ取得中に例外が発生しました:", fetchError);
+      
+      // 例外発生時にキャッシュデータを使用
+      const cached = getCachedDepartments();
+      if (cached && cached.length > 0) {
+        console.log("例外が発生したため、キャッシュから部署データを使用します");
+        setDepartments(cached);
+        setActiveDept(cached[0].id);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [loading, profile, setIsLoading]);
+
+  // 部署データ取得の実行
+  useEffect(() => {
+    fetchDepartments();
+  }, [fetchDepartments]);
+  
+  // タイムアウト処理を追加
+  useEffect(() => {
+    // 最大5秒後にはロード状態を解除し、キャッシュを確認
+    const timeoutId = setTimeout(() => {
+      if (isLoading) {
+        console.log("部署データ取得がタイムアウトしました。強制的にロード状態を解除します。");
+        
+        // タイムアウト時にキャッシュデータを使用
+        const cached = getCachedDepartments();
+        if (cached && cached.length > 0) {
+          console.log("タイムアウトのため、キャッシュから部署データを使用します");
+          setDepartments(cached);
+          setActiveDept(cached[0].id);
+        }
+        
         setIsLoading(false);
       }
-    };
-
-    fetchDepartmentsData();
-  }, [profile?.facility_id, loading]);
+    }, 5000); // 5秒でタイムアウト
+    
+    return () => clearTimeout(timeoutId);
+  }, [isLoading]);
   
   // ハンバーガーメニューの開閉ロジック
   useEffect(() => {

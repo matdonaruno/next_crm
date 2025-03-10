@@ -112,63 +112,70 @@ const AuthForm = () => {
             {isSignUp ? "アカウントを作成してサービスを利用開始" : "既存のアカウントでログイン"}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email">メールアドレス</Label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="pl-10"
-              />
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          handleAuth();
+        }}>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">メールアドレス</Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="pl-10"
+                  required
+                />
+              </div>
             </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">パスワード</Label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="pl-10"
-              />
+            <div className="space-y-2">
+              <Label htmlFor="password">パスワード</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="pl-10"
+                  required
+                />
+              </div>
             </div>
-          </div>
-          {error && (
-            <div className="p-3 bg-red-50 border border-red-300 rounded-md">
-              <p className="text-sm text-red-700">{error}</p>
-            </div>
-          )}
-        </CardContent>
-        <CardFooter className="flex flex-col space-y-4">
-          <Button 
-            onClick={handleAuth} 
-            className="w-full"
-            disabled={authLoading || !email || !password}
-          >
-            {authLoading ? "処理中..." : isSignUp ? "新規登録" : "ログイン"}
-            {!authLoading && <ArrowRight className="ml-2 h-4 w-4" />}
-          </Button>
-          <p className="text-sm text-center text-gray-600">
-            {isSignUp ? "既にアカウントをお持ちですか？ " : "アカウントをお持ちでないですか？ "}
-            <span
-              onClick={() => {
-                setIsSignUp(!isSignUp);
-                setError("");
-              }}
-              className="text-primary cursor-pointer hover:underline"
+            {error && (
+              <div className="p-3 bg-red-50 border border-red-300 rounded-md">
+                <p className="text-sm text-red-700">{error}</p>
+              </div>
+            )}
+          </CardContent>
+          <CardFooter className="flex flex-col space-y-4">
+            <Button 
+              type="submit"
+              className="w-full"
+              disabled={authLoading || !email || !password}
             >
-              {isSignUp ? "ログイン" : "新規登録"}
-            </span>
-          </p>
-        </CardFooter>
+              {authLoading ? "処理中..." : isSignUp ? "新規登録" : "ログイン"}
+              {!authLoading && <ArrowRight className="ml-2 h-4 w-4" />}
+            </Button>
+            <p className="text-sm text-center text-gray-600">
+              {isSignUp ? "既にアカウントをお持ちですか？ " : "アカウントをお持ちでないですか？ "}
+              <span
+                onClick={() => {
+                  setIsSignUp(!isSignUp);
+                  setError("");
+                }}
+                className="text-primary cursor-pointer hover:underline"
+              >
+                {isSignUp ? "ログイン" : "新規登録"}
+              </span>
+            </p>
+          </CardFooter>
+        </form>
       </Card>
     </div>
   );

@@ -16,7 +16,10 @@ export function useRequireAuth() {
 
     // 認証されていない場合はログインページにリダイレクト
     if (!user) {
-      router.push("/login");
+      // 現在既にログインページにいる場合はリダイレクトをスキップ
+      if (pathname !== "/login") {
+        router.push("/login");
+      }
       return;
     }
 
@@ -27,13 +30,19 @@ export function useRequireAuth() {
 
     // フルネームが設定されていない場合はユーザー設定ページにリダイレクト
     if (!profile?.fullname) {
-      router.push("/user-settings");
+      // 既にユーザー設定ページにいる場合はリダイレクトをスキップ
+      if (pathname !== "/user-settings") {
+        router.push("/user-settings");
+      }
       return;
     }
 
     // 施設IDが設定されていない場合はユーザー設定ページにリダイレクト
     if (!profile?.facility_id) {
-      router.push("/user-settings");
+      // 既にユーザー設定ページにいる場合はリダイレクトをスキップ
+      if (pathname !== "/user-settings") {
+        router.push("/user-settings");
+      }
       return;
     }
   }, [user, profile, loading, router, pathname]);

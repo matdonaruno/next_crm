@@ -48,28 +48,52 @@ export default function RegisterPage() {
           <CardHeader>
             <CardTitle>アカウント作成</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {error && <p className="text-red-500">{error}</p>}
-            <div>
-              <Label htmlFor="firstName">名</Label>
-              <Input id="firstName" {...register("firstName", { required: true })} placeholder="名" />
-            </div>
-            <div>
-              <Label htmlFor="lastName">姓</Label>
-              <Input id="lastName" {...register("lastName", { required: true })} placeholder="姓" />
-            </div>
-            <div>
-              <Label htmlFor="email">メールアドレス</Label>
-              <Input id="email" type="email" {...register("email", { required: true })} placeholder="you@example.com" />
-            </div>
-            <div>
-              <Label htmlFor="password">パスワード</Label>
-              <Input id="password" type="password" {...register("password", { required: true })} placeholder="••••••••" />
-            </div>
-          </CardContent>
-          <CardFooter>
-            <Button onClick={handleSubmit(onSubmit)} className="w-full">登録</Button>
-          </CardFooter>
+          <form onSubmit={handleSubmit(onSubmit)}>
+            <CardContent className="space-y-4">
+              {error && <p className="text-red-500">{error}</p>}
+              <div>
+                <Label htmlFor="firstName">名</Label>
+                <Input 
+                  id="firstName" 
+                  {...register("firstName", { required: true })} 
+                  placeholder="名"
+                  required 
+                />
+              </div>
+              <div>
+                <Label htmlFor="lastName">姓</Label>
+                <Input 
+                  id="lastName" 
+                  {...register("lastName", { required: true })} 
+                  placeholder="姓"
+                  required 
+                />
+              </div>
+              <div>
+                <Label htmlFor="email">メールアドレス</Label>
+                <Input 
+                  id="email" 
+                  type="email" 
+                  {...register("email", { required: true })} 
+                  placeholder="you@example.com"
+                  required 
+                />
+              </div>
+              <div>
+                <Label htmlFor="password">パスワード</Label>
+                <Input 
+                  id="password" 
+                  type="password" 
+                  {...register("password", { required: true })} 
+                  placeholder="••••••••"
+                  required 
+                />
+              </div>
+            </CardContent>
+            <CardFooter>
+              <Button type="submit" className="w-full">登録</Button>
+            </CardFooter>
+          </form>
         </Card>
       </div>
     </div>

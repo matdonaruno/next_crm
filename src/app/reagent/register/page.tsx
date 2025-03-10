@@ -205,7 +205,7 @@ export default function ReagentRegistration() {
   useEffect(() => {
     addDebugLog("ページロード完了。カメラを自動起動します。");
     setShowCamera(true);
-  }, [addDebugLog]);
+  }, []);
 
   // 部署一覧取得（supabaseから）
   useEffect(() => {
@@ -246,7 +246,7 @@ export default function ReagentRegistration() {
       }
     };
     fetchDepartments();
-  }, [addDebugLog]);
+  }, []);
 
   // 商品CSV（マスタ）の読み込み
   useEffect(() => {
@@ -263,7 +263,7 @@ export default function ReagentRegistration() {
       }
     };
     fetchProducts();
-  }, [addDebugLog]);
+  }, []);
 
   // Quaggaの初期化と実行
   useEffect(() => {
