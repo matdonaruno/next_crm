@@ -1,0 +1,10 @@
+﻿"tablename","policyname","permissive","roles","cmd","qual","with_check"
+"reagents","Users can update reagents from their facility","PERMISSIVE","{public}","UPDATE","(facility_id IN ( SELECT profiles.facility_id
+   FROM profiles
+  WHERE (profiles.id = auth.uid())))","null"
+"reagents","Users can view reagents from their facility","PERMISSIVE","{public}","SELECT","(facility_id = ( SELECT profiles.facility_id
+   FROM profiles
+  WHERE (profiles.id = auth.uid())))","null"
+"reagents","Users can insert reagents for their facility","PERMISSIVE","{public}","INSERT","null","(facility_id IN ( SELECT profiles.facility_id
+   FROM profiles
+  WHERE (profiles.id = auth.uid())))"

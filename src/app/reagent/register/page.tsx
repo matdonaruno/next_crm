@@ -20,6 +20,7 @@ import { useRequireAuth } from "@/hooks/useRequireAuth";
 import NextImage from "next/image";
 // 新しいバーコードスキャナーコンポーネントをインポート
 import BarcodeScanner from "@/components/BarcodeScanner";
+import { useToast } from "@/hooks/use-toast";
 
 type FormValues = {
   department: string;
@@ -43,6 +44,7 @@ export default function ReagentRegistration() {
   const [error, setError] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [showCamera, setShowCamera] = useState<boolean>(true); // 初期値をtrueに戻す
+  const { toast } = useToast(); // トースト通知を使用
   
   // 部署一覧、商品CSV、バーコード読み取り状況
   const [departments, setDepartments] = useState<{id: string, name: string}[]>([]);
@@ -386,21 +388,52 @@ export default function ReagentRegistration() {
     }
   };
 
+  // 試薬名フィールドのフォーカスが外れたときの処理
+  const handleReagentNameBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    // 必要に応じて実装
+  };
+
   // 次へボタン
   const handleNext = () => {
+    addDebugLog("登録ボタンがクリックされました");
     const formValues = getValues();
-    if (!formValues.department || !formValues.reagentName || !formValues.lotNo || !formValues.expirationDate) {
-      setError("必須項目を入力してください");
+    addDebugLog("フォーム値チェック: " + JSON.stringify(formValues));
+    
+    // 必須項目のチェック
+    const missingFields = [];
+    if (!formValues.department) missingFields.push("部署");
+    if (!formValues.reagentName) missingFields.push("試薬名");
+    if (!formValues.lotNo) missingFields.push("ロット番号");
+    if (!formValues.expirationDate) missingFields.push("有効期限");
+    
+    if (missingFields.length > 0) {
+      const errorMsg = `以下の必須項目を入力してください: ${missingFields.join(", ")}`;
+      addDebugLog("バリデーションエラー: " + errorMsg);
+      setError(errorMsg);
       return;
     }
     
+    addDebugLog("バリデーション成功、登録処理を開始します");
     // 試薬登録処理へ
     registerReagent(false);
   };
 
-  // 試薬名フィールドのフォーカスが外れたときの処理
-  const handleReagentNameBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    // 必要に応じて実装
+  // 登録成功時の処理
+  const handleRegistrationSuccess = (message: string) => {
+    // 成功メッセージをトーストで表示
+    toast({
+      title: "登録完了",
+      description: message,
+      duration: 3000,
+    });
+    
+    // デバッグログに記録
+    addDebugLog("登録成功: " + message);
+    
+    // 少し待ってからリダイレクト
+    setTimeout(() => {
+      router.push("/reagent_dash");
+    }, 1500);
   };
 
   // 試薬登録処理
@@ -410,70 +443,132 @@ export default function ReagentRegistration() {
       setError("");
       
       const formValues = getValues();
+      addDebugLog("フォーム値: " + JSON.stringify(formValues));
       
       // ユーザー情報取得
+      addDebugLog("ユーザー情報取得開始");
       const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) {
+      if (!userData?.user?.id) {
+        addDebugLog("ユーザーIDが取得できません");
         setError("ユーザー情報の取得に失敗しました");
         return;
       }
+      addDebugLog("ユーザー情報取得成功: " + userData.user.id);
       
-      // 試薬データ作成
+      // ユーザーのプロファイルから施設IDを取得
+      addDebugLog("ユーザープロファイル取得開始");
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("facility_id")
+        .eq("id", userData.user.id)
+        .single();
+        
+      if (profileError || !profileData) {
+        addDebugLog("プロファイル取得エラー: " + JSON.stringify(profileError));
+        setError("ユーザープロファイルの取得に失敗しました");
+        return;
+      }
+      
+      if (!profileData.facility_id) {
+        addDebugLog("ユーザーに施設IDが設定されていません");
+        setError("ユーザーに施設が設定されていません。管理者に連絡してください。");
+        return;
+      }
+      
+      addDebugLog("ユーザー施設ID: " + profileData.facility_id);
+      
+      // 試薬データ作成（カラム名の大文字小文字に注意）
       const reagentData = {
         department: formValues.department,
         name: formValues.reagentName,
         specification: formValues.specification || "",
-        lotNo: formValues.lotNo,
-        expirationDate: formValues.expirationDate,
-        registrationDate: new Date().toISOString(),
-        registeredBy: userData.user.id,
+        "lotNo": formValues.lotNo, // 大文字小文字を正確に
+        "expirationDate": formValues.expirationDate, // 大文字小文字を正確に
+        "registrationDate": new Date().toISOString(), // 大文字小文字を正確に
+        "registeredBy": userData.user.id, // 大文字小文字を正確に
         used: startUsage,
-        used_at: startUsage ? new Date().toISOString() : null,
-        used_by: startUsage ? userData.user.id : null,
+        "used_at": startUsage ? new Date().toISOString() : null,
+        "used_by": startUsage ? userData.user.id : null,
+        unit: "", // 単位（空文字で登録）
+        facility_id: profileData.facility_id, // ユーザープロファイルから取得した施設ID
       };
+      addDebugLog("試薬データ作成: " + JSON.stringify(reagentData));
       
       // Supabaseに登録
-      const { data, error } = await supabase
-        .from("reagents")
-        .insert(reagentData)
-        .select();
+      addDebugLog("Supabase登録開始");
+      try {
+        // 通常のクライアントを使用
+        addDebugLog("通常のクライアントで登録を試みます");
+        const insertResult = await supabase
+          .from("reagents")
+          .insert(reagentData)
+          .select();
         
-      if (error) {
-        console.error("Error inserting reagent:", error);
-        setError("試薬の登録に失敗しました: " + error.message);
-        return;
-      }
-      
-      addDebugLog("試薬登録成功: ID=" + data[0].id);
-      
-      // 使用開始の場合は使用履歴も登録
-      if (startUsage && data && data[0]) {
-        const usageData = {
-          reagent_id: data[0].id,
-          usagestartdate: new Date().toISOString(),
-          user: userData.user.id,
-        };
+        const { data, error } = insertResult;
         
-        const { error: usageError } = await supabase
-          .from("reagent_items")
-          .insert(usageData);
+        addDebugLog("Supabase登録レスポンス受信");
           
-        if (usageError) {
-          console.error("Error inserting usage:", usageError);
-          setError("使用履歴の登録に失敗しました: " + usageError.message);
+        if (error) {
+          console.error("Error inserting reagent:", error);
+          addDebugLog("試薬登録エラー: " + JSON.stringify(error));
+          setError("試薬の登録に失敗しました: " + error.message);
           return;
         }
         
-        addDebugLog("使用履歴登録成功");
+        if (!data || data.length === 0) {
+          addDebugLog("試薬登録失敗: データが返されませんでした");
+          setError("試薬の登録に失敗しました: データが返されませんでした");
+          return;
+        }
+        
+        addDebugLog("試薬登録成功: ID=" + data[0].id);
+        
+        // 使用開始の場合は使用履歴も登録
+        if (startUsage && data && data[0]) {
+          addDebugLog("使用履歴登録開始");
+          const usageData = {
+            reagent_id: data[0].id,
+            usagestartdate: new Date().toISOString(),
+            user: userData.user.id,
+            // ユーザープロファイルから取得した施設ID
+            facility_id: profileData.facility_id,
+          };
+          
+          addDebugLog("使用履歴データ: " + JSON.stringify(usageData));
+          
+          // 通常のクライアントを使用
+          const usageResult = await supabase
+            .from("reagent_items")
+            .insert(usageData);
+          
+          const { error: usageError } = usageResult;
+          
+          if (usageError) {
+            console.error("Error inserting usage:", usageError);
+            addDebugLog("使用履歴登録エラー: " + JSON.stringify(usageError));
+            setError("使用履歴の登録に失敗しました: " + usageError.message);
+            return;
+          }
+          
+          addDebugLog("使用履歴登録成功");
+          // 使用開始で登録成功
+          handleRegistrationSuccess("試薬を登録し、使用を開始しました");
+        } else {
+          // 通常登録成功
+          handleRegistrationSuccess("試薬を登録しました");
+        }
+      } catch (insertError) {
+        console.error("Error during Supabase insert:", insertError);
+        addDebugLog("Supabase挿入中のエラー: " + JSON.stringify(insertError));
+        setError("データベース操作中にエラーが発生しました");
       }
-      
-      // 登録成功後、ダッシュボードに戻る
-      router.push("/reagent_dash");
     } catch (err) {
       console.error("Error in registerReagent:", err);
+      addDebugLog("予期せぬエラー: " + JSON.stringify(err));
       setError("予期せぬエラーが発生しました");
     } finally {
       setIsSubmitting(false);
+      addDebugLog("登録処理完了");
     }
   };
 
@@ -494,12 +589,57 @@ export default function ReagentRegistration() {
         </Button>
       </div>
 
+      {/* バーコードスキャナー */}
+      {showCamera && (
+        <div className="mb-6">
+          <BarcodeScanner 
+            onBarcodeDetected={handleBarcodeDetected}
+            onError={handleScanError}
+            onClose={() => setShowCamera(false)}
+          />
+        </div>
+      )}
+
+      {/* デバッグログ表示 */}
+      {process.env.NODE_ENV === "development" && (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>デバッグログ</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="bg-gray-100 p-4 rounded h-40 overflow-y-auto">
+              {debugLogs.map((log, index) => (
+                <div key={index} className="text-xs font-mono">
+                  {log}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {error && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md text-red-600">
+          {error}
+        </div>
+      )}
+
       <Card className="mb-6">
         <CardHeader>
           <CardTitle>試薬情報入力</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
+            <div className="flex justify-center mb-4">
+              <Button
+                type="button"
+                onClick={handleBarcodeScan}
+                className="w-full md:w-auto"
+              >
+                バーコードスキャン
+              </Button>
+            </div>
+
             <div>
               <Label htmlFor="department">部署 *</Label>
               <select
@@ -578,28 +718,6 @@ export default function ReagentRegistration() {
                 <p className="text-red-500 text-sm mt-1">有効期限を入力してください</p>
               )}
             </div>
-
-            {error && <p className="text-red-500">{error}</p>}
-
-            <div className="flex justify-center">
-              <Button
-                type="button"
-                onClick={handleBarcodeScan}
-                className="w-full md:w-auto"
-              >
-                バーコードスキャン
-              </Button>
-            </div>
-
-            {showCamera && (
-              <div className="mt-4">
-                <BarcodeScanner 
-                  onBarcodeDetected={handleBarcodeDetected}
-                  onError={handleScanError}
-                  onClose={() => setShowCamera(false)}
-                />
-              </div>
-            )}
           </div>
         </CardContent>
         <CardFooter className="flex justify-between">
@@ -626,24 +744,6 @@ export default function ReagentRegistration() {
           </div>
         </CardFooter>
       </Card>
-
-      {/* デバッグログ表示（開発時のみ表示） */}
-      {process.env.NODE_ENV === "development" && (
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>デバッグログ</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="bg-gray-100 p-4 rounded h-40 overflow-y-auto">
-              {debugLogs.map((log, index) => (
-                <div key={index} className="text-xs font-mono">
-                  {log}
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }
