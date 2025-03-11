@@ -30,61 +30,155 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ユーザー情報とプロファイル情報を取得
   const fetchUserAndProfile = async () => {
     try {
-      console.log("ユーザー情報とプロファイル情報の取得を開始");
+      console.log("fetchUserAndProfile: ユーザー情報とプロファイル情報の取得を開始");
       const { data: { user }, error } = await supabase.auth.getUser();
       
+      console.log("fetchUserAndProfile: supabase.auth.getUser の結果:", { user: user?.id || 'なし', error: error?.message || 'なし' });
+      
       if (error || !user) {
-        console.error("ユーザー情報の取得に失敗:", error);
+        console.error("fetchUserAndProfile: ユーザー情報の取得に失敗:", error);
         setUser(null);
         setProfile(null);
         setLoading(false); // エラー時もローディング状態を解除
         return;
       }
 
-      console.log("ユーザー情報を取得:", user.id);
+      console.log("fetchUserAndProfile: ユーザー情報を取得:", user.id);
       setUser(user);
 
       // プロファイル情報を取得
+      console.log("fetchUserAndProfile: プロファイル情報の取得を開始:", user.id);
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('id, fullname, facility_id')
         .eq('id', user.id)
         .single();
 
+      console.log("fetchUserAndProfile: プロファイル取得結果:", { 
+        profileData: profileData ? JSON.stringify(profileData) : 'なし', 
+        profileError: profileError?.message || 'なし' 
+      });
+
       if (profileError) {
-        console.error('プロファイル情報の取得に失敗:', profileError);
+        console.error('fetchUserAndProfile: プロファイル情報の取得に失敗:', profileError);
         setProfile(null);
       } else {
-        console.log("プロファイル情報を取得:", profileData);
+        console.log("fetchUserAndProfile: プロファイル情報を取得:", profileData);
         setProfile(profileData);
       }
     } catch (error) {
-      console.error('fetchUserAndProfile内でエラー発生:', error);
+      console.error('fetchUserAndProfile: 例外が発生:', error);
     } finally {
-      console.log("ユーザー情報とプロファイル情報の取得を完了");
+      console.log("fetchUserAndProfile: ユーザー情報とプロファイル情報の取得を完了, loading=false に設定");
       setLoading(false); // 常にロード完了時にloadingをfalseに設定
     }
   };
 
   // 初期化時とauth状態変更時にユーザー情報を取得
   useEffect(() => {
-    fetchUserAndProfile();
-
-    // auth状態変更のリスナー
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (session?.user) {
-          setUser(session.user);
-          await fetchUserAndProfile();
+    console.log("AuthContext: 初期化処理を開始");
+    
+    // セッション管理を一元化した初期化処理
+    const initializeAuth = async () => {
+      try {
+        console.log("AuthContext: セッションの初期化を開始");
+        
+        // 明示的にセッションを取得
+        const { data, error } = await supabase.auth.getSession();
+        
+        console.log("AuthContext: セッション初期化結果:", { 
+          hasSession: !!data.session, 
+          userId: data.session?.user?.id || "なし",
+          error: error?.message || "なし" 
+        });
+        
+        if (error) {
+          console.error("AuthContext: セッション取得エラー:", error);
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
+          return;
+        }
+        
+        if (data.session && data.session.user) {
+          console.log("AuthContext: 有効なセッションを検出:", data.session.user.id);
+          setUser(data.session.user);
+          
+          // プロファイル情報を取得
+          console.log("AuthContext: プロファイル情報の取得を開始:", data.session.user.id);
+          const { data: profileData, error: profileError } = await supabase
+            .from('profiles')
+            .select('id, fullname, facility_id')
+            .eq('id', data.session.user.id)
+            .single();
+          
+          console.log("AuthContext: プロファイル取得結果:", { 
+            profileData: profileData ? JSON.stringify(profileData) : 'なし', 
+            profileError: profileError?.message || 'なし' 
+          });
+          
+          if (profileError) {
+            console.error('AuthContext: プロファイル情報の取得に失敗:', profileError);
+            setProfile(null);
+          } else {
+            console.log("AuthContext: プロファイル情報を取得:", profileData);
+            setProfile(profileData);
+          }
         } else {
+          console.log("AuthContext: 有効なセッションなし");
           setUser(null);
           setProfile(null);
         }
+      } catch (e) {
+        console.error("AuthContext: 認証初期化エラー:", e);
+        setUser(null);
+        setProfile(null);
+      } finally {
+        console.log("AuthContext: 初期化処理完了");
+        setLoading(false);
+      }
+    };
+    
+    // 初期化処理を実行
+    initializeAuth();
+    
+    // 認証状態変更のリスナー
+    console.log("AuthContext: 認証状態変更リスナーを設定");
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log("AuthContext: 認証状態変更イベント:", event, "セッション:", session?.user?.id || 'なし');
+        
+        if (session?.user) {
+          console.log("AuthContext: 認証状態変更 - ユーザーあり:", session.user.id);
+          setUser(session.user);
+          
+          // プロファイル情報を取得
+          console.log("AuthContext: 状態変更後のプロファイル情報取得:", session.user.id);
+          const { data: profileData, error: profileError } = await supabase
+            .from('profiles')
+            .select('id, fullname, facility_id')
+            .eq('id', session.user.id)
+            .single();
+          
+          if (profileError) {
+            console.error('AuthContext: 状態変更後のプロファイル取得失敗:', profileError);
+            setProfile(null);
+          } else {
+            console.log("AuthContext: 状態変更後のプロファイル取得成功:", profileData);
+            setProfile(profileData);
+          }
+        } else {
+          console.log("AuthContext: 認証状態変更 - ユーザーなし");
+          setUser(null);
+          setProfile(null);
+        }
+        
         setLoading(false);
       }
     );
 
     return () => {
+      console.log("AuthContext: クリーンアップ - リスナー解除");
       subscription.unsubscribe();
     };
   }, []);
@@ -92,59 +186,70 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ログイン処理
   const signIn = async (email: string, password: string) => {
     try {
-      console.log("ログイン処理を開始");
+      console.log("signIn: ログイン処理を開始:", email);
       setLoading(true); // ログイン処理開始時にloadingをtrueに設定
       
       // 直接fetchUserAndProfileを呼び出さず、認証とプロファイル取得を直接行う
-      console.log("Supabaseで認証を実行");
+      console.log("signIn: Supabaseで認証を実行");
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
+      console.log("signIn: 認証結果:", { 
+        success: !!data?.user, 
+        userId: data?.user?.id || 'なし', 
+        error: error?.message || 'なし' 
+      });
+
       if (error) {
-        console.error("ログインエラー:", error.message);
+        console.error("signIn: ログインエラー:", error.message);
         setLoading(false); // エラー時はloadingをfalseに設定
         return { error };
       }
 
       if (!data || !data.user) {
-        console.error("ユーザーデータが取得できませんでした");
+        console.error("signIn: ユーザーデータが取得できませんでした");
         setLoading(false);
         return { error: new Error("ユーザーデータが取得できませんでした") };
       }
 
-      console.log("ログイン成功、ユーザー情報:", data.user.id);
+      console.log("signIn: ログイン成功、ユーザー情報:", data.user.id);
       
       // ユーザー情報を設定
       setUser(data.user);
       
       try {
         // プロファイル情報を取得
-        console.log("プロファイル情報を取得中...");
+        console.log("signIn: プロファイル情報を取得中...", data.user.id);
         const { data: profileData, error: profileError } = await supabase
           .from('profiles')
           .select('id, fullname, facility_id')
           .eq('id', data.user.id)
           .single();
 
+        console.log("signIn: プロファイル取得結果:", { 
+          profileData: profileData ? JSON.stringify(profileData) : 'なし', 
+          profileError: profileError?.message || 'なし' 
+        });
+
         if (profileError) {
-          console.error('プロファイル情報の取得に失敗:', profileError);
+          console.error('signIn: プロファイル情報の取得に失敗:', profileError);
           setProfile(null);
         } else {
-          console.log("プロファイル情報を取得:", profileData);
+          console.log("signIn: プロファイル情報を取得:", profileData);
           setProfile(profileData);
         }
       } catch (profileError) {
-        console.error("プロファイル取得中にエラー:", profileError);
+        console.error("signIn: プロファイル取得中にエラー:", profileError);
         // プロファイル取得に失敗しても認証自体は成功とする
       }
       
-      console.log("認証処理完了、loading状態をfalseに設定");
+      console.log("signIn: 認証処理完了、loading状態をfalseに設定");
       setLoading(false);
       return { error: null };
     } catch (error) {
-      console.error('ログイン処理中に例外が発生:', error);
+      console.error('signIn: ログイン処理中に例外が発生:', error);
       setLoading(false); // 例外発生時もloadingをfalseに設定
       return { error };
     }

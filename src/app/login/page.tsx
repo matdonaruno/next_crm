@@ -18,105 +18,86 @@ const AuthForm = () => {
   const [password, setPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [error, setError] = useState("");
+  const [redirecting, setRedirecting] = useState(false);
+
+  // デバッグ用：状態変更を監視
+  useEffect(() => {
+    console.log("LoginPage: 状態変更", { 
+      user: user?.id || 'なし', 
+      loading, 
+      authLoading, 
+      error: error || 'なし',
+      redirecting
+    });
+  }, [user, loading, authLoading, error, redirecting]);
 
   // ユーザーが既にログインしている場合はリダイレクト
   useEffect(() => {
-    if (!loading && user) {
-      console.log("ユーザーは既にログイン済み、リダイレクトします");
-      router.push('/depart');
+    console.log("LoginPage: ユーザー状態チェック", { 
+      loading, 
+      user: user?.id || 'なし',
+      redirecting
+    });
+    
+    if (!loading && user && !redirecting) {
+      console.log("LoginPage: ユーザーは既にログイン済み、リダイレクト準備中", user.id);
+      setRedirecting(true);
+      
+      // リダイレクト前に少し遅延を入れる（認証状態が完全に確立されるのを待つ）
+      setTimeout(() => {
+        console.log("LoginPage: /departへリダイレクト実行", user.id);
+        router.push('/depart');
+      }, 500); // 遅延を短縮
     }
-  }, [user, loading, router]);
+  }, [user, loading, router, redirecting]);
 
   const handleAuth = async () => {
-    try {
-      setError("");
-      setAuthLoading(true);
+    setError("");
+    setAuthLoading(true);
 
+    try {
       if (isSignUp) {
-        // 新規登録の場合
-        const { error } = await supabase.auth.signUp({ 
-          email, 
+        // サインアップ処理
+        const { data, error } = await supabase.auth.signUp({
+          email,
           password,
-          options: {
-            data: {
-              // 初期プロファイル情報
-              fullname: null,
-              facility_id: null
-            }
-          }
         });
-        
+
         if (error) {
           setError(error.message);
-          return;
+        } else {
+          // サインアップ成功
+          setError("確認メールを送信しました。メールを確認してアカウントを有効化してください。");
         }
-
-        // 新規登録後、プロファイルテーブルにレコードを作成
-        const { data: authData } = await supabase.auth.getUser();
-        if (authData.user) {
-          const { error: profileError } = await supabase
-            .from('profiles')
-            .insert([
-              { 
-                id: authData.user.id,
-                fullname: null,
-                facility_id: null
-              }
-            ]);
-          
-          if (profileError) {
-            setError(profileError.message);
-            return;
-          }
-        }
-
-        // 登録成功メッセージ
-        alert("アカウントが作成されました。ログインしてください。");
-        setIsSignUp(false);
       } else {
-        // ログインの場合
-        console.log("ログイン処理を開始します");
-        setAuthLoading(true);
+        // サインイン処理
+        console.log("LoginPage: サインイン処理開始", { email });
+        setRedirecting(true); // サインイン開始時にリダイレクト状態にする
         
-        try {
-          const { error } = await signIn(email, password);
-          
-          if (error) {
-            console.error("ログイン失敗:", error.message);
-            setError(error.message || "ログインに失敗しました");
-            setAuthLoading(false);
-            return;
-          }
+        const { error } = await signIn(email, password);
 
-          console.log("ログイン成功、リダイレクトします");
-          
-          // 明示的にリダイレクト
-          router.push('/depart');
-        } catch (loginError) {
-          console.error("ログイン処理中に例外が発生:", loginError);
-          setError("ログイン処理中にエラーが発生しました");
-          setAuthLoading(false);
+        if (error) {
+          console.error("LoginPage: サインインエラー", error);
+          setError(error.message);
+          setRedirecting(false); // エラー時はリダイレクト状態を解除
+        } else {
+          console.log("LoginPage: サインイン成功、リダイレクト準備中");
+          // 成功時はリダイレクト状態を維持
+          // リダイレクトは上記のuseEffectで処理される
         }
       }
-    } catch (error: unknown) {
-      console.error("認証処理中に例外が発生:", error);
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError("認証中にエラーが発生しました");
-      }
-      setAuthLoading(false);
+    } catch (error: any) {
+      console.error("LoginPage: 認証処理中に例外発生", error);
+      setError(error.message || "認証中にエラーが発生しました");
+      setRedirecting(false); // 例外時はリダイレクト状態を解除
     } finally {
-      // 新規登録の場合のみここでローディングを終了
-      // ログインの場合はリダイレクト後に終了するため、ここでは終了しない
-      if (isSignUp) {
-        setAuthLoading(false);
-      }
+      setAuthLoading(false);
     }
   };
 
   // ローディング中はローディング表示
   if (loading) {
+    console.log("LoginPage: グローバルローディング中...");
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
         <p>読み込み中...</p>
@@ -173,6 +154,17 @@ const AuthForm = () => {
                 <p className="text-sm text-red-700">{error}</p>
               </div>
             )}
+            
+            {/* デバッグ情報 */}
+            <div className="p-3 bg-gray-50 border border-gray-300 rounded-md">
+              <p className="text-xs text-gray-700 font-mono">
+                <strong>デバッグ情報:</strong><br />
+                ユーザー: {user ? user.id : 'なし'}<br />
+                グローバルローディング: {loading ? 'はい' : 'いいえ'}<br />
+                認証ローディング: {authLoading ? 'はい' : 'いいえ'}<br />
+                エラー: {error || 'なし'}
+              </p>
+            </div>
           </CardContent>
           <CardFooter className="flex flex-col space-y-4">
             <Button 

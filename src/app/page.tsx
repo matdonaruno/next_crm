@@ -1,9 +1,101 @@
 // src/app/page.tsx
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function Home() {
+  const router = useRouter();
+  const { user, loading } = useAuth();
+  const [isRedirecting, setIsRedirecting] = useState(false);
+
+  useEffect(() => {
+    const checkAuthAndRedirect = async () => {
+      console.log("Home: 認証状態チェック", { 
+        userId: user?.id || 'なし', 
+        loading, 
+        isRedirecting,
+        timestamp: new Date().toISOString()
+      });
+      
+      // すでにリダイレクト中なら処理しない
+      if (isRedirecting) {
+        console.log("Home: すでにリダイレクト中のため処理をスキップ");
+        return;
+      }
+      
+      // ロード中は何もしない
+      if (loading) {
+        console.log("Home: 認証情報ロード中のため処理を延期");
+        return;
+      }
+      
+      // ユーザーが認証済みの場合、departページに直接リダイレクト
+      if (user) {
+        console.log("Home: 認証済みユーザーを検出、departページへリダイレクト", user.id);
+        setIsRedirecting(true);
+        
+        // 明示的にリダイレクト処理を実行
+        try {
+          router.push('/depart');
+          console.log("Home: リダイレクト処理を実行 (/depart)");
+        } catch (e) {
+          console.error("Home: リダイレクト中にエラー発生:", e);
+          setIsRedirecting(false); // エラー時はリダイレクトフラグをリセット
+        }
+        return;
+      }
+      
+      // セッションを明示的に確認（念のため）
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        
+        console.log("Home: セッション確認結果", { 
+          hasSession: !!data.session, 
+          userId: data.session?.user?.id || "なし",
+          error: error?.message || "なし",
+          timestamp: new Date().toISOString()
+        });
+        
+        if (data.session?.user) {
+          console.log("Home: 有効なセッションを検出、departページへリダイレクト", data.session.user.id);
+          setIsRedirecting(true);
+          
+          // 明示的にリダイレクト処理を実行
+          try {
+            router.push('/depart');
+            console.log("Home: リダイレクト処理を実行 (/depart)");
+          } catch (e) {
+            console.error("Home: リダイレクト中にエラー発生:", e);
+            setIsRedirecting(false); // エラー時はリダイレクトフラグをリセット
+          }
+        } else {
+          console.log("Home: 有効なセッションがないため、ログインページを表示");
+        }
+      } catch (e) {
+        console.error("Home: セッション確認中にエラー", e);
+      }
+    };
+    
+    checkAuthAndRedirect();
+  }, [user, loading, router, isRedirecting]);
+
+  // リダイレクト中は何も表示しない（ローディング中の表示を防ぐ）
+  if (loading || isRedirecting) {
+    return (
+      <div className="w-full min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-2xl font-bold mb-4">Labo Logbook</div>
+          <div className="text-gray-600">読み込み中...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // 未認証の場合のみホームページを表示
   return (
     <div className="header w-full min-h-screen relative">
       {/* ヘッダー内ロゴ部分 */}
@@ -49,7 +141,7 @@ export default function Home() {
       </div>
       {/* フッターコンテンツ */}
       <div className="content flex">
-        <p>for your saide partner | designed By.Goodkatz</p>
+        <p>© 2024 Labo Logbook</p>
       </div>
     </div>
   );

@@ -74,7 +74,7 @@ const formatDateTime = (timestamp: string | null) => {
 };
 
 export default function DashboardPage() {
-  const { profile } = useAuth();
+  const { profile, user, loading } = useAuth();
   const router = useRouter();
   const [reagents, setReagents] = useState<Reagent[]>([]);
   const [reagentItems, setReagentItems] = useState<ReagentItem[]>([]); // 試薬アイテムの状態を追加
@@ -91,6 +91,10 @@ export default function DashboardPage() {
   const [expiryNotifications, setExpiryNotifications] = useState<Reagent[]>([]);
   // 試薬マスターデータ
   const [reagentMasterData, setReagentMasterData] = useState<Record<string, ReagentMaster>>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [departmentId, setDepartmentId] = useState<string | null>(null);
 
   // 背景色を白色に変更
   useEffect(() => {
@@ -115,15 +119,80 @@ export default function DashboardPage() {
     };
   }, []);
 
+  // メインのuseEffect
+  useEffect(() => {
+    console.log("ReagentDash: メインuseEffect実行", { 
+      hasProfile: !!profile,
+      facilityId: profile?.facility_id || 'なし',
+      isLoading: loading
+    });
+    
+    if (loading) {
+      console.log("ReagentDash: 認証情報ロード中のため、データ取得を延期");
+      return;
+    }
+    
+    if (!profile?.facility_id) {
+      console.log("ReagentDash: 施設IDがないため、データ取得をスキップ");
+      return;
+    }
+    
+    // データ取得前にローディング状態を設定
+    setIsLoading(true);
+    setError(null);
+    
+    console.log("ReagentDash: マスターデータとデータの取得を開始");
+    
+    // 非同期処理を実行
+    const fetchData = async () => {
+      try {
+        // マスターデータを先に読み込む
+        await loadReagentMasterData();
+        
+        // マスターデータ読み込み後に試薬データを取得
+        await fetchReagents();
+        
+        // ユーザープロファイルを取得
+        await fetchCurrentUserProfile();
+        
+        // すべての取得が完了したらローディング状態を解除
+        setIsLoading(false);
+      } catch (err) {
+        console.error("ReagentDash: データ取得中にエラーが発生:", err);
+        setError("データの取得中にエラーが発生しました。");
+        setIsLoading(false);
+      }
+    };
+    
+    fetchData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, profile?.facility_id]);
+
   // 試薬マスターデータをCSVから読み込む
   const loadReagentMasterData = async () => {
     try {
+      console.log("ReagentDash: 試薬マスターデータの読み込みを開始");
       const response = await fetch('/products.csv');
+      
+      if (!response.ok) {
+        console.error('ReagentDash: CSVファイル取得エラー:', response.status, response.statusText);
+        return;
+      }
+      
       const csvText = await response.text();
+      console.log("ReagentDash: CSVデータ取得成功", { 
+        dataLength: csvText.length,
+        firstLine: csvText.split('\n')[0]
+      });
       
       Papa.parse(csvText, {
         header: true,
         complete: (results) => {
+          console.log("ReagentDash: CSV解析完了", { 
+            rowCount: results.data.length,
+            sampleRow: results.data[0]
+          });
+          
           const masterData: Record<string, ReagentMaster> = {};
           results.data.forEach((row: unknown) => {
             const typedRow = row as Record<string, string>;
@@ -137,13 +206,16 @@ export default function DashboardPage() {
             }
           });
           setReagentMasterData(masterData);
+          console.log("ReagentDash: マスターデータ設定完了", { 
+            entryCount: Object.keys(masterData).length 
+          });
         },
         error: (error: Error) => {
-          console.error('CSV解析エラー:', error);
+          console.error('ReagentDash: CSV解析エラー:', error);
         }
       });
     } catch (error: unknown) {
-      console.error('試薬マスターデータの読み込みエラー:', error);
+      console.error('ReagentDash: 試薬マスターデータの読み込みエラー:', error);
     }
   };
 
@@ -159,80 +231,192 @@ export default function DashboardPage() {
     return code; // マスターデータに存在しない場合はコードをそのまま返す
   }, [reagentMasterData]);
 
+  // ユーザーIDからフルネームを取得する関数
+  const getUserFullname = useCallback((userId: string) => {
+    // プロファイル情報からユーザー名を取得
+    try {
+      // ユーザーIDがない場合は空文字を返す
+      if (!userId) return "";
+      
+      console.log("ReagentDash: ユーザー名取得", { userId });
+      
+      // ここでユーザー情報を取得するロジックを実装
+      // 本来はAPIリクエストなどで取得するが、現在はダミーデータを返す
+      return `ユーザー(${userId.substring(0, 8)})`;
+    } catch (err) {
+      console.error("ReagentDash: ユーザー名取得エラー:", err);
+      return "";
+    }
+  }, []);
+
   // 試薬アイテムの取得
   const fetchReagentItems = useCallback(async () => {
-    if (!profile?.facility_id) return;
-
-    const { data, error } = await supabase
-      .from("reagent_items")
-      .select("*")
-      .eq("facility_id", profile.facility_id)
-      .order("created_at", { ascending: false });
-    
-    if (error) {
-      console.error("Error fetching reagent items:", error);
-    } else {
-      // ユーザー情報を取得して試薬アイテムに追加
-      const itemsWithUserInfo = await Promise.all((data || []).map(async (item) => {
-        const updatedItem = { ...item };
-        
-        // 利用者のユーザー情報を取得
-        if (item.user) {
-          const { data: profileData, error: profileError } = await supabase
-            .from("profiles")
-            .select("fullname")
-            .eq("id", item.user)
-            .single();
-            
-          if (!profileError && profileData) {
-            updatedItem.user_fullname = profileData.fullname;
-          }
-        }
-        
-        // 終了者のユーザー情報を取得
-        if (item.ended_by) {
-          const { data: endedByData, error: endedByError } = await supabase
-            .from("profiles")
-            .select("fullname")
-            .eq("id", item.ended_by)
-            .single();
-            
-          if (!endedByError && endedByData) {
-            updatedItem.ended_by_fullname = endedByData.fullname;
-          }
-        }
-        
-        return updatedItem;
-      }));
-      
-      setReagentItems(itemsWithUserInfo);
+    if (!profile?.facility_id) {
+      console.log("ReagentDash: fetchReagentItems - 施設IDがないためスキップ");
+      return;
     }
-  }, [profile?.facility_id]);
+
+    console.log("ReagentDash: 試薬アイテムの取得を開始", { 
+      facilityId: profile.facility_id,
+      timestamp: new Date().toISOString()
+    });
+
+    try {
+      console.log("ReagentDash: 試薬アイテムクエリ実行前", { 
+        facilityId: profile.facility_id,
+        timestamp: new Date().toISOString(),
+        table: "reagent_items"
+      });
+
+      // 明示的にセッションを確認
+      const { data: sessionData } = await supabase.auth.getSession();
+      console.log("ReagentDash: アイテム取得前のセッション確認", {
+        hasSession: !!sessionData.session,
+        userId: sessionData.session?.user?.id || "なし",
+        accessToken: sessionData.session?.access_token ? "あり" : "なし"
+      });
+
+      if (!sessionData.session) {
+        console.error("ReagentDash: セッションが無効です。アイテム取得をスキップします。");
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("reagent_items")
+        .select(`*, reagent_package_id`)
+        .order("created_at", { ascending: false });
+
+      console.log("ReagentDash: 試薬アイテムクエリ実行結果", { 
+        success: !error, 
+        error: error?.message || 'なし',
+        dataReceived: !!data,
+        count: data?.length || 0,
+        timestamp: new Date().toISOString()
+      });
+
+      if (error) {
+        console.error("ReagentDash: 試薬アイテム取得エラー:", error);
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        console.log("ReagentDash: 取得した試薬アイテムデータが空です");
+        setReagentItems([]);
+        return;
+      }
+
+      console.log("ReagentDash: 試薬アイテム取得成功", { 
+        count: data.length,
+        firstItem: data[0] ? JSON.stringify(data[0]).substring(0, 100) + '...' : 'なし'
+      });
+
+      // ユーザー名を設定
+      const itemsWithUserNames = data.map(item => {
+        return {
+          ...item,
+          user_fullname: item.user ? getUserFullname(item.user) : null,
+          ended_by_fullname: item.ended_by ? getUserFullname(item.ended_by) : null
+        };
+      });
+
+      console.log("ReagentDash: 試薬アイテム処理完了", { 
+        processedCount: itemsWithUserNames.length,
+        setStateTimestamp: new Date().toISOString()
+      });
+
+      setReagentItems(itemsWithUserNames);
+    } catch (err) {
+      console.error("ReagentDash: 試薬アイテム取得中に例外が発生:", err);
+      setError("試薬アイテムの取得中にエラーが発生しました");
+    }
+  }, [profile?.facility_id, getUserFullname]);
 
   // 試薬データの取得（profiles との join で各ユーザー情報を取得）
   const fetchReagents = useCallback(async () => {
-    if (!profile?.facility_id) return;
+    if (!profile?.facility_id) {
+      console.log("ReagentDash: fetchReagents - 施設IDがないためスキップ");
+      return;
+    }
 
-    const { data, error } = await supabase
-      .from("reagents")
-      .select(`*, registeredBy (fullname), used_by (fullname), ended_by (fullname)`)
-      .eq("facility_id", profile.facility_id)
-      .order("registrationDate", { ascending: false });
+    console.log("ReagentDash: 試薬データの取得を開始", { 
+      facilityId: profile.facility_id,
+      timestamp: new Date().toISOString()
+    });
 
-    if (error) {
-      console.error("Error fetching reagents:", error);
-    } else {
+    try {
+      // データ取得前のデバッグログ
+      console.log("ReagentDash: Supabaseクエリ実行前", { 
+        facilityId: profile.facility_id,
+        timestamp: new Date().toISOString(),
+        table: "reagents",
+        query: "select * from reagents where facility_id = '" + profile.facility_id + "'"
+      });
+
+      // 明示的にセッションを確認
+      const { data: sessionData } = await supabase.auth.getSession();
+      console.log("ReagentDash: データ取得前のセッション確認", {
+        hasSession: !!sessionData.session,
+        userId: sessionData.session?.user?.id || "なし",
+        accessToken: sessionData.session?.access_token ? "あり" : "なし"
+      });
+
+      if (!sessionData.session) {
+        console.error("ReagentDash: セッションが無効です。データ取得をスキップします。");
+        return;
+      }
+
+      // 明示的にアクセストークンを設定
+      const { data, error } = await supabase
+        .from("reagents")
+        .select(`*, registeredBy (fullname), used_by (fullname), ended_by (fullname)`)
+        .eq("facility_id", profile.facility_id)
+        .order("registrationDate", { ascending: false });
+
+      // クエリ結果のデバッグログ
+      console.log("ReagentDash: Supabaseクエリ実行結果", { 
+        success: !error, 
+        error: error?.message || 'なし',
+        dataReceived: !!data,
+        count: data?.length || 0,
+        timestamp: new Date().toISOString()
+      });
+
+      if (error) {
+        console.error("ReagentDash: 試薬データ取得エラー:", error);
+        setError("試薬データの取得中にエラーが発生しました: " + error.message);
+        return;
+      }
+      
+      // データが空の場合のログ
+      if (!data || data.length === 0) {
+        console.log("ReagentDash: 取得した試薬データが空です");
+        setReagents([]);
+        return;
+      }
+      
+      console.log("ReagentDash: 試薬データ取得成功", { 
+        count: data.length,
+        firstItem: data[0] ? JSON.stringify(data[0]).substring(0, 100) + '...' : 'なし'
+      });
+      
       // 試薬名をマスターデータから取得して設定
       const reagentsWithNames = (data || []).map(reagent => {
         // nameフィールドがコードの場合、マスターデータから名前を取得
         if (reagent.name && reagent.name.match(/^[A-Z0-9-]+$/)) {
+          const masterName = getReagentNameByCode(reagent.name);
+          console.log(`ReagentDash: 試薬名マッピング - コード: ${reagent.name}, マスター名: ${masterName || 'なし'}`);
           return {
             ...reagent,
             originalCode: reagent.name, // 元のコードを保存
-            name: getReagentNameByCode(reagent.name) || reagent.name
+            name: masterName || reagent.name
           };
         }
         return reagent;
+      });
+      
+      console.log("ReagentDash: 試薬データ処理完了", { 
+        processedCount: reagentsWithNames.length,
+        setStateTimestamp: new Date().toISOString()
       });
       
       setReagents(reagentsWithNames);
@@ -242,9 +426,10 @@ export default function DashboardPage() {
       
       // 試薬アイテムも取得
       fetchReagentItems();
+    } catch (err) {
+      console.error("ReagentDash: 試薬データ取得中に例外が発生:", err);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.facility_id]);
+  }, [profile?.facility_id, getReagentNameByCode, fetchReagentItems]);
 
   // 期限切れ間近（1ヶ月以内）の試薬を検出する関数
   const checkExpiryNotifications = (reagents: Reagent[]) => {
@@ -286,14 +471,6 @@ export default function DashboardPage() {
       setCurrentUserName(profileData.fullname);
     }
   };
-
-  // メインのuseEffect
-  useEffect(() => {
-    loadReagentMasterData(); // マスターデータを読み込む
-    fetchReagents();
-    fetchCurrentUserProfile();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // visibilitychangeイベントのリスナー
   useEffect(() => {
@@ -481,6 +658,51 @@ export default function DashboardPage() {
       setAllExpanded(true);
     }
   };
+
+  // セッション確認と復元処理
+  useEffect(() => {
+    const checkAndRestoreSession = async () => {
+      try {
+        console.log("ReagentDash: セッション確認を開始");
+        
+        // 現在のセッションを確認
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        
+        console.log("ReagentDash: セッション確認結果:", { 
+          hasSession: !!sessionData.session,
+          userId: sessionData.session?.user?.id || "なし",
+          error: sessionError?.message || "なし"
+        });
+        
+        if (sessionError) {
+          console.error("ReagentDash: セッション確認エラー:", sessionError);
+          router.push('/login');
+          return;
+        }
+        
+        if (!sessionData.session) {
+          console.log("ReagentDash: セッションなし、ログインページへリダイレクト");
+          router.push('/login');
+          return;
+        }
+        
+        console.log("ReagentDash: 有効なセッションを確認:", sessionData.session.user.id);
+        
+        // ユーザー情報あり
+        if (user) {
+          console.log("ReagentDash: ユーザー情報あり:", user.id);
+        } else {
+          console.log("ReagentDash: ユーザー情報なし、認証コンテキストと不一致");
+        }
+      } catch (e) {
+        console.error("ReagentDash: セッション確認中にエラー発生:", e);
+        router.push('/login');
+      }
+    };
+    
+    // ページロード時にセッション確認を実行
+    checkAndRestoreSession();
+  }, [router, user]);
 
   return (
     <TooltipProvider>

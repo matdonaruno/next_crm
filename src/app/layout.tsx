@@ -6,6 +6,7 @@ import "./globals.css";
 import "/public/css/menu.css"
 import "/public/css/simple-css-waves.css"
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ClientTokenCleaner } from "@/components/ClientTokenCleaner";
 
 // フォント設定
 const geistSans = Geist({
@@ -35,9 +36,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="ja">
+      <head>
+        <link
+          href="https://fonts.googleapis.com/css?family=Montserrat:100,100i,200,200i,300,300i,400,400i,500,500i,600,600i,700,700i,800,800i,900,900i"
+          rel="stylesheet"
+        />
+        <link
+          href="https://fonts.googleapis.com/css?family=Poppins:400,500,600,700,800,900"
+          rel="stylesheet"
+        />
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <AuthProvider>
+          <ClientTokenCleaner />
           {children}
         </AuthProvider>
       </body>
