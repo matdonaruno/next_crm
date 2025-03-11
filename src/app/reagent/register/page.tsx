@@ -279,15 +279,60 @@ export default function ReagentRegistration() {
         const lines = csvText.split('\n');
         const header = lines[0]; // ヘッダー行を保存
         
+        /**
+         * ダミーJANコード採番手法
+         * -----------------------------------------------
+         * 1. プレフィックス: 0999
+         *    - 実在しないJANコードの接頭辞として使用
+         *    - このプレフィックスで始まるコードは架空のJANコードであることを示す
+         * 
+         * 2. シーケンス番号: 10桁の連番
+         *    - 1000000から始まる連番を使用
+         *    - 各商品に一意のコードを割り当てるため
+         * 
+         * 3. チェックディジット: 1桁
+         *    - 実際のJANコードと同様の計算方法でチェックディジットを算出
+         *    - 奇数桁の数字をそのまま、偶数桁の数字を3倍して合計し、
+         *      その合計を10で割った余りを10から引いた値（10の場合は0）
+         * 
+         * 例: 0999 + 1000001 + チェックディジット = 09991000001X
+         * 
+         * 注意: このコードは実在するJANコードと衝突しないように設計されています
+         */
+        // 架空のJANコードのプレフィックス（実在しないJANコードの接頭辞）
+        // 0999で始まるコードは架空のJANコードであることを示す
+        const fakeJanPrefix = "0999"; // 実在しないJANコードのプレフィックス
+        let fakeJanCounter = 1000000; // カウンター（ユニークなコードを生成するため）
+        
         // ヘッダー以外の各行を処理
         const modifiedLines = lines.slice(1).map(line => {
           if (!line.trim()) return line; // 空行はスキップ
           
           const columns = line.split(',');
+          
+          // codeが空の場合、架空のJANコードを生成
+          if (!columns[0] || columns[0].trim() === '') {
+            // 架空のJANコードを生成（14桁）
+            // 0999 + 10桁のシーケンス番号
+            const fakeJanBase = fakeJanPrefix + String(fakeJanCounter++).padStart(10, '0');
+            
+            // チェックディジットを計算（実際のJANコードの計算方法に準拠）
+            let sum = 0;
+            for (let i = 0; i < 13; i++) {
+              const digit = parseInt(fakeJanBase[i]);
+              sum += i % 2 === 0 ? digit : digit * 3;
+            }
+            const checkDigit = (10 - (sum % 10)) % 10;
+            
+            // 架空のJANコードを設定（プレフィックス + カウンター + チェックディジット）
+            columns[0] = fakeJanBase.slice(0, 13) + checkDigit;
+            addDebugLog(`空のcodeに架空のJANコード(0999で始まる)を生成: ${columns[0]}`);
+          }
           // codeが13桁の場合、先頭に0を追加
-          if (columns[0] && columns[0].length === 13) {
+          else if (columns[0] && columns[0].length === 13) {
             columns[0] = '0' + columns[0];
           }
+          
           return columns.join(',');
         });
         
@@ -297,7 +342,7 @@ export default function ReagentRegistration() {
         // 修正したCSVをパース
         const parsed = Papa.parse(modifiedCsvText, { header: true });
         setProducts(parsed.data as Product[]);
-        addDebugLog("商品CSV読み込み成功 - codeフィールドを14桁に変換");
+        addDebugLog("商品CSV読み込み成功 - codeフィールドを14桁に変換、空のcodeに架空のJANコード(0999で始まる)を生成");
       } catch (error) {
         console.error("CSV読み込みエラー", error);
         addDebugLog("CSV読み込みエラー");
