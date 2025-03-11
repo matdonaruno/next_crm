@@ -434,7 +434,7 @@ export default function ReagentRegistration() {
       
       // Supabaseに登録
       const { data, error } = await supabase
-        .from("reagent_packages")
+        .from("reagents")
         .insert(reagentData)
         .select();
         
@@ -449,7 +449,7 @@ export default function ReagentRegistration() {
       // 使用開始の場合は使用履歴も登録
       if (startUsage && data && data[0]) {
         const usageData = {
-          reagent_package_id: data[0].id,
+          reagent_id: data[0].id,
           usagestartdate: new Date().toISOString(),
           user: userData.user.id,
         };

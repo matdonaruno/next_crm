@@ -23,7 +23,7 @@ export default function Home() {
   const [isMenuActive, setIsMenuActive] = useState(false);
   const menuIconRef = useRef<HTMLDivElement>(null);
   
-  // 認証とプロファイルチェック
+  // 認証とプロファイルチェックe
   useEffect(() => {
     const checkAuth = async () => {
       try {

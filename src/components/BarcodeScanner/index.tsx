@@ -7,7 +7,10 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Camera, Image as ImageIcon, RefreshCw } from 'lucide-react';
 import styles from './styles.module.css';
 
-// BarcodeDetectorの型定義
+/**
+ * BarcodeDetector API の型定義
+ * Web標準のBarcodeDetector APIの型定義がないため、独自に定義
+ */
 interface BarcodeDetectorOptions {
   formats: string[];
 }
@@ -21,6 +24,15 @@ interface BarcodeDetectorResult {
 
 interface BarcodeDetector {
   detect(image: ImageBitmapSource): Promise<BarcodeDetectorResult[]>;
+}
+
+// グローバルなWindow型を拡張してBarcodeDetectorを含める
+declare global {
+  interface Window {
+    BarcodeDetector: {
+      new(options?: BarcodeDetectorOptions): BarcodeDetector;
+    };
+  }
 }
 
 // サポートされているバーコードフォーマット
@@ -40,50 +52,78 @@ const BARCODE_FORMATS = [
   'upc_e'
 ];
 
+// カメラ初期化の遅延時間（ミリ秒）
+const CAMERA_INIT_DELAY = 500;
+// バーコード検出の間隔（ミリ秒）
+const DETECTION_INTERVAL = 200;
+
 interface BarcodeScannerProps {
+  /** バーコード検出時のコールバック関数 */
   onBarcodeDetected: (barcode: string, format: string) => void;
+  /** エラー発生時のコールバック関数 */
   onError?: (error: string) => void;
+  /** スキャナーを閉じる際のコールバック関数 */
   onClose?: () => void;
 }
 
+/**
+ * バーコードスキャナーコンポーネント
+ * カメラまたは画像ファイルからバーコードを検出する
+ */
 export default function BarcodeScanner({ 
   onBarcodeDetected, 
   onError,
   onClose 
 }: BarcodeScannerProps) {
+  // DOM参照
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  
+  // 状態管理
   const [isInitializing, setIsInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [isCameraMode, setIsCameraMode] = useState(true);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isBarcodeAPISupported, setIsBarcodeAPISupported] = useState(false);
 
-  // Barcode Detector APIのサポートチェック
+  /**
+   * Barcode Detector APIのサポートチェック
+   */
   useEffect(() => {
-    // @ts-expect-error - BarcodeDetector APIの型定義がないため
     if ('BarcodeDetector' in window) {
       setIsBarcodeAPISupported(true);
       console.log('Barcode Detector API is supported');
     } else {
       setIsBarcodeAPISupported(false);
       console.log('Barcode Detector API is not supported');
-      setError('このブラウザはBarcodeDetector APIをサポートしていません。Chrome/Edgeの最新版をお試しください。');
-      if (onError) onError('このブラウザはBarcodeDetector APIをサポートしていません');
+      const errorMsg = 'このブラウザはBarcodeDetector APIをサポートしていません。Chrome/Edgeの最新版をお試しください。';
+      setError(errorMsg);
+      if (onError) onError(errorMsg);
     }
   }, [onError]);
 
-  // カメラの初期化
+  /**
+   * カメラの初期化
+   */
   const initCamera = useCallback(async () => {
     if (!videoRef.current) return;
     
     try {
       setIsInitializing(true);
       setError(null);
+      
+      // 既存のストリームがあれば停止
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+      
+      // 少し遅延を入れてから初期化
+      await new Promise(resolve => setTimeout(resolve, 300));
       
       // カメラストリームの取得
       const constraints = {
@@ -95,6 +135,14 @@ export default function BarcodeScanner({
       };
       
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      // コンポーネントがアンマウントされていないか確認
+      if (!videoRef.current) {
+        // すでにアンマウントされている場合はストリームを停止
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      
       videoRef.current.srcObject = stream;
       streamRef.current = stream;
       
@@ -107,16 +155,53 @@ export default function BarcodeScanner({
         }
       };
       
-      await videoRef.current.play();
+      // エラーハンドリングを追加
+      videoRef.current.onerror = (e) => {
+        console.error('ビデオ要素エラー:', e);
+        const errorMsg = 'ビデオの初期化中にエラーが発生しました';
+        setError(errorMsg);
+        setIsInitializing(false);
+        if (onError) onError(errorMsg);
+      };
+      
+      try {
+        await videoRef.current.play();
+        console.log('カメラ初期化成功');
+      } catch (playErr: any) {
+        console.error('ビデオ再生エラー:', playErr);
+        
+        // AbortErrorの場合は再試行
+        if (playErr.name === 'AbortError') {
+          console.log('再生が中断されました。再試行します...');
+          setTimeout(() => {
+            if (videoRef.current) {
+              videoRef.current.play()
+                .then(() => console.log('再試行成功'))
+                .catch(retryErr => {
+                  console.error('再試行エラー:', retryErr);
+                  const errorMsg = 'カメラの起動に失敗しました。ページを再読み込みしてください。';
+                  setError(errorMsg);
+                  setIsInitializing(false);
+                  if (onError) onError('カメラの起動に失敗しました');
+                });
+            }
+          }, 500);
+        } else {
+          throw playErr; // その他のエラーは外側のcatchブロックで処理
+        }
+      }
     } catch (err) {
       console.error('カメラ初期化エラー:', err);
-      setError('カメラの起動に失敗しました。カメラへのアクセス許可を確認してください。');
+      const errorMsg = 'カメラの起動に失敗しました。カメラへのアクセス許可を確認してください。';
+      setError(errorMsg);
       setIsInitializing(false);
       if (onError) onError('カメラの起動に失敗しました');
     }
   }, [onError]);
 
-  // カメラの停止
+  /**
+   * カメラの停止
+   */
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
@@ -130,25 +215,43 @@ export default function BarcodeScanner({
     setIsScanning(false);
   }, []);
 
-  // コンポーネントのマウント時にカメラを初期化
+  /**
+   * コンポーネントのマウント時にカメラを初期化
+   */
   useEffect(() => {
+    let mounted = true;
+    
     if (isCameraMode) {
-      initCamera();
+      // コンポーネントがマウントされている場合のみ初期化
+      const startCamera = async () => {
+        // 少し遅延を入れてからカメラを初期化
+        await new Promise(resolve => setTimeout(resolve, CAMERA_INIT_DELAY));
+        if (mounted) {
+          initCamera();
+        }
+      };
+      
+      startCamera();
     }
     
     return () => {
+      mounted = false;
       stopCamera();
     };
   }, [initCamera, stopCamera, isCameraMode]);
 
-  // バーコードスキャンのループ処理
+  /**
+   * バーコードスキャンのループ処理
+   */
   useEffect(() => {
     if (!isBarcodeAPISupported || !isScanning || !videoRef.current || !canvasRef.current) return;
     
     let animationFrameId: number;
     let lastDetectionTime = 0;
-    const DETECTION_INTERVAL = 200; // 検出間隔（ミリ秒）
     
+    /**
+     * バーコードスキャン処理
+     */
     const scanBarcode = async (timestamp: number) => {
       if (timestamp - lastDetectionTime > DETECTION_INTERVAL) {
         lastDetectionTime = timestamp;
@@ -157,14 +260,18 @@ export default function BarcodeScanner({
           // ビデオフレームをキャンバスに描画
           const video = videoRef.current!;
           const canvas = canvasRef.current!;
-          const ctx = canvas.getContext('2d')!;
+          const ctx = canvas.getContext('2d');
+          
+          if (!ctx) {
+            console.error('キャンバスコンテキストの取得に失敗しました');
+            return;
+          }
           
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           
           // バーコード検出
-          // @ts-expect-error - BarcodeDetector APIの型定義がないため
           const barcodeDetector = new window.BarcodeDetector({ formats: BARCODE_FORMATS });
           const barcodes = await barcodeDetector.detect(canvas);
           
@@ -200,10 +307,14 @@ export default function BarcodeScanner({
     };
   }, [isBarcodeAPISupported, isScanning, onBarcodeDetected, stopCamera]);
 
-  // 画像ファイルからバーコードをスキャン
+  /**
+   * 画像ファイルからバーコードをスキャン
+   */
   const scanFromImage = async (imageUrl: string) => {
     if (!isBarcodeAPISupported) {
-      setError('バーコード検出機能が利用できません');
+      const errorMsg = 'バーコード検出機能が利用できません';
+      setError(errorMsg);
+      if (onError) onError(errorMsg);
       return;
     }
     
@@ -214,21 +325,27 @@ export default function BarcodeScanner({
       const img = new Image();
       img.src = imageUrl;
       
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('画像の読み込みに失敗しました'));
       });
       
       // 画像をキャンバスに描画
-      const canvas = canvasRef.current!;
-      const ctx = canvas.getContext('2d')!;
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        throw new Error('キャンバス要素が見つかりません');
+      }
+      
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        throw new Error('キャンバスコンテキストの取得に失敗しました');
+      }
       
       canvas.width = img.width;
       canvas.height = img.height;
       ctx.drawImage(img, 0, 0, img.width, img.height);
       
       // バーコード検出
-      // @ts-expect-error - BarcodeDetector APIの型定義がないため
       const barcodeDetector = new window.BarcodeDetector({ formats: BARCODE_FORMATS });
       const barcodes = await barcodeDetector.detect(canvas);
       
@@ -240,26 +357,32 @@ export default function BarcodeScanner({
         // 検出結果をコールバックで返す
         onBarcodeDetected(barcode.rawValue, barcode.format);
       } else {
-        setError('バーコードが検出できませんでした');
-        if (onError) onError('バーコードが検出できませんでした');
+        const errorMsg = 'バーコードが検出できませんでした';
+        setError(errorMsg);
+        if (onError) onError(errorMsg);
       }
     } catch (err) {
       console.error('画像からのバーコードスキャンエラー:', err);
-      setError('画像の処理中にエラーが発生しました');
-      if (onError) onError('画像の処理中にエラーが発生しました');
+      const errorMsg = '画像の処理中にエラーが発生しました';
+      setError(errorMsg);
+      if (onError) onError(errorMsg);
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // 画像ファイル選択ハンドラ
+  /**
+   * 画像ファイル選択ハンドラ
+   */
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     
     // ファイルがイメージかチェック
     if (!file.type.startsWith('image/')) {
-      setError('画像ファイルを選択してください');
+      const errorMsg = '画像ファイルを選択してください';
+      setError(errorMsg);
+      if (onError) onError(errorMsg);
       return;
     }
     
@@ -271,7 +394,9 @@ export default function BarcodeScanner({
     scanFromImage(imageUrl);
   };
 
-  // 手動でキャプチャ
+  /**
+   * 手動でキャプチャ
+   */
   const handleCaptureImage = () => {
     if (!videoRef.current || !canvasRef.current) return;
     
@@ -279,12 +404,17 @@ export default function BarcodeScanner({
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     
+    if (!ctx) {
+      console.error('キャンバスコンテキストの取得に失敗しました');
+      return;
+    }
+    
     // キャンバスをビデオと同じサイズに設定
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     
     // ビデオフレームをキャンバスに描画
-    ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     
     // キャンバスから画像データを取得
     const imageSrc = canvas.toDataURL('image/jpeg', 1.0);
@@ -297,7 +427,9 @@ export default function BarcodeScanner({
     scanFromImage(imageSrc);
   };
 
-  // モード切替
+  /**
+   * モード切替（カメラ/画像アップロード）
+   */
   const toggleMode = () => {
     setIsCameraMode(!isCameraMode);
     setCapturedImage(null);
@@ -308,7 +440,9 @@ export default function BarcodeScanner({
     }
   };
 
-  // リセット
+  /**
+   * リセット処理
+   */
   const handleReset = () => {
     setCapturedImage(null);
     setError(null);
