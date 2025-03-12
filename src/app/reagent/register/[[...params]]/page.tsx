@@ -18,6 +18,8 @@ import { Home } from "lucide-react";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { useToast } from "@/hooks/use-toast";
 import BarcodeScanner from "@/components/BarcodeScanner";
+import { AppHeader } from "@/components/ui/app-header";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 type FormValues = {
   department: string;
@@ -432,148 +434,174 @@ export default function ReagentRegistration() {
   };
 
   return (
-    <div className="container mx-auto p-4">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">試薬登録</h1>
-        <Button variant="outline" onClick={() => router.push("/reagent_dash")}>
-          <Home className="mr-2 h-4 w-4" />
-          ダッシュボードに戻る
-        </Button>
-      </div>
+    <TooltipProvider>
+      <div className="min-h-screen w-full flex flex-col bg-gradient-to-b from-[#fde3f1] to-[#e9ddfc]">
+        {/* 共通ヘッダーコンポーネントを使用 */}
+        <AppHeader showBackButton={true} title="Clinical reagent manager" />
 
-      {/* バーコードスキャナー */}
-      {showCamera && (
-        <div className="mb-6">
-          <BarcodeScanner 
-            onBarcodeDetected={handleBarcodeDetected}
-            onError={handleScanError}
-            onClose={() => setShowCamera(false)}
-          />
-        </div>
-      )}
-      
-      {/* カメラ操作ボタン */}
-      <div className="mb-6">
-        <Button onClick={toggleCamera}>
-          {showCamera ? "カメラを閉じる" : "バーコードをスキャン"}
-        </Button>
-      </div>
-
-      {/* エラーメッセージ */}
-      {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
-          {error}
-        </div>
-      )}
-
-      {/* 登録フォーム */}
-      <Card>
-        <CardHeader>
-          <CardTitle>試薬情報入力</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* 部署選択 - URLパラメータから自動入力 */}
-            <div className="space-y-2">
-              <Label htmlFor="department">部署 <span className="text-red-500">*</span></Label>
-              <Input
-                id="department"
-                {...register("department")}
-                readOnly={!!departmentName}
-                className={departmentName ? "bg-gray-100" : ""}
-              />
-              <input type="hidden" {...register("departmentId")} />
+        <div className="flex-grow flex flex-col items-center py-8 px-4">
+          <div className="max-w-4xl w-full mx-auto">
+            <div className="text-center mb-8">
+              <h1
+                className="text-4xl font-bold mb-4"
+                style={{ color: '#8167a9' }}
+              >
+                試薬登録
+              </h1>
+              <h2
+                className="text-3xl mb-4"
+                style={{ color: '#8167a9' }}
+              >
+                『{departmentName}』
+              </h2>
+              <p className="text-lg" style={{ color: '#8167a9' }}>
+                Barcode scan select 1D/2D for automatic data entry
+              </p>
             </div>
 
-            {/* JANコード */}
-            <div className="space-y-2">
-              <Label htmlFor="janCode">JANコード</Label>
-              <Input
-                id="janCode"
-                {...register("janCode")}
-                onBlur={handleJanCodeBlur}
-                placeholder="バーコードスキャンまたは手動入力"
-              />
-            </div>
-
-            {/* 試薬名 */}
-            <div className="space-y-2">
-              <Label htmlFor="reagentName">試薬名 <span className="text-red-500">*</span></Label>
-              <Input
-                id="reagentName"
-                {...register("reagentName")}
-                required
-              />
-            </div>
-
-            {/* 規格 */}
-            <div className="space-y-2">
-              <Label htmlFor="specification">規格</Label>
-              <Input
-                id="specification"
-                {...register("specification")}
-                placeholder="必要に応じて入力"
-              />
-            </div>
-
-            {/* 単位 */}
-            <div className="space-y-2">
-              <Label htmlFor="unit">単位</Label>
-              <Input
-                id="unit"
-                {...register("unit")}
-                placeholder="個、箱、キット等"
-              />
-            </div>
-
-            {/* ロット番号 */}
-            <div className="space-y-2">
-              <Label htmlFor="lotNo">ロット番号 <span className="text-red-500">*</span></Label>
-              <Input
-                id="lotNo"
-                {...register("lotNo")}
-                required
-              />
-            </div>
-
-            {/* 有効期限 */}
-            <div className="space-y-2">
-              <Label htmlFor="expirationDate">有効期限 <span className="text-red-500">*</span></Label>
-              <Input
-                id="expirationDate"
-                type="date"
-                {...register("expirationDate")}
-                required
-              />
-            </div>
-
-            {/* 送信ボタン */}
-            <div className="pt-4">
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting ? "登録中..." : "登録する"}
+            {/* バーコードスキャナー */}
+            {showCamera && (
+              <div className="mb-6">
+                <BarcodeScanner 
+                  onBarcodeDetected={handleBarcodeDetected}
+                  onError={handleScanError}
+                  onClose={() => setShowCamera(false)}
+                />
+              </div>
+            )}
+            
+            {/* カメラ操作ボタン */}
+            <div className="mb-6 text-center">
+              <Button 
+                onClick={toggleCamera}
+                className="bg-[#8167a9] hover:bg-[#6a5491] text-white"
+              >
+                {showCamera ? "カメラを閉じる" : "バーコードをスキャン"}
               </Button>
             </div>
-          </form>
-        </CardContent>
-      </Card>
-      
-      {/* デバッグログ表示 (開発環境のみ) */}
-      {process.env.NODE_ENV === "development" && (
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>デバッグログ</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="bg-gray-100 p-4 rounded h-40 overflow-y-auto">
-              {debugLogs.map((log, index) => (
-                <div key={index} className="text-xs font-mono">
-                  {log}
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+
+            {/* エラーメッセージ */}
+            {error && (
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+                {error}
+              </div>
+            )}
+
+            {/* 登録フォーム */}
+            <Card className="shadow-lg border-[#8167a9]/20">
+              <CardHeader className="bg-[#8167a9]/10">
+                <CardTitle className="text-[#8167a9]">試薬情報入力</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <form onSubmit={handleSubmit} className="space-y-6">
+                  {/* 部署選択 - URLパラメータから自動入力 */}
+                  <div className="space-y-2">
+                    <Label htmlFor="department">部署 <span className="text-red-500">*</span></Label>
+                    <Input
+                      id="department"
+                      {...register("department")}
+                      readOnly={!!departmentName}
+                      className={departmentName ? "bg-gray-100" : ""}
+                    />
+                    <input type="hidden" {...register("departmentId")} />
+                  </div>
+
+                  {/* JANコード */}
+                  <div className="space-y-2">
+                    <Label htmlFor="janCode">JANコード</Label>
+                    <Input
+                      id="janCode"
+                      {...register("janCode")}
+                      onBlur={handleJanCodeBlur}
+                      placeholder="バーコードスキャンまたは手動入力"
+                    />
+                  </div>
+
+                  {/* 試薬名 */}
+                  <div className="space-y-2">
+                    <Label htmlFor="reagentName">試薬名 <span className="text-red-500">*</span></Label>
+                    <Input
+                      id="reagentName"
+                      {...register("reagentName")}
+                      required
+                    />
+                  </div>
+
+                  {/* 規格 */}
+                  <div className="space-y-2">
+                    <Label htmlFor="specification">規格</Label>
+                    <Input
+                      id="specification"
+                      {...register("specification")}
+                      placeholder="必要に応じて入力"
+                    />
+                  </div>
+
+                  {/* 単位 */}
+                  <div className="space-y-2">
+                    <Label htmlFor="unit">単位</Label>
+                    <Input
+                      id="unit"
+                      {...register("unit")}
+                      placeholder="個、箱、キット等"
+                    />
+                  </div>
+
+                  {/* ロット番号 */}
+                  <div className="space-y-2">
+                    <Label htmlFor="lotNo">ロット番号 <span className="text-red-500">*</span></Label>
+                    <Input
+                      id="lotNo"
+                      {...register("lotNo")}
+                      required
+                    />
+                  </div>
+
+                  {/* 有効期限 */}
+                  <div className="space-y-2">
+                    <Label htmlFor="expirationDate">有効期限 <span className="text-red-500">*</span></Label>
+                    <Input
+                      id="expirationDate"
+                      type="date"
+                      {...register("expirationDate")}
+                      required
+                    />
+                  </div>
+
+                  {/* 送信ボタン */}
+                  <div className="pt-4">
+                    <Button 
+                      type="submit" 
+                      className="w-full bg-[#8167a9] hover:bg-[#6a5491] text-white" 
+                      disabled={isSubmitting}
+                    >
+                      {isSubmitting ? "登録中..." : "登録する"}
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+            
+            {/* デバッグログ表示 (開発環境のみ) */}
+            {process.env.NODE_ENV === "development" && (
+              <Card className="mt-6 shadow-lg border-[#8167a9]/20">
+                <CardHeader className="bg-[#8167a9]/10">
+                  <CardTitle className="text-[#8167a9]">デバッグログ</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="bg-gray-100 p-4 rounded h-40 overflow-y-auto">
+                    {debugLogs.map((log, index) => (
+                      <div key={index} className="text-xs font-mono">
+                        {log}
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
+      </div>
+    </TooltipProvider>
   );
 } 
