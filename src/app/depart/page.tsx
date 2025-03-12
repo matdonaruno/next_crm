@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppHeader } from '@/components/ui/app-header';
 import { cacheDepartments, getCachedDepartments } from '@/lib/departmentCache';
+import { setupDatabase } from '@/lib/setupDatabase';
 
 interface Department {
     id: string;
@@ -113,6 +114,14 @@ export default function Home() {
     
     try {
       console.log("部署データ取得を開始します");
+      
+      // データベースのセットアップを実行
+      try {
+        console.log("部署データ取得前にデータベースセットアップを実行");
+        await setupDatabase();
+      } catch (setupError) {
+        console.error("データベースセットアップ中にエラーが発生:", setupError);
+      }
       
       // 施設IDの前後の空白を削除
       const cleanFacilityId = profile.facility_id.trim();
