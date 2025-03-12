@@ -94,9 +94,9 @@ export default function ReagentDashboardClient() {
   const [expiryNotifications, setExpiryNotifications] = useState<Reagent[]>([]);
   // 試薬マスターデータ
   const [reagentMasterData, setReagentMasterData] = useState<Record<string, ReagentMaster>>({});
+  // ローディング状態とエラー管理（UIに表示するために使用）
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
 
   // 背景色を白色に変更
   useEffect(() => {
@@ -753,6 +753,19 @@ export default function ReagentDashboardClient() {
               </p>
             )}
           </div>
+
+          {/* ローディング状態とエラー表示 */}
+          {isLoading && (
+            <div className="mb-6 p-4 border border-blue-300 bg-blue-50 rounded-md">
+              <p className="text-blue-700">データを読み込み中です...</p>
+            </div>
+          )}
+          
+          {error && (
+            <div className="mb-6 p-4 border border-red-300 bg-red-50 rounded-md">
+              <p className="text-red-700">{error}</p>
+            </div>
+          )}
 
           {/* 期限切れ通知エリア */}
           {expiryNotifications.length > 0 && (
