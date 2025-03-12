@@ -2,7 +2,6 @@
 
 'use client';
 
-import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "/public/css/menu.css"
@@ -22,17 +21,6 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: 'Labo Logbook',
-  description: '臨床検査現場向け記録管理システム',
-};
-
-export const viewport: Viewport = {
-  width: 'device-width',
-  initialScale: 1,
-  maximumScale: 1,
-};
-
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -41,6 +29,9 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <head>
+        <title>Labo Logbook</title>
+        <meta name="description" content="臨床検査現場向け記録管理システム" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
         <link
           href="https://fonts.googleapis.com/css?family=Montserrat:100,100i,200,200i,300,300i,400,400i,500,500i,600,600i,700,700i,800,800i,900,900i"
           rel="stylesheet"
