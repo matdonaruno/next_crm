@@ -26,11 +26,29 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     detectSessionInUrl: true,
     debug: process.env.NODE_ENV === 'development' // 開発環境のみデバッグ有効
+  },
+  global: {
+    // リクエストのタイムアウト設定を10秒に延長
+    fetch: (url, options) => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒タイムアウト
+      
+      return fetch(url, {
+        ...options,
+        signal: controller.signal
+      }).finally(() => clearTimeout(timeoutId));
+    }
+  },
+  db: {
+    schema: 'public'
   }
 });
 
 // デバッグ用：Supabaseクライアントの初期化確認
-console.log("Supabaseクライアントを初期化しました", { storageKey });
+console.log("Supabaseクライアントを初期化しました", { 
+  storageKey,
+  timeout: "10秒"
+});
 
 // セッションの確認
 if (typeof window !== 'undefined') {

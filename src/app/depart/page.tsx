@@ -118,6 +118,24 @@ export default function Home() {
       const cleanFacilityId = profile.facility_id.trim();
       console.log("クリーニングした施設ID:", cleanFacilityId);
       
+      // まず、すべての部署を取得してみる（デバッグ用）
+      console.log("デバッグ: すべての部署データを取得します");
+      try {
+        const { data: allDepts, error: allError } = await supabase
+          .from("departments")
+          .select('*')
+          .limit(20);
+          
+        if (allError) {
+          console.error("デバッグ: すべての部署データ取得エラー:", allError.message, allError.details, allError.hint);
+        } else {
+          console.log("デバッグ: すべての部署データ取得成功:", allDepts?.length || 0, "件");
+          console.log("デバッグ: 最初の部署データ:", allDepts?.[0] || "なし");
+        }
+      } catch (debugError) {
+        console.error("デバッグ: 部署データ取得中に例外が発生:", debugError);
+      }
+      
       // 施設IDに基づいて部署を取得（直接クエリ）
       console.log("Supabaseクエリを実行: departments.select().eq('facility_id', '" + cleanFacilityId + "')");
       const { data, error } = await supabase
@@ -213,7 +231,7 @@ export default function Home() {
   
   // タイムアウト処理を追加
   useEffect(() => {
-    // 最大3秒後にはロード状態を解除し、キャッシュを確認
+    // 最大10秒後にはロード状態を解除し、キャッシュを確認
     const timeoutId = setTimeout(() => {
       if (isLoading) {
         console.log("部署データ取得がタイムアウトしました。強制的にロード状態を解除します。");
@@ -241,7 +259,7 @@ export default function Home() {
         
         setIsLoading(false);
       }
-    }, 3000); // 3秒でタイムアウト
+    }, 10000); // 10秒でタイムアウト
     
     return () => clearTimeout(timeoutId);
   }, [isLoading]);
