@@ -30,11 +30,15 @@ type FormValues = {
   expirationDate: string;
   // 追加: JANコード欄
   janCode?: string;
+  // 追加: 単位欄
+  unit: string;
 };
 
 interface Product {
   code: string; // JAN/EAN/GTINなど
   name: string;
+  specification: string; // 規格
+  unit: string; // 単位
 }
 
 export default function ReagentRegistration() {
@@ -102,12 +106,21 @@ export default function ReagentRegistration() {
         const product = products.find((p) => p.code === gtin);
         if (product) {
           setValue("reagentName", product.name);
+          setValue("specification", product.specification || "規格未設定");
+          setValue("unit", product.unit || "");
+          setValue("janCode", gtin); // JANコードも設定
           addDebugLog("商品名ルックアップ成功: " + product.name);
+          addDebugLog("規格: " + (product.specification || "規格未設定"));
+          addDebugLog("単位: " + (product.unit || "未設定"));
+          addDebugLog("JANコード設定: " + gtin);
         } else {
           setValue("reagentName", "商品名未設定");
+          setValue("specification", "規格未設定");
+          setValue("unit", "");
+          setValue("janCode", gtin); // JANコードは設定
           addDebugLog("商品名ルックアップ失敗: 該当するコード " + gtin + " が見つかりません");
+          addDebugLog("JANコード設定: " + gtin);
         }
-        setValue("specification", "規格未設定");
         addDebugLog("各フィールドに自動入力完了");
         setShowCamera(false);
         setBarcodeDetected(true);
@@ -142,12 +155,21 @@ export default function ReagentRegistration() {
           const product = products.find((p) => p.code === gtin);
           if (product) {
             setValue("reagentName", product.name);
+            setValue("specification", product.specification || "規格未設定");
+            setValue("unit", product.unit || "");
+            setValue("janCode", gtin); // JANコードも設定
             addDebugLog("商品名ルックアップ成功: " + product.name);
+            addDebugLog("規格: " + (product.specification || "規格未設定"));
+            addDebugLog("単位: " + (product.unit || "未設定"));
+            addDebugLog("JANコード設定: " + gtin);
           } else {
             setValue("reagentName", "商品名未設定");
+            setValue("specification", "規格未設定");
+            setValue("unit", "");
+            setValue("janCode", gtin); // JANコードは設定
             addDebugLog("商品名ルックアップ失敗: 該当するコード " + gtin + " が見つかりません");
+            addDebugLog("JANコード設定: " + gtin);
           }
-          setValue("specification", "規格未設定");
           addDebugLog("各フィールドに自動入力完了");
           setShowCamera(false);
           setBarcodeDetected(true);
@@ -163,7 +185,10 @@ export default function ReagentRegistration() {
             setValue("reagentName", product.name);
             setValue("specification", "規格未設定");
             setValue("janCode", cleanBarcode);
+            setValue("unit", product.unit || "");
             addDebugLog("JANコード一致: " + product.name);
+            addDebugLog("規格: " + (product.specification || "規格未設定"));
+            addDebugLog("単位: " + (product.unit || "未設定"));
             setShowCamera(false);
             setBarcodeDetected(true);
             setError("");
@@ -207,12 +232,21 @@ export default function ReagentRegistration() {
             const product = products.find((p) => p.code === gtin);
             if (product) {
               setValue("reagentName", product.name);
+              setValue("specification", product.specification || "規格未設定");
+              setValue("unit", product.unit || "");
+              setValue("janCode", gtin); // JANコードも設定
               addDebugLog("商品名ルックアップ成功: " + product.name);
+              addDebugLog("規格: " + (product.specification || "規格未設定"));
+              addDebugLog("単位: " + (product.unit || "未設定"));
+              addDebugLog("JANコード設定: " + gtin);
             } else {
               setValue("reagentName", "商品名未設定");
+              setValue("specification", "規格未設定");
+              setValue("unit", "");
+              setValue("janCode", gtin); // JANコードは設定
               addDebugLog("商品名ルックアップ失敗: 該当するコード " + gtin + " が見つかりません");
+              addDebugLog("JANコード設定: " + gtin);
             }
-            setValue("specification", "規格未設定");
             addDebugLog("各フィールドに自動入力完了");
             setShowCamera(false);
             setBarcodeDetected(true);
@@ -382,7 +416,11 @@ export default function ReagentRegistration() {
     const product = products.find((p) => p.code === janCode);
     if (product) {
       setValue("reagentName", product.name);
+      setValue("specification", product.specification || "規格未設定");
+      setValue("unit", product.unit || "");
       addDebugLog("JANコード一致（手動入力）: " + product.name);
+      addDebugLog("規格: " + (product.specification || "規格未設定"));
+      addDebugLog("単位: " + (product.unit || "未設定"));
     } else {
       addDebugLog("JANコード不一致（手動入力）: " + janCode);
     }
@@ -489,7 +527,7 @@ export default function ReagentRegistration() {
         used: startUsage,
         "used_at": startUsage ? new Date().toISOString() : null,
         "used_by": startUsage ? userData.user.id : null,
-        unit: "", // 単位（空文字で登録）
+        unit: formValues.unit || "", // 単位（フォームから取得）
         facility_id: profileData.facility_id, // ユーザープロファイルから取得した施設ID
       };
       addDebugLog("試薬データ作成: " + JSON.stringify(reagentData));
@@ -691,6 +729,16 @@ export default function ReagentRegistration() {
                 type="text"
                 placeholder="規格"
                 {...register("specification")}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="unit">単位</Label>
+              <Input
+                id="unit"
+                type="text"
+                placeholder="単位"
+                {...register("unit")}
               />
             </div>
 
