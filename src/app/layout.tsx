@@ -10,8 +10,6 @@ import "/public/css/simple-css-waves.css"
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ClientTokenCleaner } from "@/components/ClientTokenCleaner";
 import { Toaster } from "@/components/ui/toaster";
-import { useEffect } from 'react';
-import { setupDatabase } from '@/lib/setupDatabase';
 
 // フォント設定
 const geistSans = Geist({
@@ -40,21 +38,6 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // データベースのセットアップを実行
-  useEffect(() => {
-    const initDb = async () => {
-      try {
-        console.log("アプリケーション起動時のデータベースセットアップを開始");
-        const result = await setupDatabase();
-        console.log("データベースセットアップ結果:", result);
-      } catch (error) {
-        console.error("データベースセットアップ中にエラーが発生:", error);
-      }
-    };
-    
-    initDb();
-  }, []);
-
   return (
     <html lang="ja">
       <head>
