@@ -97,6 +97,10 @@ export default function ReagentDashboardClient() {
   // ローディング状態とエラー管理（UIに表示するために使用）
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 読み込み開始時間を追跡するための状態
+  const [loadingStartTime, setLoadingStartTime] = useState<number | null>(null);
+  // 自動リロードのタイマーID
+  const [autoReloadTimerId, setAutoReloadTimerId] = useState<NodeJS.Timeout | null>(null);
 
   // 背景色を白色に変更
   useEffect(() => {
@@ -142,6 +146,8 @@ export default function ReagentDashboardClient() {
     // データ取得前にローディング状態を設定
     setIsLoading(true);
     setError(null);
+    // 読み込み開始時間を記録
+    setLoadingStartTime(Date.now());
     
     console.log("ReagentDash: マスターデータとデータの取得を開始");
     
@@ -159,16 +165,50 @@ export default function ReagentDashboardClient() {
         
         // すべての取得が完了したらローディング状態を解除
         setIsLoading(false);
+        // 読み込み完了したのでタイマーをクリア
+        setLoadingStartTime(null);
+        if (autoReloadTimerId) {
+          clearTimeout(autoReloadTimerId);
+          setAutoReloadTimerId(null);
+        }
       } catch (err) {
         console.error("ReagentDash: データ取得中にエラーが発生:", err);
         setError("データの取得中にエラーが発生しました。");
         setIsLoading(false);
+        // エラー発生時も読み込み時間をリセット
+        setLoadingStartTime(null);
+        if (autoReloadTimerId) {
+          clearTimeout(autoReloadTimerId);
+          setAutoReloadTimerId(null);
+        }
       }
     };
     
     fetchData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, profile?.facility_id]);
+
+  // 自動リロード用のuseEffect
+  useEffect(() => {
+    // 読み込み開始時間が設定されていて、まだローディング中の場合
+    if (loadingStartTime && isLoading) {
+      // 15秒後に自動リロードするタイマーを設定
+      const timerId = setTimeout(() => {
+        console.log("ReagentDash: データ読み込みが長時間かかっているため、ページを自動リロードします");
+        // 現在のURLを取得してリロード
+        window.location.reload();
+      }, 15000); // 15秒後
+
+      setAutoReloadTimerId(timerId);
+
+      // クリーンアップ関数
+      return () => {
+        if (timerId) {
+          clearTimeout(timerId);
+        }
+      };
+    }
+  }, [loadingStartTime, isLoading]);
 
   // 試薬マスターデータをCSVから読み込む
   const loadReagentMasterData = async () => {
@@ -757,13 +797,22 @@ export default function ReagentDashboardClient() {
           {/* ローディング状態とエラー表示 */}
           {isLoading && (
             <div className="mb-6 p-4 border border-blue-300 bg-blue-50 rounded-md">
-              <p className="text-blue-700">データを読み込み中です...</p>
+              <p className="text-blue-700">データを読み込み中です... {loadingStartTime && (
+                <span>（長時間かかる場合は自動的にリロードされます）</span>
+              )}</p>
             </div>
           )}
           
           {error && (
             <div className="mb-6 p-4 border border-red-300 bg-red-50 rounded-md">
               <p className="text-red-700">{error}</p>
+              <Button 
+                onClick={() => window.location.reload()} 
+                className="mt-2 bg-red-600 hover:bg-red-700 text-white"
+                size="sm"
+              >
+                ページをリロード
+              </Button>
             </div>
           )}
 
