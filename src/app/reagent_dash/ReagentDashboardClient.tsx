@@ -880,7 +880,7 @@ export default function ReagentDashboardClient() {
               </Button>
             </div>
             <Button
-              onClick={() => router.push(`/reagent/register?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`)}
+              onClick={() => router.push(`/reagent/register-new?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`)}
               className="bg-[hsl(12,6.5%,15.1%)] hover:bg-[hsl(12,6.5%,10%)] text-white"
             >
               <Plus className="mr-2 h-4 w-4" /> Register Reagent
