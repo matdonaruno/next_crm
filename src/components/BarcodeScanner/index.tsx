@@ -66,6 +66,9 @@ interface BarcodeScannerProps {
   onClose?: () => void;
 }
 
+// バーコードタイプの定義
+type BarcodeType = 'gs1_128' | 'qr_code';
+
 /**
  * バーコードスキャナーコンポーネント
  * カメラまたは画像ファイルからバーコードを検出する
@@ -89,6 +92,19 @@ export default function BarcodeScanner({
   const [isCameraMode, setIsCameraMode] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isBarcodeAPISupported, setIsBarcodeAPISupported] = useState(false);
+  const [barcodeType, setBarcodeType] = useState<BarcodeType>('gs1_128'); // デフォルトはGS1-128
+
+  // 現在のバーコードタイプに基づいてフォーマットを選択
+  const getSelectedFormats = useCallback(() => {
+    switch (barcodeType) {
+      case 'gs1_128':
+        return ['code_128'];
+      case 'qr_code':
+        return ['qr_code'];
+      default:
+        return BARCODE_FORMATS;
+    }
+  }, [barcodeType]);
 
   /**
    * Barcode Detector APIのサポートチェック
@@ -271,8 +287,10 @@ export default function BarcodeScanner({
           canvas.height = video.videoHeight;
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           
-          // バーコード検出
-          const barcodeDetector = new window.BarcodeDetector({ formats: BARCODE_FORMATS });
+          // バーコード検出（選択されたフォーマットのみ）
+          const selectedFormats = getSelectedFormats();
+          console.log(`スキャン中のバーコードタイプ: ${barcodeType}、フォーマット:`, selectedFormats);
+          const barcodeDetector = new window.BarcodeDetector({ formats: selectedFormats });
           const barcodes = await barcodeDetector.detect(canvas);
           
           if (barcodes.length > 0) {
@@ -305,7 +323,7 @@ export default function BarcodeScanner({
         cancelAnimationFrame(animationFrameId);
       }
     };
-  }, [isBarcodeAPISupported, isScanning, onBarcodeDetected, stopCamera]);
+  }, [isBarcodeAPISupported, isScanning, onBarcodeDetected, stopCamera, barcodeType, getSelectedFormats]);
 
   /**
    * 画像ファイルからバーコードをスキャン
@@ -345,8 +363,10 @@ export default function BarcodeScanner({
       canvas.height = img.height;
       ctx.drawImage(img, 0, 0, img.width, img.height);
       
-      // バーコード検出
-      const barcodeDetector = new window.BarcodeDetector({ formats: BARCODE_FORMATS });
+      // バーコード検出（選択されたフォーマットのみ）
+      const selectedFormats = getSelectedFormats();
+      console.log(`画像スキャン中のバーコードタイプ: ${barcodeType}、フォーマット:`, selectedFormats);
+      const barcodeDetector = new window.BarcodeDetector({ formats: selectedFormats });
       const barcodes = await barcodeDetector.detect(canvas);
       
       if (barcodes.length > 0) {
@@ -456,6 +476,18 @@ export default function BarcodeScanner({
     }
   };
 
+  // バーコードタイプを切り替える関数
+  const toggleBarcodeType = () => {
+    setBarcodeType(prevType => prevType === 'gs1_128' ? 'qr_code' : 'gs1_128');
+    setError(null);
+    
+    // リセットして再スキャン
+    if (isCameraMode && isScanning) {
+      // カメラは継続して使用
+      console.log(`バーコードタイプを切り替えました: ${barcodeType === 'gs1_128' ? 'QRコード' : 'GS1-128'}`);
+    }
+  };
+
   return (
     <Card className={styles.scannerContainer}>
       <CardContent className={styles.scannerContent}>
@@ -491,6 +523,15 @@ export default function BarcodeScanner({
         </div>
         
         <div className={styles.controls}>
+          {/* バーコードタイプ切り替えボタン */}
+          <Button 
+            variant="outline" 
+            onClick={toggleBarcodeType}
+            className="mb-2 w-full"
+          >
+            {barcodeType === 'gs1_128' ? 'GS1-128モード' : 'QRコードモード'}に設定中
+          </Button>
+          
           {isCameraMode ? (
             <>
               <Button 
