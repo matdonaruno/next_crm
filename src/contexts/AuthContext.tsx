@@ -80,49 +80,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     // セッション管理を一元化した初期化処理
     const initializeAuth = async () => {
+      console.log("AuthContext: 認証初期化を開始");
+      setLoading(true);
+
       try {
-        console.log("AuthContext: セッションの初期化を開始");
+        // セッション取得のプロミスを作成
+        const authSessionPromise = supabase.auth.getSession();
         
-        // 明示的にセッションを取得
-        const { data, error } = await supabase.auth.getSession();
-        
-        console.log("AuthContext: セッション初期化結果:", { 
-          hasSession: !!data.session, 
-          userId: data.session?.user?.id || "なし",
-          error: error?.message || "なし" 
+        // タイムアウト用のプロミスを作成（8秒後にタイムアウト）
+        const timeoutPromise = new Promise<{data: {session: null}, error: Error}>((_, reject) => {
+          setTimeout(() => reject(new Error("認証タイムアウト: セッション取得に時間がかかりすぎています")), 8000);
         });
         
+        // 両方のプロミスを競争させる
+        const result = await Promise.race([authSessionPromise, timeoutPromise]);
+        const { data, error } = result;
+        
+        console.log("AuthContext: セッション初期化結果", { 
+          hasSession: !!data.session, 
+          userId: data.session?.user?.id || "なし",
+          error: error?.message || "なし",
+          timestamp: new Date().toISOString()
+        });
+
         if (error) {
-          console.error("AuthContext: セッション取得エラー:", error);
+          console.error("AuthContext: セッション初期化エラー:", error.message);
           setUser(null);
           setProfile(null);
           setLoading(false);
           return;
         }
-        
-        if (data.session && data.session.user) {
-          console.log("AuthContext: 有効なセッションを検出:", data.session.user.id);
+
+        if (data.session?.user) {
+          console.log("AuthContext: セッション初期化成功、ユーザーID:", data.session.user.id);
           setUser(data.session.user);
           
-          // プロファイル情報を取得
-          console.log("AuthContext: プロファイル情報の取得を開始:", data.session.user.id);
-          const { data: profileData, error: profileError } = await supabase
-            .from('profiles')
-            .select('id, fullname, facility_id')
-            .eq('id', data.session.user.id)
-            .single();
-          
-          console.log("AuthContext: プロファイル取得結果:", { 
-            profileData: profileData ? JSON.stringify(profileData) : 'なし', 
-            profileError: profileError?.message || 'なし' 
-          });
-          
-          if (profileError) {
-            console.error('AuthContext: プロファイル情報の取得に失敗:', profileError);
+          console.log("AuthContext: プロファイル情報取得を開始");
+          try {
+            const { data: profileData, error: profileError } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', data.session.user.id)
+              .single();
+
+            console.log("AuthContext: プロファイル取得結果", { 
+              success: !!profileData, 
+              error: profileError?.message || "なし",
+              timestamp: new Date().toISOString()
+            });
+
+            if (profileError) {
+              console.error("AuthContext: プロファイル取得エラー:", profileError.message);
+              setProfile(null);
+            } else {
+              console.log("AuthContext: プロファイル取得成功:", profileData);
+              setProfile(profileData);
+            }
+          } catch (e) {
+            console.error("AuthContext: プロファイル取得中に例外発生:", e);
             setProfile(null);
-          } else {
-            console.log("AuthContext: プロファイル情報を取得:", profileData);
-            setProfile(profileData);
           }
         } else {
           console.log("AuthContext: 有効なセッションなし");
@@ -130,12 +146,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setProfile(null);
         }
       } catch (e) {
-        console.error("AuthContext: 認証初期化エラー:", e);
+        console.error("AuthContext: 認証初期化中に例外発生:", e);
         setUser(null);
         setProfile(null);
       } finally {
-        console.log("AuthContext: 初期化処理完了");
         setLoading(false);
+        console.log("AuthContext: 認証初期化完了");
       }
     };
     

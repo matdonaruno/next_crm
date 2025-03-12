@@ -27,7 +27,7 @@ export default function Home() {
         return;
       }
       
-      // ロード中は何もしない
+      // ロード中は何もしない（UXを改善するためにローディング表示は表示する）
       if (loading) {
         console.log("Home: 認証情報ロード中のため処理を延期");
         return;
@@ -50,49 +50,45 @@ export default function Home() {
         return;
       }
       
-      // セッションを明示的に確認（念のため）
-      try {
-        console.log("Home: セッションを明示的に確認");
-        const { data, error } = await supabase.auth.getSession();
-        
-        console.log("Home: セッション確認結果", { 
-          hasSession: !!data.session, 
-          userId: data.session?.user?.id || "なし",
-          error: error?.message || "なし",
-          timestamp: new Date().toISOString()
-        });
-        
-        if (data.session?.user) {
-          console.log("Home: 有効なセッションを検出、departページへリダイレクト", data.session.user.id);
-          setIsRedirecting(true);
-          
-          // 明示的にリダイレクト処理を実行
-          try {
-            console.log("Home: セッション確認後のリダイレクト処理を実行開始 (/depart)");
-            router.push('/depart');
-            console.log("Home: セッション確認後のリダイレクト処理を実行完了 (/depart)");
-          } catch (e) {
-            console.error("Home: セッション確認後のリダイレクト中にエラー発生:", e);
-            setIsRedirecting(false); // エラー時はリダイレクトフラグをリセット
-          }
-        } else {
-          console.log("Home: 有効なセッションがないため、ログインページを表示");
-        }
-      } catch (e) {
-        console.error("Home: セッション確認中にエラー", e);
-      }
+      // 認証されていない場合はここでセッションを確認する必要はない
+      // ユーザーはログインページに留まる
+      console.log("Home: 認証されていないユーザー、ログインページを表示");
     };
     
+    // 初回マウント時に一度だけ実行
     checkAuthAndRedirect();
+
+    // 5秒後に認証状態確認を再試行（万が一の対策）
+    const timeoutId = setTimeout(() => {
+      if (loading) {
+        console.log("Home: 認証状態が5秒以上ロード中の状態です。リセットします。");
+        // 万が一の場合の対応策
+        window.location.reload();
+      }
+    }, 5000);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
   }, [user, loading, router, isRedirecting]);
 
-  // リダイレクト中は何も表示しない（ローディング中の表示を防ぐ）
+  // ロード中は適切なローディング表示を行う
   if (loading || isRedirecting) {
     return (
       <div className="w-full min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="text-2xl font-bold mb-4">Labo Logbook</div>
           <div className="text-gray-600">読み込み中...</div>
+          {loading && (
+            <div className="mt-2 text-xs text-gray-500">
+              認証情報を確認しています...
+            </div>
+          )}
+          {isRedirecting && (
+            <div className="mt-2 text-xs text-gray-500">
+              リダイレクト中...
+            </div>
+          )}
         </div>
       </div>
     );
