@@ -30,7 +30,8 @@ export default function Home() {
         console.log("DepartPage: 認証チェック開始", { 
           loading, 
           userId: user?.id || 'なし',
-          hasProfile: !!profile
+          hasProfile: !!profile,
+          timestamp: new Date().toISOString()
         });
 
         // 認証状態のロードが完了していない場合は待機
@@ -44,7 +45,8 @@ export default function Home() {
         console.log("DepartPage: セッション確認結果", { 
           hasSession: !!sessionData.session,
           sessionUserId: sessionData.session?.user?.id || 'なし',
-          contextUserId: user?.id || 'なし'
+          contextUserId: user?.id || 'なし',
+          timestamp: new Date().toISOString()
         });
 
         // 認証されていない場合はログインページにリダイレクト
@@ -56,12 +58,19 @@ export default function Home() {
 
         // フルネームまたは施設IDが設定されていない場合はユーザー設定ページにリダイレクト
         if (!profile?.fullname || !profile?.facility_id) {
-          console.log("DepartPage: プロファイル情報が不完全です。ユーザー設定ページへリダイレクト");
+          console.log("DepartPage: プロファイル情報が不完全です。ユーザー設定ページへリダイレクト", {
+            fullname: profile?.fullname || 'なし',
+            facility_id: profile?.facility_id || 'なし'
+          });
           router.push("/user-settings");
           return;
         }
 
-        console.log("DepartPage: 認証チェック完了 - ユーザーは認証済み");
+        console.log("DepartPage: 認証チェック完了 - ユーザーは認証済み", {
+          userId: user.id,
+          fullname: profile.fullname,
+          facility_id: profile.facility_id
+        });
         setIsLoading(false);
       } catch (error) {
         console.error("DepartPage: 認証チェックエラー:", error);

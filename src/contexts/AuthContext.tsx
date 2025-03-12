@@ -167,13 +167,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.log("AuthContext: 状態変更後のプロファイル取得成功:", profileData);
             setProfile(profileData);
           }
+          
+          // 明示的にローディング状態を解除
+          console.log("AuthContext: 認証状態変更処理完了 - loading=false に設定");
+          setLoading(false);
         } else {
           console.log("AuthContext: 認証状態変更 - ユーザーなし");
           setUser(null);
           setProfile(null);
+          setLoading(false);
         }
-        
-        setLoading(false);
       }
     );
 

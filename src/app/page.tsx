@@ -40,8 +40,9 @@ export default function Home() {
         
         // 明示的にリダイレクト処理を実行
         try {
+          console.log("Home: リダイレクト処理を実行開始 (/depart)");
           router.push('/depart');
-          console.log("Home: リダイレクト処理を実行 (/depart)");
+          console.log("Home: リダイレクト処理を実行完了 (/depart)");
         } catch (e) {
           console.error("Home: リダイレクト中にエラー発生:", e);
           setIsRedirecting(false); // エラー時はリダイレクトフラグをリセット
@@ -51,6 +52,7 @@ export default function Home() {
       
       // セッションを明示的に確認（念のため）
       try {
+        console.log("Home: セッションを明示的に確認");
         const { data, error } = await supabase.auth.getSession();
         
         console.log("Home: セッション確認結果", { 
@@ -66,10 +68,11 @@ export default function Home() {
           
           // 明示的にリダイレクト処理を実行
           try {
+            console.log("Home: セッション確認後のリダイレクト処理を実行開始 (/depart)");
             router.push('/depart');
-            console.log("Home: リダイレクト処理を実行 (/depart)");
+            console.log("Home: セッション確認後のリダイレクト処理を実行完了 (/depart)");
           } catch (e) {
-            console.error("Home: リダイレクト中にエラー発生:", e);
+            console.error("Home: セッション確認後のリダイレクト中にエラー発生:", e);
             setIsRedirecting(false); // エラー時はリダイレクトフラグをリセット
           }
         } else {
