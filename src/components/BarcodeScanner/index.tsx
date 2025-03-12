@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, Camera, Image as ImageIcon, RefreshCw } from 'lucide-react';
+import { Loader2, Camera, Image as ImageIcon, RefreshCw, CheckCircle2 } from 'lucide-react';
 import styles from './styles.module.css';
 
 /**
@@ -67,7 +67,7 @@ interface BarcodeScannerProps {
 }
 
 // バーコードタイプの定義
-type BarcodeType = 'gs1_128' | 'qr_code';
+type BarcodeType = 'gs1_128' | 'qr_code' | 'gs1_128_vertical' | 'cross';
 
 /**
  * バーコードスキャナーコンポーネント
@@ -92,15 +92,19 @@ export default function BarcodeScanner({
   const [isCameraMode, setIsCameraMode] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isBarcodeAPISupported, setIsBarcodeAPISupported] = useState(false);
-  const [barcodeType, setBarcodeType] = useState<BarcodeType>('gs1_128'); // デフォルトはGS1-128
+  const [barcodeType, setBarcodeType] = useState<BarcodeType>('gs1_128'); // デフォルトはGS1-128に戻す
+  const [detectedBarcode, setDetectedBarcode] = useState<{value: string, format: string} | null>(null);
+  const [showCamera, setShowCamera] = useState(true);
 
   // 現在のバーコードタイプに基づいてフォーマットを選択
   const getSelectedFormats = useCallback(() => {
     switch (barcodeType) {
       case 'gs1_128':
-        return ['code_128'];
+      case 'gs1_128_vertical':
+      case 'cross':
+        return ['code_128', 'ean_13', 'ean_8', 'upc_a', 'upc_e']; // 一般的な1Dバーコード形式を追加
       case 'qr_code':
-        return ['qr_code'];
+        return ['qr_code', 'data_matrix', 'pdf417']; // 2Dバーコード形式を追加
       default:
         return BARCODE_FORMATS;
     }
@@ -159,6 +163,15 @@ export default function BarcodeScanner({
         return;
       }
       
+      // ビデオ要素の準備
+      if (videoRef.current.srcObject) {
+        // 既存のストリームがある場合は一旦nullに設定
+        videoRef.current.srcObject = null;
+        // 少し待機して状態をリセット
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      // 新しいストリームを設定
       videoRef.current.srcObject = stream;
       streamRef.current = stream;
       
@@ -181,6 +194,8 @@ export default function BarcodeScanner({
       };
       
       try {
+        // 再生前に少し待機
+        await new Promise(resolve => setTimeout(resolve, 100));
         await videoRef.current.play();
         console.log('カメラ初期化成功');
       } catch (playErr: any) {
@@ -189,19 +204,50 @@ export default function BarcodeScanner({
         // AbortErrorの場合は再試行
         if (playErr.name === 'AbortError') {
           console.log('再生が中断されました。再試行します...');
-          setTimeout(() => {
+          
+          // 再試行前に既存のストリームを確実に停止
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+          }
+          
+          // より長い遅延を設定して再試行
+          setTimeout(async () => {
             if (videoRef.current) {
-              videoRef.current.play()
-                .then(() => console.log('再試行成功'))
-                .catch(retryErr => {
-                  console.error('再試行エラー:', retryErr);
-                  const errorMsg = 'カメラの起動に失敗しました。ページを再読み込みしてください。';
-                  setError(errorMsg);
-                  setIsInitializing(false);
-                  if (onError) onError('カメラの起動に失敗しました');
-                });
+              try {
+                // srcObjectを一旦nullに設定してリセット
+                videoRef.current.srcObject = null;
+                
+                // 少し待機
+                await new Promise(resolve => setTimeout(resolve, 200));
+                
+                // 新しいストリームを再取得
+                const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+                videoRef.current.srcObject = newStream;
+                streamRef.current = newStream;
+                
+                // 再度少し待機
+                await new Promise(resolve => setTimeout(resolve, 200));
+                
+                // 再生を試行
+                await videoRef.current.play();
+                console.log('再試行成功');
+                setIsInitializing(false);
+                setIsScanning(true);
+              } catch (retryErr) {
+                console.error('再試行エラー:', retryErr);
+                const errorMsg = 'カメラの起動に失敗しました。ページを再読み込みしてください。';
+                setError(errorMsg);
+                setIsInitializing(false);
+                if (onError) onError('カメラの起動に失敗しました');
+                
+                // 確実にストリームを停止
+                if (streamRef.current) {
+                  streamRef.current.getTracks().forEach(track => track.stop());
+                  streamRef.current = null;
+                }
+              }
             }
-          }, 500);
+          }, 800); // より長い遅延で再試行
         } else {
           throw playErr; // その他のエラーは外側のcatchブロックで処理
         }
@@ -212,6 +258,12 @@ export default function BarcodeScanner({
       setError(errorMsg);
       setIsInitializing(false);
       if (onError) onError('カメラの起動に失敗しました');
+      
+      // 確実にストリームを停止
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
     }
   }, [onError]);
 
@@ -236,15 +288,17 @@ export default function BarcodeScanner({
    */
   useEffect(() => {
     let mounted = true;
+    let initTimeoutId: NodeJS.Timeout | null = null;
     
     if (isCameraMode) {
       // コンポーネントがマウントされている場合のみ初期化
       const startCamera = async () => {
         // 少し遅延を入れてからカメラを初期化
-        await new Promise(resolve => setTimeout(resolve, CAMERA_INIT_DELAY));
-        if (mounted) {
-          initCamera();
-        }
+        initTimeoutId = setTimeout(() => {
+          if (mounted) {
+            initCamera();
+          }
+        }, CAMERA_INIT_DELAY);
       };
       
       startCamera();
@@ -252,6 +306,13 @@ export default function BarcodeScanner({
     
     return () => {
       mounted = false;
+      
+      // タイムアウトをクリア
+      if (initTimeoutId) {
+        clearTimeout(initTimeoutId);
+      }
+      
+      // カメラを確実に停止
       stopCamera();
     };
   }, [initCamera, stopCamera, isCameraMode]);
@@ -260,22 +321,29 @@ export default function BarcodeScanner({
    * バーコードスキャンのループ処理
    */
   useEffect(() => {
-    if (!isBarcodeAPISupported || !isScanning || !videoRef.current || !canvasRef.current) return;
+    if (!isBarcodeAPISupported || !isScanning || !videoRef.current || !canvasRef.current || !showCamera) return;
     
-    let animationFrameId: number;
+    let animationFrameId: number | null = null;
     let lastDetectionTime = 0;
+    let isActive = true; // このエフェクトがアクティブかどうかを追跡
     
     /**
      * バーコードスキャン処理
      */
     const scanBarcode = async (timestamp: number) => {
+      // このエフェクトが非アクティブになっていたら処理を中止
+      if (!isActive) return;
+      
       if (timestamp - lastDetectionTime > DETECTION_INTERVAL) {
         lastDetectionTime = timestamp;
         
         try {
+          // ビデオ要素とキャンバス要素が存在するか再確認
+          if (!videoRef.current || !canvasRef.current || !isActive) return;
+          
           // ビデオフレームをキャンバスに描画
-          const video = videoRef.current!;
-          const canvas = canvasRef.current!;
+          const video = videoRef.current;
+          const canvas = canvasRef.current;
           const ctx = canvas.getContext('2d');
           
           if (!ctx) {
@@ -293,16 +361,28 @@ export default function BarcodeScanner({
           const barcodeDetector = new window.BarcodeDetector({ formats: selectedFormats });
           const barcodes = await barcodeDetector.detect(canvas);
           
+          // 再度アクティブかチェック（非同期処理中にアンマウントされた可能性がある）
+          if (!isActive) return;
+          
           if (barcodes.length > 0) {
             // 最初に検出されたバーコードを使用
             const barcode = barcodes[0];
             console.log('バーコード検出:', barcode);
             
-            // 検出結果をコールバックで返す
-            onBarcodeDetected(barcode.rawValue, barcode.format);
+            // 検出結果を保存
+            setDetectedBarcode({
+              value: barcode.rawValue,
+              format: barcode.format
+            });
+            
+            // カメラを非表示にする
+            setShowCamera(false);
             
             // スキャンを停止
             stopCamera();
+            
+            // 検出結果をコールバックで返す
+            onBarcodeDetected(barcode.rawValue, barcode.format);
             return;
           }
         } catch (err) {
@@ -310,8 +390,10 @@ export default function BarcodeScanner({
         }
       }
       
-      // 次のフレームでスキャンを継続
-      animationFrameId = requestAnimationFrame(scanBarcode);
+      // 次のフレームでスキャンを継続（アクティブな場合のみ）
+      if (isActive) {
+        animationFrameId = requestAnimationFrame(scanBarcode);
+      }
     };
     
     // スキャン開始
@@ -319,11 +401,14 @@ export default function BarcodeScanner({
     
     // クリーンアップ
     return () => {
+      isActive = false; // このエフェクトを非アクティブにマーク
+      
       if (animationFrameId) {
         cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
       }
     };
-  }, [isBarcodeAPISupported, isScanning, onBarcodeDetected, stopCamera, barcodeType, getSelectedFormats]);
+  }, [isBarcodeAPISupported, isScanning, onBarcodeDetected, stopCamera, barcodeType, getSelectedFormats, showCamera]);
 
   /**
    * 画像ファイルからバーコードをスキャン
@@ -373,6 +458,12 @@ export default function BarcodeScanner({
         // 最初に検出されたバーコードを使用
         const barcode = barcodes[0];
         console.log('画像からバーコード検出:', barcode);
+        
+        // 検出結果を保存
+        setDetectedBarcode({
+          value: barcode.rawValue,
+          format: barcode.format
+        });
         
         // 検出結果をコールバックで返す
         onBarcodeDetected(barcode.rawValue, barcode.format);
@@ -454,6 +545,8 @@ export default function BarcodeScanner({
     setIsCameraMode(!isCameraMode);
     setCapturedImage(null);
     setError(null);
+    setDetectedBarcode(null);
+    setShowCamera(true);
     
     if (isCameraMode) {
       stopCamera();
@@ -466,9 +559,12 @@ export default function BarcodeScanner({
   const handleReset = () => {
     setCapturedImage(null);
     setError(null);
+    setDetectedBarcode(null);
+    setShowCamera(true);
     
     if (isCameraMode) {
       setIsScanning(true);
+      initCamera();
     } else {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -478,13 +574,76 @@ export default function BarcodeScanner({
 
   // バーコードタイプを切り替える関数
   const toggleBarcodeType = () => {
-    setBarcodeType(prevType => prevType === 'gs1_128' ? 'qr_code' : 'gs1_128');
+    setBarcodeType(prevType => {
+      if (prevType === 'cross') return 'gs1_128';
+      if (prevType === 'gs1_128') return 'gs1_128_vertical';
+      if (prevType === 'gs1_128_vertical') return 'qr_code';
+      return 'cross';
+    });
     setError(null);
     
     // リセットして再スキャン
     if (isCameraMode && isScanning) {
       // カメラは継続して使用
-      console.log(`バーコードタイプを切り替えました: ${barcodeType === 'gs1_128' ? 'QRコード' : 'GS1-128'}`);
+      console.log(`バーコードタイプを切り替えました: ${barcodeType}`);
+    }
+  };
+
+  // バーコードタイプに応じたビューファインダーを表示
+  const renderViewfinder = () => {
+    if (!isScanning) return null;
+    
+    switch (barcodeType) {
+      case 'cross':
+        return (
+          <div className={styles.viewfinderCross}>
+            <div className={styles.crossHorizontal}></div>
+            <div className={styles.crossVertical}></div>
+            <div className={styles.centerMarker}></div>
+            <div className={`${styles.cornerMarker} ${styles.topLeft}`}></div>
+            <div className={`${styles.cornerMarker} ${styles.topRight}`}></div>
+            <div className={`${styles.cornerMarker} ${styles.bottomLeft}`}></div>
+            <div className={`${styles.cornerMarker} ${styles.bottomRight}`}></div>
+          </div>
+        );
+      case 'gs1_128':
+        return (
+          <div className={styles.viewfinderHorizontal}>
+            <div className={`${styles.cornerMarker} ${styles.topLeft}`}></div>
+            <div className={`${styles.cornerMarker} ${styles.topRight}`}></div>
+            <div className={`${styles.cornerMarker} ${styles.bottomLeft}`}></div>
+            <div className={`${styles.cornerMarker} ${styles.bottomRight}`}></div>
+          </div>
+        );
+      case 'gs1_128_vertical':
+        return (
+          <div className={styles.viewfinderVertical}>
+            <div className={`${styles.cornerMarker} ${styles.topLeft}`}></div>
+            <div className={`${styles.cornerMarker} ${styles.topRight}`}></div>
+            <div className={`${styles.cornerMarker} ${styles.bottomLeft}`}></div>
+            <div className={`${styles.cornerMarker} ${styles.bottomRight}`}></div>
+          </div>
+        );
+      case 'qr_code':
+        return <div className={styles.viewfinder} />;
+      default:
+        return <div className={styles.viewfinder} />;
+    }
+  };
+
+  // バーコードタイプの表示名を取得
+  const getBarcodeTypeName = () => {
+    switch (barcodeType) {
+      case 'cross':
+        return '十字型（縦横両対応）';
+      case 'gs1_128':
+        return 'GS1-128 横向き';
+      case 'gs1_128_vertical':
+        return 'GS1-128 縦向き';
+      case 'qr_code':
+        return 'QRコード';
+      default:
+        return 'バーコード';
     }
   };
 
@@ -497,46 +656,57 @@ export default function BarcodeScanner({
           </Alert>
         )}
         
-        <div className={styles.viewfinderContainer}>
-          {isCameraMode ? (
-            <>
-              <video 
-                ref={videoRef} 
-                className={styles.video} 
-                playsInline 
-                muted
-              />
-              {isScanning && <div className={styles.viewfinder} />}
-            </>
-          ) : (
-            capturedImage ? (
-              <img src={capturedImage} alt="Captured" className={styles.capturedImage} />
+        {detectedBarcode ? (
+          <div className={styles.detectionResult}>
+            <CheckCircle2 className="h-12 w-12 text-green-500 mx-auto mb-2" />
+            <h3>バーコード検出成功</h3>
+            <p><strong>形式:</strong> {detectedBarcode.format}</p>
+            <p><strong>値:</strong> {detectedBarcode.value}</p>
+          </div>
+        ) : (
+          <div className={styles.viewfinderContainer}>
+            {isCameraMode && showCamera ? (
+              <>
+                <video 
+                  ref={videoRef} 
+                  className={styles.video} 
+                  playsInline 
+                  muted
+                />
+                {renderViewfinder()}
+              </>
             ) : (
-              <div className={styles.uploadPlaceholder}>
-                <ImageIcon size={48} />
-                <p>画像を選択してください</p>
-              </div>
-            )
-          )}
-          
-          <canvas ref={canvasRef} style={{ display: 'none' }} />
-        </div>
+              capturedImage ? (
+                <img src={capturedImage} alt="Captured" className={styles.capturedImage} />
+              ) : (
+                <div className={styles.uploadPlaceholder}>
+                  <ImageIcon size={48} />
+                  <p>画像を選択してください</p>
+                </div>
+              )
+            )}
+            
+            <canvas ref={canvasRef} style={{ display: 'none' }} />
+          </div>
+        )}
         
         <div className={styles.controls}>
           {/* バーコードタイプ切り替えボタン */}
-          <Button 
-            variant="outline" 
-            onClick={toggleBarcodeType}
-            className="mb-2 w-full"
-          >
-            {barcodeType === 'gs1_128' ? 'GS1-128モード' : 'QRコードモード'}に設定中
-          </Button>
+          {!detectedBarcode && (
+            <Button 
+              variant="outline" 
+              onClick={toggleBarcodeType}
+              className="mb-2 w-full"
+            >
+              {getBarcodeTypeName()}モードに設定中
+            </Button>
+          )}
           
-          {isCameraMode ? (
+          {isCameraMode && !detectedBarcode ? (
             <>
               <Button 
                 onClick={handleCaptureImage} 
-                disabled={isInitializing || !isScanning || !isBarcodeAPISupported}
+                disabled={isInitializing || !isScanning || !isBarcodeAPISupported || !showCamera}
                 className={styles.captureButton}
               >
                 {isInitializing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera />}
@@ -547,7 +717,7 @@ export default function BarcodeScanner({
                 画像を選択
               </Button>
             </>
-          ) : (
+          ) : !detectedBarcode ? (
             <>
               <Button 
                 onClick={() => fileInputRef.current?.click()} 
@@ -569,9 +739,9 @@ export default function BarcodeScanner({
                 カメラに切替
               </Button>
             </>
-          )}
+          ) : null}
           
-          {(capturedImage || error) && (
+          {(capturedImage || error || detectedBarcode) && (
             <Button variant="outline" onClick={handleReset}>
               <RefreshCw className="mr-2 h-4 w-4" />
               リセット
