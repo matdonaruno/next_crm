@@ -123,7 +123,6 @@ export default function ReagentRegistration() {
       // 試薬データ作成（カラム名の大文字小文字に注意）
       const reagentData = {
         department: formValues.department,
-        department_id: formValues.departmentId || "", // URLパラメータから取得した部署ID
         name: formValues.reagentName,
         specification: formValues.specification || "",
         "lotNo": formValues.lotNo, // 大文字小文字を正確に
