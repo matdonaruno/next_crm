@@ -15,7 +15,7 @@
 .viewfinderContainer {
   position: relative;
   width: 100%;
-  height: 300px;
+  height: 350px;
   overflow: hidden;
   border-radius: 0.5rem;
   background-color: #000;
@@ -27,17 +27,134 @@
   object-fit: cover;
 }
 
+/* 標準のQRコード用ビューファインダー */
 .viewfinder {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 200px;
-  height: 200px;
+  width: 240px;
+  height: 240px;
   border: 2px solid #fff;
   border-radius: 1rem;
   box-shadow: 0 0 0 5000px rgba(0, 0, 0, 0.5);
   animation: pulse 2s infinite;
+}
+
+/* 横長バーコード用ビューファインダー */
+.viewfinderHorizontal {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 350px;
+  height: 140px;
+  border: 2px solid #fff;
+  border-radius: 0.5rem;
+  box-shadow: 0 0 0 5000px rgba(0, 0, 0, 0.5);
+  animation: pulse 2s infinite;
+}
+
+/* 縦長バーコード用ビューファインダー */
+.viewfinderVertical {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 140px;
+  height: 350px;
+  border: 2px solid #fff;
+  border-radius: 0.5rem;
+  box-shadow: 0 0 0 5000px rgba(0, 0, 0, 0.5);
+  animation: pulse 2s infinite;
+}
+
+/* 十字型ビューファインダー（縦横両方対応） */
+.viewfinderCross {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 350px;
+  height: 350px;
+  animation: pulse 2s infinite;
+}
+
+/* 十字型の横線 */
+.crossHorizontal {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: 100%;
+  height: 140px;
+  border: 2px solid #fff;
+  border-radius: 0.5rem;
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+/* 十字型の縦線 */
+.crossVertical {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 140px;
+  height: 100%;
+  border: 2px solid #fff;
+  border-radius: 0.5rem;
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+/* コーナーマーカー */
+.cornerMarker {
+  position: absolute;
+  width: 25px;
+  height: 25px;
+  border-color: #8167a9;
+  border-style: solid;
+  border-width: 0;
+}
+
+.topLeft {
+  top: 0;
+  left: 0;
+  border-top-width: 4px;
+  border-left-width: 4px;
+}
+
+.topRight {
+  top: 0;
+  right: 0;
+  border-top-width: 4px;
+  border-right-width: 4px;
+}
+
+.bottomLeft {
+  bottom: 0;
+  left: 0;
+  border-bottom-width: 4px;
+  border-left-width: 4px;
+}
+
+.bottomRight {
+  bottom: 0;
+  right: 0;
+  border-bottom-width: 4px;
+  border-right-width: 4px;
+}
+
+/* 中央の交差点マーカー */
+.centerMarker {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 3px solid #8167a9;
+  background-color: rgba(129, 103, 169, 0.2);
 }
 
 .capturedImage {
@@ -73,6 +190,40 @@
 
 .alert {
   margin-bottom: 1rem;
+}
+
+.barcodeTypeSelector {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  justify-content: center;
+}
+
+.barcodeTypeButton {
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  background-color: #f1f1f1;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.barcodeTypeButton.active {
+  background-color: #8167a9;
+  color: white;
+}
+
+/* バーコード検出結果表示 */
+.detectionResult {
+  background-color: rgba(255, 255, 255, 0.9);
+  padding: 1rem;
+  border-radius: 0.5rem;
+  margin-top: 1rem;
+  text-align: center;
+}
+
+.detectionResult h3 {
+  margin-top: 0;
+  color: #8167a9;
 }
 
 @keyframes pulse {

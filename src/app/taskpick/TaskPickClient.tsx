@@ -23,7 +23,7 @@ const tooltipTextStyle = { color: 'white' };
 
 const menuItems = [
   {
-    title: 'Temperature Records',
+    title: 'Temperature Records & Monitoring',
     description: 'Monitor and record temperature data',
     icon: ThermometerSnowflake,
     path: '/temperature',
@@ -39,7 +39,7 @@ const menuItems = [
     tooltip: '機器メンテナンス管理'
   },
   {
-    title: 'Quality Control',
+    title: 'Quality Control Management',
     description: 'Manage quality control processes',
     icon: ChartLine,
     path: '/quality',
@@ -47,7 +47,7 @@ const menuItems = [
     tooltip: '品質管理プロセス'
   },
   {
-    title: 'Reagent Management',
+    title: 'Clinical Reagent Management',
     description: 'Track reagent inventory and usage',
     icon: FlaskRound,
     path: '/reagent_dash',
