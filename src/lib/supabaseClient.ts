@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import Cookies from 'js-cookie';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -17,31 +18,78 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error("Supabase環境変数が設定されていません");
 }
 
-// セッションストレージの設定
-// ブラウザ環境では localStorage を使用し、サーバー環境では undefined を使用
-const getStorage = () => {
-  if (typeof window !== 'undefined') {
-    // セッションストレージをクリア（古いセッションを削除）
-    try {
-      // 古いセッションキーを削除
-      const oldKey = 'supabase.auth.token';
-      if (localStorage.getItem(oldKey)) {
-        console.log("古いトークンキーを削除します");
-        localStorage.removeItem(oldKey);
-      }
-      
-      // 現在のセッションキーを確認
-      const currentSession = localStorage.getItem(storageKey);
-      if (currentSession) {
-        console.log("既存のセッションが見つかりました");
-      }
-    } catch (e) {
-      console.error("ストレージアクセスエラー:", e);
+// クッキーベースのストレージアダプタ
+const cookieStorage = {
+  getItem: (key: string) => {
+    if (typeof window === 'undefined') return null;
+    const value = Cookies.get(key);
+    return value || null;
+  },
+  setItem: (key: string, value: string) => {
+    if (typeof window === 'undefined') return;
+    // セキュアなクッキーを設定
+    Cookies.set(key, value, {
+      expires: 7, // 7日間有効
+      secure: process.env.NODE_ENV === 'production', // 本番環境ではHTTPSのみ
+      sameSite: 'strict', // CSRF対策
+      path: '/' // すべてのパスで利用可能
+    });
+    console.log(`クッキーを設定しました: ${key}`);
+  },
+  removeItem: (key: string) => {
+    if (typeof window === 'undefined') return;
+    Cookies.remove(key, { path: '/' });
+    console.log(`クッキーを削除しました: ${key}`);
+  }
+};
+
+// セッションストレージの初期化
+const initStorage = () => {
+  if (typeof window === 'undefined') return cookieStorage;
+
+  try {
+    // 古いセッションキーを削除
+    const oldKey = 'supabase.auth.token';
+    if (localStorage.getItem(oldKey)) {
+      console.log("古いトークンキーをローカルストレージから削除します");
+      localStorage.removeItem(oldKey);
     }
     
-    return window.localStorage;
+    // 古いクッキーを削除
+    if (Cookies.get(oldKey)) {
+      console.log("古いトークンキーをクッキーから削除します");
+      Cookies.remove(oldKey, { path: '/' });
+    }
+    
+    // 現在のセッションキーをローカルストレージからクッキーに移行
+    const currentSession = localStorage.getItem(storageKey);
+    if (currentSession) {
+      console.log("既存のセッションをローカルストレージからクッキーに移行します");
+      try {
+        const sessionData = JSON.parse(currentSession);
+        Cookies.set(storageKey, currentSession, {
+          expires: 7,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'strict',
+          path: '/'
+        });
+        // 移行後にローカルストレージから削除
+        localStorage.removeItem(storageKey);
+      } catch (e) {
+        console.error("セッションデータの解析に失敗しました:", e);
+      }
+    }
+    
+    // 現在のクッキーを確認
+    const cookieSession = Cookies.get(storageKey);
+    if (cookieSession) {
+      console.log("既存のクッキーセッションが見つかりました");
+    }
+  } catch (e) {
+    console.error("ストレージアクセスエラー:", e);
   }
-  return undefined;
+  
+  return cookieStorage;
 };
 
 // Supabaseクライアントの設定
@@ -49,7 +97,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     storageKey: storageKey,
-    storage: getStorage(),
+    storage: initStorage(),
     autoRefreshToken: true,
     detectSessionInUrl: true,
     flowType: 'pkce', // PKCEフローを使用（より安全）
@@ -76,7 +124,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 console.log("Supabaseクライアントを初期化しました", { 
   storageKey,
   timeout: "10秒",
-  flowType: "pkce"
+  flowType: "pkce",
+  storage: "cookie-based"
 });
 
 // セッションの確認
@@ -87,7 +136,8 @@ if (typeof window !== 'undefined') {
       console.log("現在のセッション状態:", { 
         session: data.session ? "あり" : "なし", 
         error: error?.message || "なし",
-        userId: data.session?.user?.id || "なし"
+        userId: data.session?.user?.id || "なし",
+        cookieExists: !!Cookies.get(storageKey)
       });
     } catch (e) {
       console.error("セッション確認エラー:", e);

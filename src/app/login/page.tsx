@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label";
 import { Mail, Lock, ArrowRight } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import Cookies from 'js-cookie';
 
 const AuthForm = () => {
   const router = useRouter();
@@ -24,9 +25,24 @@ const AuthForm = () => {
   useEffect(() => {
     const clearExistingSession = async () => {
       try {
+        // Supabase URLからプロジェクトIDを抽出
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+        const projectId = supabaseUrl.match(/https:\/\/(.*?)\.supabase\.co/)?.[1] || 'bsgvaomswzkywbiubtjg';
+        const storageKey = `sb-${projectId}-auth-token`;
+        
         // ローカルセッションのみをクリア（ログインページに来た場合は新しいログインを想定）
         await supabase.auth.signOut({ scope: 'local' });
         console.log("LoginPage: ローカルセッションをクリアしました");
+        
+        // クッキーを明示的に削除
+        Cookies.remove(storageKey, { path: '/' });
+        console.log("LoginPage: クッキーを削除しました");
+        
+        // ローカルストレージも削除
+        if (localStorage.getItem(storageKey)) {
+          localStorage.removeItem(storageKey);
+          console.log("LoginPage: ローカルストレージを削除しました");
+        }
       } catch (e) {
         console.error("LoginPage: セッションクリア中にエラーが発生しました", e);
       }

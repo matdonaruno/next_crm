@@ -3,6 +3,19 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import Cookies from 'js-cookie';
+
+// グローバルウィンドウにCookiesを追加
+declare global {
+  interface Window {
+    Cookies: typeof Cookies;
+  }
+}
+
+// Cookiesをグローバルに設定
+if (typeof window !== 'undefined') {
+  window.Cookies = Cookies;
+}
 
 interface UserProfile {
   id: string;
@@ -358,9 +371,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     try {
       console.log("signOut: ログアウト処理を開始");
+      
+      // Supabase URLからプロジェクトIDを抽出
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      const projectId = supabaseUrl.match(/https:\/\/(.*?)\.supabase\.co/)?.[1] || 'bsgvaomswzkywbiubtjg';
+      const storageKey = `sb-${projectId}-auth-token`;
+      
       // グローバルスコープでログアウト（すべてのデバイスからログアウト）
       await supabase.auth.signOut({ scope: 'global' });
       console.log("signOut: ログアウト成功");
+      
+      // クッキーを明示的に削除（念のため）
+      if (typeof window !== 'undefined' && window.Cookies) {
+        try {
+          window.Cookies.remove(storageKey, { path: '/' });
+          console.log("signOut: クッキーを削除しました");
+        } catch (e) {
+          console.error("signOut: クッキー削除エラー", e);
+        }
+      }
+      
       setUser(null);
       setProfile(null);
       router.push('/login');
