@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, Suspense } from "react";
 import { useForm } from "react-hook-form";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -40,8 +40,8 @@ interface Product {
   unit: string; // 単位
 }
 
-export default function ReagentRegistration() {
-  useRequireAuth();
+// SearchParamsを取得するコンポーネント
+function ReagentRegistrationContent() {
   const { register, setValue, getValues, reset, formState: { /* errors */ } } = useForm<FormValues>();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -601,5 +601,30 @@ export default function ReagentRegistration() {
         </div>
       </div>
     </TooltipProvider>
+  );
+}
+
+// ローディング表示用のコンポーネント
+function LoadingFallback() {
+  return (
+    <div className="min-h-screen w-full flex flex-col items-center justify-center bg-gradient-to-b from-[#fde3f1] to-[#e9ddfc]">
+      <div className="text-center">
+        <h2 className="text-2xl font-bold mb-4" style={{ color: '#8167a9' }}>
+          読み込み中...
+        </h2>
+        <div className="w-16 h-16 border-4 border-[#8167a9] border-t-transparent rounded-full animate-spin mx-auto"></div>
+      </div>
+    </div>
+  );
+}
+
+// メインコンポーネント
+export default function ReagentRegistration() {
+  useRequireAuth();
+  
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <ReagentRegistrationContent />
+    </Suspense>
   );
 } 
