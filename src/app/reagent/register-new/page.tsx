@@ -42,6 +42,9 @@ interface Product {
 
 // SearchParamsを取得するコンポーネント
 function ReagentRegistrationContent() {
+  // 認証チェック
+  useRequireAuth();
+  
   const { register, setValue, getValues, reset, formState: { /* errors */ } } = useForm<FormValues>();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -620,8 +623,6 @@ function LoadingFallback() {
 
 // メインコンポーネント
 export default function ReagentRegistration() {
-  useRequireAuth();
-  
   return (
     <Suspense fallback={<LoadingFallback />}>
       <ReagentRegistrationContent />
