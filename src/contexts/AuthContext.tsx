@@ -208,6 +208,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log("signIn: ログイン処理を開始:", email);
       setLoading(true); // ログイン処理開始時にloadingをtrueに設定
       
+      // 既存のセッションをクリア（他のデバイスからのログインを防ぐため）
+      console.log("signIn: 既存のセッションをクリア");
+      await supabase.auth.signOut({ scope: 'global' });
+      
       // 直接fetchUserAndProfileを呼び出さず、認証とプロファイル取得を直接行う
       console.log("signIn: Supabaseで認証を実行");
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -277,7 +281,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ログアウト処理
   const signOut = async () => {
     try {
-      await supabase.auth.signOut();
+      console.log("signOut: ログアウト処理を開始");
+      // グローバルスコープでログアウト（すべてのデバイスからログアウト）
+      await supabase.auth.signOut({ scope: 'global' });
+      console.log("signOut: ログアウト成功");
       setUser(null);
       setProfile(null);
       router.push('/login');

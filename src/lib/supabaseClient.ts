@@ -17,14 +17,42 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error("Supabase環境変数が設定されていません");
 }
 
+// セッションストレージの設定
+// ブラウザ環境では localStorage を使用し、サーバー環境では undefined を使用
+const getStorage = () => {
+  if (typeof window !== 'undefined') {
+    // セッションストレージをクリア（古いセッションを削除）
+    try {
+      // 古いセッションキーを削除
+      const oldKey = 'supabase.auth.token';
+      if (localStorage.getItem(oldKey)) {
+        console.log("古いトークンキーを削除します");
+        localStorage.removeItem(oldKey);
+      }
+      
+      // 現在のセッションキーを確認
+      const currentSession = localStorage.getItem(storageKey);
+      if (currentSession) {
+        console.log("既存のセッションが見つかりました");
+      }
+    } catch (e) {
+      console.error("ストレージアクセスエラー:", e);
+    }
+    
+    return window.localStorage;
+  }
+  return undefined;
+};
+
 // Supabaseクライアントの設定
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
-    storageKey: storageKey, // デフォルトキーを使用
-    storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+    storageKey: storageKey,
+    storage: getStorage(),
     autoRefreshToken: true,
     detectSessionInUrl: true,
+    flowType: 'pkce', // PKCEフローを使用（より安全）
     debug: process.env.NODE_ENV === 'development' // 開発環境のみデバッグ有効
   },
   global: {
@@ -47,7 +75,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // デバッグ用：Supabaseクライアントの初期化確認
 console.log("Supabaseクライアントを初期化しました", { 
   storageKey,
-  timeout: "10秒"
+  timeout: "10秒",
+  flowType: "pkce"
 });
 
 // セッションの確認
@@ -57,7 +86,8 @@ if (typeof window !== 'undefined') {
       const { data, error } = await supabase.auth.getSession();
       console.log("現在のセッション状態:", { 
         session: data.session ? "あり" : "なし", 
-        error: error?.message || "なし" 
+        error: error?.message || "なし",
+        userId: data.session?.user?.id || "なし"
       });
     } catch (e) {
       console.error("セッション確認エラー:", e);
