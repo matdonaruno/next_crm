@@ -20,6 +20,21 @@ const AuthForm = () => {
   const [error, setError] = useState("");
   const [redirecting, setRedirecting] = useState(false);
 
+  // ページロード時に既存のセッションをクリア
+  useEffect(() => {
+    const clearExistingSession = async () => {
+      try {
+        // ローカルセッションのみをクリア（ログインページに来た場合は新しいログインを想定）
+        await supabase.auth.signOut({ scope: 'local' });
+        console.log("LoginPage: ローカルセッションをクリアしました");
+      } catch (e) {
+        console.error("LoginPage: セッションクリア中にエラーが発生しました", e);
+      }
+    };
+    
+    clearExistingSession();
+  }, []);
+
   // デバッグ用：状態変更を監視
   useEffect(() => {
     console.log("LoginPage: 状態変更", { 

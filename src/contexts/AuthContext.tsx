@@ -21,11 +21,87 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// 非アクティブタイムアウト（ミリ秒）- 30分
+const INACTIVITY_TIMEOUT = 30 * 60 * 1000;
+// セッション確認間隔（ミリ秒）- 5分
+const SESSION_CHECK_INTERVAL = 5 * 60 * 1000;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<any | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastActivity, setLastActivity] = useState<number>(Date.now());
   const router = useRouter();
+
+  // ユーザーアクティビティを追跡
+  useEffect(() => {
+    if (!user) return; // ユーザーがログインしていない場合は何もしない
+
+    console.log("AuthContext: ユーザーアクティビティ追跡を開始");
+    
+    // アクティビティイベントのリスナー
+    const activityEvents = ['mousedown', 'keydown', 'touchstart', 'scroll'];
+    
+    // アクティビティを記録する関数
+    const recordActivity = () => {
+      setLastActivity(Date.now());
+    };
+    
+    // イベントリスナーを追加
+    activityEvents.forEach(event => {
+      window.addEventListener(event, recordActivity);
+    });
+    
+    // 非アクティブタイムアウトのチェック
+    const inactivityCheckInterval = setInterval(() => {
+      const now = Date.now();
+      const timeSinceLastActivity = now - lastActivity;
+      
+      if (timeSinceLastActivity > INACTIVITY_TIMEOUT) {
+        console.log("AuthContext: 非アクティブタイムアウトを検出、ログアウトします");
+        clearInterval(inactivityCheckInterval);
+        signOut();
+      }
+    }, 60000); // 1分ごとにチェック
+    
+    // クリーンアップ
+    return () => {
+      activityEvents.forEach(event => {
+        window.removeEventListener(event, recordActivity);
+      });
+      clearInterval(inactivityCheckInterval);
+    };
+  }, [user, lastActivity]);
+
+  // 定期的なセッション確認
+  useEffect(() => {
+    if (!user) return; // ユーザーがログインしていない場合は何もしない
+
+    console.log("AuthContext: 定期的なセッション確認を開始");
+    
+    const sessionCheckInterval = setInterval(async () => {
+      try {
+        console.log("AuthContext: セッションの有効性を確認中...");
+        const { data, error } = await supabase.auth.getSession();
+        
+        if (error || !data.session) {
+          console.log("AuthContext: セッションが無効になっています、ログアウトします");
+          clearInterval(sessionCheckInterval);
+          // セッションが無効になっている場合は、ユーザー状態をクリアしてログインページにリダイレクト
+          setUser(null);
+          setProfile(null);
+          router.push('/login');
+        }
+      } catch (e) {
+        console.error("AuthContext: セッション確認中にエラーが発生しました", e);
+      }
+    }, SESSION_CHECK_INTERVAL);
+    
+    // クリーンアップ
+    return () => {
+      clearInterval(sessionCheckInterval);
+    };
+  }, [user, router]);
 
   // ユーザー情報とプロファイル情報を取得
   const fetchUserAndProfile = async () => {
