@@ -7,6 +7,38 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Camera, Image as ImageIcon, RefreshCw, CheckCircle2 } from 'lucide-react';
 import styles from './styles.module.css';
 
+// BarcodeDetector APIのpolyfillをインポート
+// 注: 実際のデプロイ時には、このURLを適切なCDNに変更するか、パッケージをインストールしてください
+const BarcodeDetectorPolyfillScript = 'https://fastly.jsdelivr.net/npm/barcode-detector@2/dist/es/pure.min.js';
+
+// polyfill用の型定義
+interface BarcodeDetectorPolyfillModule {
+  BarcodeDetector: {
+    new(options?: BarcodeDetectorOptions): BarcodeDetector;
+  };
+}
+
+// polyfillを動的にロードする関数
+const loadBarcodeDetectorPolyfill = async () => {
+  // すでにBarcodeDetector APIがサポートされている場合は何もしない
+  if ('BarcodeDetector' in window) {
+    console.log('Native BarcodeDetector API is supported');
+    return;
+  }
+
+  console.log('Loading BarcodeDetector polyfill...');
+  try {
+    // ESモジュールとしてpolyfillをインポート
+    const polyfillModule = await import(/* webpackIgnore: true */ BarcodeDetectorPolyfillScript) as BarcodeDetectorPolyfillModule;
+    // window.BarcodeDetectorにpolyfillを設定
+    // @ts-expect-error - TypeScriptの型チェックを無視（実行時には動的に追加される）
+    window.BarcodeDetector = polyfillModule.BarcodeDetector;
+    console.log('BarcodeDetector polyfill loaded successfully');
+  } catch (error) {
+    console.error('Failed to load BarcodeDetector polyfill:', error);
+  }
+};
+
 /**
  * BarcodeDetector API の型定義
  * Web標準のBarcodeDetector APIの型定義がないため、独自に定義
@@ -114,16 +146,32 @@ export default function BarcodeScanner({
    * Barcode Detector APIのサポートチェック
    */
   useEffect(() => {
-    if ('BarcodeDetector' in window) {
-      setIsBarcodeAPISupported(true);
-      console.log('Barcode Detector API is supported');
-    } else {
-      setIsBarcodeAPISupported(false);
-      console.log('Barcode Detector API is not supported');
-      const errorMsg = 'このブラウザはBarcodeDetector APIをサポートしていません。Chrome/Edgeの最新版をお試しください。';
-      setError(errorMsg);
-      if (onError) onError(errorMsg);
-    }
+    // polyfillをロード
+    const initBarcodeDetector = async () => {
+      try {
+        await loadBarcodeDetectorPolyfill();
+        
+        // polyfillロード後に再度チェック
+        if ('BarcodeDetector' in window) {
+          setIsBarcodeAPISupported(true);
+          console.log('Barcode Detector API is supported (native or polyfill)');
+        } else {
+          setIsBarcodeAPISupported(false);
+          console.log('Barcode Detector API is not supported, even with polyfill');
+          const errorMsg = 'このブラウザはBarcodeDetector APIをサポートしていません。Chrome/Edgeの最新版をお試しください。';
+          setError(errorMsg);
+          if (onError) onError(errorMsg);
+        }
+      } catch (error) {
+        console.error('Error initializing BarcodeDetector:', error);
+        setIsBarcodeAPISupported(false);
+        const errorMsg = 'バーコード検出機能の初期化に失敗しました。';
+        setError(errorMsg);
+        if (onError) onError(errorMsg);
+      }
+    };
+
+    initBarcodeDetector();
   }, [onError]);
 
   /**
