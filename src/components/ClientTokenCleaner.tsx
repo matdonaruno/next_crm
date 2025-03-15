@@ -1,18 +1,30 @@
 'use client';
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Cookies from 'js-cookie';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 
 export function ClientTokenCleaner() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, loading } = useAuth();
   const isLoginPage = pathname === '/login' || pathname === '/direct-login';
+  const redirectedRef = useRef(false);
+  const lastPathRef = useRef(pathname);
+  const [redirecting, setRedirecting] = useState(false);
   
   // セッション管理の改善
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      console.log("ClientTokenCleaner: 初期化", { isLoginPage });
+      console.log("ClientTokenCleaner: 初期化", { isLoginPage, loading });
+      
+      // ローディング中やリダイレクト中は処理をスキップ
+      if (loading || redirecting) {
+        console.log("ClientTokenCleaner: ローディング中またはリダイレクト中のため処理をスキップします");
+        return;
+      }
       
       // 古いトークンキーを削除する処理
       const oldKey = 'supabase.auth.token';
@@ -30,6 +42,32 @@ export function ClientTokenCleaner() {
       // ログインページでは不整合チェックをスキップ（意図的なセッションクリアのため）
       if (isLoginPage) {
         console.log("ClientTokenCleaner: ログインページのため、不整合チェックをスキップします");
+        
+        // ログイン済みならホームページにリダイレクト
+        if (user && !redirectedRef.current) {
+          console.log("ClientTokenCleaner: ログイン済みユーザーをリダイレクト");
+          redirectedRef.current = true;
+          setRedirecting(true);
+          
+          // アニメーションのためにわずかに遅延
+          setTimeout(() => {
+            router.push('/');
+          }, 100);
+        }
+        
+        return;
+      }
+      
+      // 未ログインなら保護ページからログインページへリダイレクト
+      if (!user && !isLoginPage && !redirectedRef.current) {
+        console.log("ClientTokenCleaner: 未ログインユーザーをログインページへリダイレクト");
+        redirectedRef.current = true;
+        setRedirecting(true);
+        
+        // アニメーションのためにわずかに遅延
+        setTimeout(() => {
+          router.push('/login');
+        }, 100);
         return;
       }
       
@@ -62,8 +100,13 @@ export function ClientTokenCleaner() {
             // セッションをクリアして再ログインを促す
             await supabase.auth.signOut({ scope: 'local' });
             
-            // ログインページにリダイレクト
-            window.location.href = '/login';
+            // リダイレクト状態をセット
+            setRedirecting(true);
+            
+            // ログインページにリダイレクト（アニメーション遷移用に少し遅延）
+            setTimeout(() => {
+              window.location.href = '/login';
+            }, 100);
           }
           
           // ローカルストレージからクッキーへの移行
@@ -93,7 +136,20 @@ export function ClientTokenCleaner() {
       // 初期化時にセッションを確認
       checkSession();
     }
-  }, [isLoginPage]);
+  }, [isLoginPage, loading, user, router, redirecting]);
+  
+  // パスが変わったらリダイレクトフラグをリセット
+  useEffect(() => {
+    if (pathname !== lastPathRef.current) {
+      console.log("ClientTokenCleaner: パスが変更されたためリダイレクトフラグをリセット", {
+        oldPath: lastPathRef.current,
+        newPath: pathname
+      });
+      redirectedRef.current = false;
+      setRedirecting(false);
+      lastPathRef.current = pathname;
+    }
+  }, [pathname]);
   
   // このコンポーネントは何も表示しない
   return null;
