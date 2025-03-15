@@ -27,17 +27,16 @@ export function ClientTokenCleaner() {
         Cookies.remove(oldKey, { path: '/' });
       }
       
-      // Supabase URLからプロジェクトIDを抽出
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-      const projectId = supabaseUrl.match(/https:\/\/(.*?)\.supabase\.co/)?.[1] || 'bsgvaomswzkywbiubtjg';
-      const storageKey = `sb-${projectId}-auth-token`;
-      const codeVerifierKey = `sb-${projectId}-auth-code-verifier`;
-      
       // ログインページでは不整合チェックをスキップ（意図的なセッションクリアのため）
       if (isLoginPage) {
         console.log("ClientTokenCleaner: ログインページのため、不整合チェックをスキップします");
         return;
       }
+      
+      // Supabase URLからプロジェクトIDを抽出
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      const projectId = supabaseUrl.match(/https:\/\/(.*?)\.supabase\.co/)?.[1] || 'bsgvaomswzkywbiubtjg';
+      const storageKey = `sb-${projectId}-auth-token`;
       
       // 現在のセッションを確認
       const checkSession = async () => {
@@ -49,33 +48,22 @@ export function ClientTokenCleaner() {
             userId: data.session?.user?.id || "なし",
             error: error?.message || "なし",
             cookieExists: !!Cookies.get(storageKey),
-            codeVerifierExists: !!Cookies.get(codeVerifierKey),
             localStorageExists: !!localStorage.getItem(storageKey)
           });
           
-          // セッションがあるが、クッキーにトークンがない場合
-          // または、クッキーにトークンがあるが、セッションがない場合
+          // セッションがあるが、クッキーにトークンがない場合のみチェック
+          // より少ない条件でチェックすることで安定性を向上
           const hasCookieToken = !!Cookies.get(storageKey);
-          const hasCodeVerifier = !!Cookies.get(codeVerifierKey);
           const hasLocalStorageToken = !!localStorage.getItem(storageKey);
           
-          if ((data.session && !hasCookieToken) || (!data.session && hasCookieToken) || (data.session && !hasCodeVerifier)) {
+          if (data.session && !hasCookieToken) {
             console.log("ClientTokenCleaner: セッションとクッキーの不整合を検出");
             
             // セッションをクリアして再ログインを促す
             await supabase.auth.signOut({ scope: 'local' });
             
-            // クッキーを明示的に削除
-            Cookies.remove(storageKey, { path: '/' });
-            Cookies.remove(codeVerifierKey, { path: '/' });
-            
-            // ローカルストレージも削除
-            if (hasLocalStorageToken) {
-              localStorage.removeItem(storageKey);
-            }
-            
-            // ページをリロード
-            window.location.href = '/login?refresh=true&ts=' + Date.now();
+            // ログインページにリダイレクト
+            window.location.href = '/login';
           }
           
           // ローカルストレージからクッキーへの移行

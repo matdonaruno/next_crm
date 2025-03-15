@@ -104,10 +104,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     debug: process.env.NODE_ENV === 'development' // 開発環境のみデバッグ有効
   },
   global: {
-    // リクエストのタイムアウト設定を15秒に延長
+    // リクエストのタイムアウト設定
     fetch: (url, options) => {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15秒タイムアウト（10秒から延長）
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒タイムアウト
       
       return fetch(url, {
         ...options,
@@ -123,7 +123,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // デバッグ用：Supabaseクライアントの初期化確認
 console.log("Supabaseクライアントを初期化しました", { 
   storageKey,
-  timeout: "15秒",
+  timeout: "10秒",
   flowType: "pkce",
   storage: "cookie-based"
 });
