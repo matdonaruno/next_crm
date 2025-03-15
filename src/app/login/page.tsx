@@ -289,11 +289,11 @@ const AuthForm = () => {
                 >
                   <Button 
                     type="submit"
-                    className="w-full bg-gradient-to-r from-pink-400 to-purple-500 hover:from-pink-500 hover:to-purple-600 text-white font-medium py-2 rounded-xl transition-all duration-300"
+                    className="w-full bg-gradient-to-r from-pink-400 to-purple-500 hover:from-pink-500 hover:to-purple-600 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
                     disabled={authLoading || !email || !password}
                   >
                     {authLoading ? "処理中..." : isSignUp ? "新規登録" : "ログイン"}
-                    {!authLoading && <ArrowRight className="ml-2 h-4 w-4" />}
+                    {!authLoading && <ArrowRight className="ml-2 h-5 w-5" />}
                   </Button>
                 </motion.div>
 
