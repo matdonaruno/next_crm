@@ -10,9 +10,6 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ClientTokenCleaner } from "@/components/ClientTokenCleaner";
 import { LoadingUI } from "@/components/LoadingUI";
 import { Toaster } from "@/components/ui/toaster";
-import { useState, useEffect } from "react";
-import { useAuth } from "@/contexts/AuthContext";
-import { Spinner } from "@/components/common/Spinner";
 
 // フォント設定
 const geistSans = Geist({
@@ -24,48 +21,6 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
-
-// 遷移制御コンポーネント
-function TransitionManager({ children }: { children: React.ReactNode }) {
-  const { isTransitioning } = useAuth();
-  const [stableContent, setStableContent] = useState<React.ReactNode>(null);
-  
-  // 遷移状態が変わった時に安定したコンテンツを保存
-  useEffect(() => {
-    if (!isTransitioning) {
-      setStableContent(children);
-    }
-  }, [isTransitioning, children]);
-  
-  // 遷移中は前の状態を表示しつつオーバーレイでローディングを表示
-  if (isTransitioning) {
-    return (
-      <>
-        {stableContent || children}
-        <div className="fixed inset-0 bg-white bg-opacity-80 z-[9999] flex items-center justify-center">
-          <div className="text-center p-6 bg-white rounded-lg shadow-xl">
-            <Spinner size="lg" color="primary" />
-            <p className="mt-4 text-gray-700 font-medium">画面遷移中...</p>
-          </div>
-        </div>
-      </>
-    );
-  }
-  
-  return <>{children}</>;
-}
-
-// 実際のルートレイアウトはAuthProviderの内側でのみTransitionManagerをレンダリング
-function RootLayoutContent({ children }: { children: React.ReactNode }) {
-  return (
-    <TransitionManager>
-      <ClientTokenCleaner />
-      <LoadingUI />
-      {children}
-      <Toaster />
-    </TransitionManager>
-  );
-}
 
 export default function RootLayout({
   children,
@@ -89,9 +44,10 @@ export default function RootLayout({
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <AuthProvider>
-          <RootLayoutContent>
-            {children}
-          </RootLayoutContent>
+          <ClientTokenCleaner />
+          <LoadingUI />
+          {children}
+          <Toaster />
         </AuthProvider>
       </body>
     </html>

@@ -33,7 +33,6 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: any | null }>;
   signOut: () => Promise<void>;
   updateProfile: (data: Partial<UserProfile>) => Promise<{ error: any | null }>;
-  isTransitioning: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -48,8 +47,6 @@ const DATA_FETCH_TIMEOUT = 15000;
 const MAX_RETRY_COUNT = 3;
 // 再試行間隔（ミリ秒）
 const RETRY_INTERVAL = 1000;
-// 遷移後の安定化遅延（ミリ秒）
-const TRANSITION_DELAY = 300;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<any | null>(null);
@@ -59,15 +56,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loadingMessage, setLoadingMessage] = useState<string>('読み込み中...');
   const [lastActivity, setLastActivity] = useState<number>(Date.now());
   const [retryCount, setRetryCount] = useState<number>(0);
-  const [isTransitioning, setIsTransitioning] = useState(false);
   const router = useRouter();
 
   // 手動リロード - 状態をリセットしてからリロード
   const manualReload = () => {
     if (typeof window !== 'undefined') {
-      // 遷移状態を設定してリロードのチラつきを防ぐ
-      setIsTransitioning(true);
-
       // 現在のURLを取得
       const currentUrl = window.location.href;
       
@@ -76,10 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearAllAuthStorage();
       }
       
-      // 少し遅延してからリロードを実行（UIの安定化のため）
-      setTimeout(() => {
-        window.location.reload();
-      }, 100);
+      window.location.reload();
     }
   };
 
@@ -124,7 +114,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoadingState('error');
     setLoadingMessage('プロファイル情報の取得に時間がかかっています。手動で再読み込みしてください。');
     setLoading(false);
-    setIsTransitioning(false);
   };
 
   // プロファイル情報を取得する関数（再試行ロジック含む）
@@ -233,7 +222,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // セッションが無効になっている場合は、ユーザー状態をクリアしてログインページにリダイレクト
           setUser(null);
           setProfile(null);
-          setIsTransitioning(true);
           router.push('/login');
         }
       } catch (e) {
@@ -253,7 +241,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log("fetchUserAndProfile: ユーザー情報とプロファイル情報の取得を開始");
       setLoadingState('authenticating');
       setLoadingMessage('ユーザー情報を確認中...');
-      setIsTransitioning(true);
       
       const { data: { user }, error } = await supabase.auth.getUser();
       
@@ -266,7 +253,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false); // エラー時もローディング状態を解除
         setLoadingState('error');
         setLoadingMessage('ユーザー情報の取得に失敗しました');
-        setIsTransitioning(false);
         return;
       }
 
@@ -299,11 +285,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       console.log("fetchUserAndProfile: ユーザー情報とプロファイル情報の取得を完了, loading=false に設定");
       setLoading(false); // 常にロード完了時にloadingをfalseに設定
-      
-      // 状態が安定するまで少し待機してから遷移状態を終了
-      setTimeout(() => {
-        setIsTransitioning(false);
-      }, TRANSITION_DELAY);
     }
   };
 
@@ -312,7 +293,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     console.log("AuthContext: 初期化処理を開始");
     setLoadingState('authenticating');
     setLoadingMessage('認証状態を確認中...');
-    setIsTransitioning(true);
     
     // セッション管理を一元化した初期化処理
     const initializeAuth = async () => {
@@ -337,7 +317,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setLoading(false);
           setLoadingState('error');
           setLoadingMessage('セッションの取得に失敗しました');
-          setIsTransitioning(false);
           return;
         }
 
@@ -385,11 +364,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } finally {
         setLoading(false);
         console.log("AuthContext: 認証初期化完了");
-        
-        // 状態が安定するまで少し待機してから遷移状態を終了
-        setTimeout(() => {
-          setIsTransitioning(false);
-        }, TRANSITION_DELAY);
       }
     };
     
@@ -401,9 +375,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log("AuthContext: 認証状態変更イベント:", event, "セッション:", session?.user?.id || 'なし');
-        
-        // 状態変更時は遷移状態を開始
-        setIsTransitioning(true);
         
         if (session?.user) {
           console.log("AuthContext: 認証状態変更 - ユーザーあり:", session.user.id);
@@ -437,11 +408,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // 明示的にローディング状態を解除
           console.log("AuthContext: 認証状態変更処理完了 - loading=false に設定");
           setLoading(false);
-          
-          // 状態が安定するまで少し待機してから遷移状態を終了
-          setTimeout(() => {
-            setIsTransitioning(false);
-          }, TRANSITION_DELAY);
         } else {
           console.log("AuthContext: 認証状態変更 - ユーザーなし");
           setUser(null);
@@ -449,11 +415,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setLoading(false);
           setLoadingState('idle');
           setLoadingMessage('');
-          
-          // 状態が安定するまで少し待機してから遷移状態を終了
-          setTimeout(() => {
-            setIsTransitioning(false);
-          }, TRANSITION_DELAY);
         }
       }
     );
@@ -471,7 +432,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(true); // ログイン処理開始時にloadingをtrueに設定
       setLoadingState('authenticating');
       setLoadingMessage('ログイン中...');
-      setIsTransitioning(true);
       
       // 既存の認証関連ストレージをすべてクリア
       clearAllAuthStorage();
@@ -482,7 +442,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoadingState('error');
         setLoadingMessage('ログイン処理がタイムアウトしました。再試行してください。');
         setLoading(false);
-        setIsTransitioning(false);
       }, DATA_FETCH_TIMEOUT);
       
       // 直接fetchUserAndProfileを呼び出さず、認証とプロファイル取得を直接行う
@@ -506,7 +465,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false); // エラー時はloadingをfalseに設定
         setLoadingState('error');
         setLoadingMessage('ログインに失敗しました: ' + error.message);
-        setIsTransitioning(false);
         return { error };
       }
 
@@ -515,7 +473,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false);
         setLoadingState('error');
         setLoadingMessage('ユーザーデータが取得できませんでした');
-        setIsTransitioning(false);
         return { error: new Error("ユーザーデータが取得できませんでした") };
       }
 
@@ -533,7 +490,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setLoadingState('error');
           setLoadingMessage('プロファイル情報の取得に時間がかかっています。手動で再読み込みしてください。');
           setLoading(false);
-          setIsTransitioning(false);
         }, DATA_FETCH_TIMEOUT);
         
         // プロファイル情報を取得（再試行ロジック使用）
@@ -562,19 +518,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       console.log("signIn: 認証処理完了、loading状態をfalseに設定");
       setLoading(false);
-      
-      // 状態が安定するまで少し待機してから遷移状態を終了
-      setTimeout(() => {
-        setIsTransitioning(false);
-      }, TRANSITION_DELAY);
-      
       return { error: null };
     } catch (error) {
       console.error('signIn: ログイン処理中に例外が発生:', error);
       setLoading(false); // 例外発生時もloadingをfalseに設定
       setLoadingState('error');
       setLoadingMessage('ログイン処理中に例外が発生しました');
-      setIsTransitioning(false);
       return { error };
     }
   };
@@ -585,7 +534,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log("signOut: ログアウト処理を開始");
       setLoadingState('authenticating');
       setLoadingMessage('ログアウト中...');
-      setIsTransitioning(true);
       
       // ユーザー状態をクリア
       setUser(null);
@@ -601,15 +549,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoadingState('idle');
       setLoadingMessage('');
       
-      // ログインページに直接リダイレクトするのではなく、ルーターを使用
-      // 少し待機してからリダイレクト（遷移を安定させるため）
+      // 少し待ってからログインページにリダイレクト（ストレージのクリアを完了させるため）
       setTimeout(() => {
         router.push('/login');
-        
-        // さらに遅延して遷移状態を終了（リダイレクト後の安定化）
-        setTimeout(() => {
-          setIsTransitioning(false);
-        }, TRANSITION_DELAY);
       }, 100);
     } catch (error) {
       console.error('Error signing out:', error);
@@ -618,15 +560,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       // エラーがあっても強制的にストレージをクリアしてログアウト
       clearAllAuthStorage();
-      
-      // ログインページに強制リダイレクト
       setTimeout(() => {
         router.push('/login');
-        
-        // さらに遅延して遷移状態を終了（リダイレクト後の安定化）
-        setTimeout(() => {
-          setIsTransitioning(false);
-        }, TRANSITION_DELAY);
       }, 100);
     }
   };
@@ -638,7 +573,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       setLoadingState('loading-profile');
       setLoadingMessage('プロファイル情報を更新中...');
-      setIsTransitioning(true);
 
       const { error } = await supabase
         .from('profiles')
@@ -653,18 +587,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoadingState('error');
         setLoadingMessage('プロファイル更新に失敗しました');
       }
-      
-      // 状態が安定するまで少し待機してから遷移状態を終了
-      setTimeout(() => {
-        setIsTransitioning(false);
-      }, TRANSITION_DELAY);
 
       return { error };
     } catch (error) {
       console.error('Error updating profile:', error);
       setLoadingState('error');
       setLoadingMessage('プロファイル更新中に例外が発生しました');
-      setIsTransitioning(false);
       return { error };
     }
   };
@@ -679,7 +607,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signIn,
     signOut,
     updateProfile,
-    isTransitioning,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
