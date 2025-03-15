@@ -10,6 +10,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ClientTokenCleaner } from "@/components/ClientTokenCleaner";
 import { LoadingUI } from "@/components/LoadingUI";
 import { Toaster } from "@/components/ui/toaster";
+import { PageTransition } from "@/components/PageTransition";
 
 // フォント設定
 const geistSans = Geist({
@@ -46,7 +47,9 @@ export default function RootLayout({
         <AuthProvider>
           <ClientTokenCleaner />
           <LoadingUI />
-          {children}
+          <PageTransition>
+            {children}
+          </PageTransition>
           <Toaster />
         </AuthProvider>
       </body>
