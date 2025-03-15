@@ -32,16 +32,23 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   // パスエイリアスの設定を追加
-  webpack: (config) => {
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      '@': path.resolve(__dirname),
-    };
-    return config;
+  experimental: {
+    // WebpackでのパスエイリアスをFalseにして、tsconfig.jsonのパスエイリアスを優先
+    transpilePackages: ['@'],
   },
   // ESLintの警告を無視してビルドを進める
   eslint: {
     ignoreDuringBuilds: true,
+  },
+  // ビルドの詳細ログを出力
+  output: 'standalone',
+  distDir: '.next',
+  // ビルドエラーをデバッグ用に詳細表示
+  onDemandEntries: {
+    // period (in ms) where the server will keep pages in the buffer
+    maxInactiveAge: 60 * 1000,
+    // number of pages that should be kept simultaneously without being disposed
+    pagesBufferLength: 5,
   },
 };
 
