@@ -3,10 +3,10 @@
 import Link from 'next/link';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '../../lib/supabaseClient'; 
-import { useAuth } from '../../contexts/AuthContext';
-import { AppHeader } from '../../components/ui/app-header';
-import { cacheDepartments, getCachedDepartments } from '../../lib/departmentCache';
+import { supabase } from '@/lib/supabaseClient'; 
+import { useAuth } from '@/contexts/AuthContext';
+import { AppHeader } from '@/components/ui/app-header';
+import { cacheDepartments, getCachedDepartments } from '@/lib/departmentCache';
 
 interface Department {
     id: string;
