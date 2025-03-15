@@ -1,8 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Spinner } from '@/components/common/Spinner';
+import { usePathname } from 'next/navigation';
 
 // ローディング状態に応じた色を定義
 const stateColors = {
@@ -14,10 +15,38 @@ const stateColors = {
 
 export function LoadingUI() {
   const { loading, loadingState, loadingMessage, manualReload } = useAuth();
+  const pathname = usePathname();
+  const [isLoginPage, setIsLoginPage] = useState(false);
+  
+  // 現在のパスがログインページかをチェック
+  useEffect(() => {
+    setIsLoginPage(pathname === '/login');
+  }, [pathname]);
   
   // ローディング中でなければ何も表示しない
   if (!loading && loadingState === 'idle') {
     return null;
+  }
+  
+  // ログインページでのエラー表示を簡素化
+  if (isLoginPage && loadingState === 'error') {
+    return (
+      <div className="fixed top-0 left-0 w-full p-4 flex justify-center z-50">
+        <div className="bg-red-50 text-red-700 px-4 py-3 rounded-md shadow-md max-w-md w-full">
+          <div className="flex">
+            <div className="py-1 mr-3">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div>
+              <p className="font-bold">エラーが発生しました</p>
+              <p className="text-sm">{loadingMessage || 'ログイン処理中にエラーが発生しました。再試行してください。'}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
   
   return (
@@ -49,15 +78,16 @@ export function LoadingUI() {
         {loadingState === 'error' && (
           <div className="text-center">
             <p className="text-sm text-gray-500 mb-4">
-              時間をおいてもう一度お試しください。
-              問題が解決しない場合は管理者にお問い合わせください。
+              {isLoginPage ? 
+                'もう一度ログインをお試しください。' : 
+                '時間をおいてもう一度お試しください。問題が解決しない場合は管理者にお問い合わせください。'}
             </p>
             
             <button
               onClick={manualReload}
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-colors"
             >
-              再読み込み
+              {isLoginPage ? 'ログインページを再読み込み' : '再読み込み'}
             </button>
           </div>
         )}
