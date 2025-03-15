@@ -32,9 +32,12 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   // パスエイリアスの設定を追加
-  experimental: {
-    // WebpackでのパスエイリアスをFalseにして、tsconfig.jsonのパスエイリアスを優先
-    transpilePackages: ['@'],
+  webpack: (config) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@': path.resolve(__dirname, 'src'),
+    };
+    return config;
   },
   // ESLintの警告を無視してビルドを進める
   eslint: {
