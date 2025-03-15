@@ -82,6 +82,23 @@ const AuthForm = () => {
     }
   }, [user, loading, router, redirecting]);
 
+  // リダイレクト状態が変わった時に強制的にリダイレクトを実行
+  useEffect(() => {
+    if (redirecting && user) {
+      console.log("LoginPage: リダイレクト状態が変更されました。強制的にリダイレクトを実行します", user.id);
+      
+      // router.pushが機能しない場合に備えて、window.locationも使用
+      setTimeout(() => {
+        try {
+          console.log("LoginPage: 強制リダイレクト実行", user.id);
+          window.location.href = '/depart';
+        } catch (e) {
+          console.error("LoginPage: リダイレクト中にエラーが発生しました", e);
+        }
+      }, 1000);
+    }
+  }, [redirecting, user]);
+
   const handleAuth = async () => {
     setError("");
     setAuthLoading(true);
@@ -114,7 +131,11 @@ const AuthForm = () => {
         } else {
           console.log("LoginPage: サインイン成功、リダイレクト準備中");
           // 成功時はリダイレクト状態を維持
-          // リダイレクトは上記のuseEffectで処理される
+          // ただし、明示的にリダイレクトも実行
+          setTimeout(() => {
+            console.log("LoginPage: サインイン成功後、明示的にリダイレクト実行");
+            window.location.href = '/depart';
+          }, 1000);
         }
       }
     } catch (error: any) {
