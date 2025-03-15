@@ -54,6 +54,8 @@ function ReagentRegistrationContent() {
   const [error, setError] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [showCamera, setShowCamera] = useState<boolean>(true);
+  const [currentUserName, setCurrentUserName] = useState("");
+  const [facilityName, setFacilityName] = useState("");
   const { toast } = useToast(); // トースト通知を使用
   
   // 部署一覧、商品CSV、バーコード読み取り状況
@@ -104,6 +106,38 @@ function ReagentRegistrationContent() {
       setValue("departmentId", departmentId);
     }
   }, [departmentName, departmentId, setValue, addDebugLog]);
+
+  // ユーザー情報と施設情報の取得
+  const fetchUserAndFacilityInfo = useCallback(async () => {
+    try {
+      // プロファイル情報からユーザー名を取得
+      if (profile?.fullname) {
+        setCurrentUserName(profile.fullname);
+      }
+      
+      // 施設情報を取得
+      if (profile?.facility_id) {
+        const { data: facilityData, error: facilityError } = await supabase
+          .from("facilities")
+          .select("name")
+          .eq("id", profile.facility_id)
+          .single();
+          
+        if (!facilityError && facilityData) {
+          setFacilityName(facilityData.name);
+        }
+      }
+    } catch (error) {
+      addDebugLog("ユーザーおよび施設情報取得エラー: " + JSON.stringify(error));
+    }
+  }, [profile, addDebugLog]);
+
+  // コンポーネントマウント時にユーザー情報と施設情報を取得
+  useEffect(() => {
+    if (!loading && user && profile) {
+      fetchUserAndFacilityInfo();
+    }
+  }, [loading, user, profile, fetchUserAndFacilityInfo]);
 
   // 試薬登録処理
   const registerReagent = async (startUsage: boolean) => {
@@ -589,6 +623,20 @@ function ReagentRegistrationContent() {
               <p className="text-lg" style={{ color: '#8167a9' }}>
                 Barcode scan select 1D/2D for automatic data entry
               </p>
+              
+              {/* ユーザー情報表示 - 中央揃え */}
+              <div className="mt-2 text-center">
+                {facilityName && (
+                  <p className="text-sm text-gray-600">
+                    施設「{facilityName}」
+                  </p>
+                )}
+                {currentUserName && (
+                  <p className="text-sm text-gray-600">
+                    {currentUserName}さんがログインしています！
+                  </p>
+                )}
+              </div>
             </div>
 
             {/* ローディング中の表示 */}

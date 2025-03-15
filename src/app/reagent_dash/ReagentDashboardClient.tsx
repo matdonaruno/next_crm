@@ -82,6 +82,7 @@ export default function ReagentDashboardClient() {
   const [reagents, setReagents] = useState<Reagent[]>([]);
   const [reagentItems, setReagentItems] = useState<ReagentItem[]>([]); // 試薬アイテムの状態を追加
   const [currentUserName, setCurrentUserName] = useState("");
+  const [facilityName, setFacilityName] = useState(""); // 施設名の状態を追加
   // フィルター用の状態
   const [selectedDepartment, setSelectedDepartment] = useState("all");
   const [showEnded, setShowEnded] = useState(false);
@@ -495,22 +496,38 @@ export default function ReagentDashboardClient() {
 
   // カレントユーザーの氏名取得
   const fetchCurrentUserProfile = async () => {
-    const { data: userData, error } = await supabase.auth.getUser();
-    if (error || !userData.user) {
-      console.error("Error fetching current user:", error);
-      return;
-    }
-    const userId = userData.user.id;
-    
-    const { data: profileData, error: profileError } = await supabase
-      .from("profiles")
-      .select("fullname")
-      .eq("id", userId)
-      .maybeSingle();
-    if (profileError) {
-      console.error("Error fetching profile:", profileError);
-    } else if (profileData) {
-      setCurrentUserName(profileData.fullname);
+    if (!user) return;
+    try {
+      // プロファイル情報を取得
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("fullname, facility_id")
+        .eq("id", user.id)
+        .single();
+
+      if (profileError) {
+        console.error("プロファイル取得エラー:", profileError);
+        return;
+      }
+
+      if (profileData) {
+        setCurrentUserName(profileData.fullname || "");
+        
+        // 施設情報を取得
+        if (profileData.facility_id) {
+          const { data: facilityData, error: facilityError } = await supabase
+            .from("facilities")
+            .select("name")
+            .eq("id", profileData.facility_id)
+            .single();
+            
+          if (!facilityError && facilityData) {
+            setFacilityName(facilityData.name);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("ユーザープロファイル取得エラー:", error);
     }
   };
 
@@ -787,6 +804,11 @@ export default function ReagentDashboardClient() {
         <main className="flex-grow container mx-auto px-4 py-8" style={{ backgroundColor: '#ffffff' }}>
           {/* カレントユーザーの氏名表示 */}
           <div className="mb-4 text-right">
+            {facilityName && (
+              <p className="text-sm text-gray-600">
+                施設「{facilityName}」
+              </p>
+            )}
             {currentUserName && (
               <p className="text-sm text-gray-600">
                 {currentUserName}さんがログインしています！

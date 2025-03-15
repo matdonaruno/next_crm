@@ -5,8 +5,10 @@ import { motion } from 'framer-motion';
 import { ThermometerSnowflake, Wrench, ChartLine, FlaskRound, AlertTriangle } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { AppHeader } from '@/components/ui/app-header';
+import { supabase } from '@/lib/supabaseClient'; 
+import { useAuth } from '@/contexts/AuthContext';
 
 // 通知の型定義
 interface Notification {
@@ -61,6 +63,9 @@ export default function TaskPickClient() {
   const searchParams = useSearchParams();
   const departmentName = searchParams?.get('department') || 'Department';
   const departmentId = searchParams?.get('departmentId') || '';
+  const { user, profile } = useAuth();
+  const [currentUserName, setCurrentUserName] = useState("");
+  const [facilityName, setFacilityName] = useState("");
   // サンプル通知
   const [notifications] = useState<Notification[]>([
     {
@@ -76,6 +81,36 @@ export default function TaskPickClient() {
       timestamp: new Date(),
     }
   ]);
+
+  // ユーザー情報と施設情報の取得
+  const fetchUserAndFacilityInfo = useCallback(async () => {
+    try {
+      // プロファイル情報からユーザー名を取得
+      if (profile?.fullname) {
+        setCurrentUserName(profile.fullname);
+      }
+      
+      // 施設情報を取得
+      if (profile?.facility_id) {
+        const { data: facilityData, error: facilityError } = await supabase
+          .from("facilities")
+          .select("name")
+          .eq("id", profile.facility_id)
+          .single();
+          
+        if (!facilityError && facilityData) {
+          setFacilityName(facilityData.name);
+        }
+      }
+    } catch (error) {
+      console.error("ユーザーおよび施設情報取得エラー:", error);
+    }
+  }, [profile]);
+
+  // コンポーネントマウント時にユーザー情報と施設情報を取得
+  useEffect(() => {
+    fetchUserAndFacilityInfo();
+  }, [fetchUserAndFacilityInfo]);
 
   const handleCardClick = (path: string) => {
     router.push(
@@ -125,6 +160,22 @@ export default function TaskPickClient() {
             </div>
           </div>
         )}
+
+        {/* ユーザー情報表示 */}
+        <div className="w-full px-4 py-2">
+          <div className="text-right">
+            {facilityName && (
+              <p className="text-sm text-gray-600">
+                施設「{facilityName}」
+              </p>
+            )}
+            {currentUserName && (
+              <p className="text-sm text-gray-600">
+                {currentUserName}さんがログインしています！
+              </p>
+            )}
+          </div>
+        </div>
 
         {/* メインコンテンツ */}
         <div className="flex-grow flex flex-col items-center justify-center py-12 px-4">

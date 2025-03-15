@@ -21,6 +21,8 @@ export default function Home() {
   const [activeDept, setActiveDept] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isMenuActive, setIsMenuActive] = useState(false);
+  const [currentUserName, setCurrentUserName] = useState("");
+  const [facilityName, setFacilityName] = useState("");
   const menuIconRef = useRef<HTMLDivElement>(null);
   
   // 認証とプロファイルチェックe
@@ -224,6 +226,39 @@ export default function Home() {
     }
   }, [loading, profile, setIsLoading]);
 
+  // ユーザー情報と施設情報の取得
+  const fetchUserAndFacilityInfo = useCallback(async () => {
+    if (!user) return;
+    try {
+      // プロファイル情報からユーザー名を取得
+      if (profile?.fullname) {
+        setCurrentUserName(profile.fullname);
+      }
+      
+      // 施設情報を取得
+      if (profile?.facility_id) {
+        const { data: facilityData, error: facilityError } = await supabase
+          .from("facilities")
+          .select("name")
+          .eq("id", profile.facility_id)
+          .single();
+          
+        if (!facilityError && facilityData) {
+          setFacilityName(facilityData.name);
+        }
+      }
+    } catch (error) {
+      console.error("ユーザーおよび施設情報取得エラー:", error);
+    }
+  }, [user, profile]);
+
+  // コンポーネントマウント時にユーザー情報と施設情報を取得
+  useEffect(() => {
+    if (!loading && user && profile) {
+      fetchUserAndFacilityInfo();
+    }
+  }, [loading, user, profile, fetchUserAndFacilityInfo]);
+
   // 部署データ取得の実行
   useEffect(() => {
     fetchDepartments();
@@ -332,9 +367,21 @@ export default function Home() {
       <header className="cd-header mt-8 pt-4">
         <div className="header-wrapper">
           <div className="logo-wrap">
-          <a href="#" className="hover-target">
+            <a href="#" className="hover-target">
               <span>life has</span>limit
             </a>
+            <div className="mb-4 text-right">
+              {facilityName && (
+                <p className="text-sm text-gray-600">
+                  施設「{facilityName}」
+                </p>
+              )}
+              {currentUserName && (
+                <p className="text-sm text-gray-600">
+                  {currentUserName}さんがログインしています！
+                </p>
+              )}
+            </div>
           </div>
           <div className="nav-but-wrap">
             <div 

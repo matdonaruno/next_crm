@@ -6,6 +6,8 @@ import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { DayContentProps } from "react-day-picker";
+import { getCachedFacility, cacheFacility } from '@/lib/facilityCache';
+import { getCurrentUser } from '@/lib/userCache';
 
 interface TemperatureRecordDetail {
   id: string;
@@ -41,6 +43,9 @@ export default function TemperatureManagementClient() {
   const [records, setRecords] = useState<TemperatureRecord[]>([]);
   const [datesWithData, setDatesWithData] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  const [facilityName, setFacilityName] = useState<string>("");
+  const [facilityId, setFacilityId] = useState<string>("");
+  const [userName, setUserName] = useState<string>("");
 
   useEffect(() => {
     if (!departmentId) return;
@@ -48,97 +53,226 @@ export default function TemperatureManagementClient() {
     const fetchItems = async () => {
       setLoading(true);
       
-      // ユーザーの施設IDを取得
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) {
-        console.error("ユーザー情報の取得に失敗しました");
-        setLoading(false);
-        return;
-      }
-      
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("facility_id")
-        .eq("id", userData.user.id)
-        .single();
+      try {
+        // ユーザー情報を取得（キャッシュ→DB）
+        const userProfile = await getCurrentUser();
+        if (userProfile && userProfile.fullname) {
+          setUserName(userProfile.fullname);
+        }
         
-      if (profileError || !profileData?.facility_id) {
-        console.error("施設情報の取得に失敗しました");
-        setLoading(false);
-        return;
-      }
-      
-      const { data, error } = await supabase
-        .from("temperature_items")
-        .select("id, item_name, display_name, default_value, display_order, department_id, facility_id")
-        .eq("department_id", departmentId)
-        .eq("facility_id", profileData.facility_id)
-        .order("display_order", { ascending: true });
+        // 施設情報を取得（キャッシュ→DB）
+        const cachedFacility = getCachedFacility();
+        
+        if (cachedFacility && cachedFacility.id) {
+          // キャッシュに施設情報がある場合はそれを使用
+          setFacilityId(cachedFacility.id);
+          setFacilityName(cachedFacility.name || '');
+          
+          // キャッシュから取得した施設IDでアイテムを取得
+          const { data, error } = await supabase
+            .from("temperature_items")
+            .select("id, item_name, display_name, default_value, display_order, department_id, facility_id")
+            .eq("department_id", departmentId)
+            .eq("facility_id", cachedFacility.id)
+            .order("display_order", { ascending: true });
 
-      if (error) {
-        console.error("Temperature Items Error:", error);
-      } else if (data) {
-        setTemperatureItems(data);
+          if (error) {
+            console.error("Temperature Items Error:", error);
+          } else if (data) {
+            setTemperatureItems(data);
+          }
+          
+          setLoading(false);
+          return; // キャッシュから取得できたので処理終了
+        }
+      
+        // キャッシュに施設情報がない場合はデータベースから取得
+        if (!userProfile || !userProfile.id) {
+          console.error("ユーザー情報の取得に失敗しました");
+          setLoading(false);
+          return;
+        }
+        
+        // ユーザーのプロファイルから施設IDを取得
+        const { data: profileData, error: profileError } = await supabase
+          .from("profiles")
+          .select("facility_id")
+          .eq("id", userProfile.id)
+          .single();
+          
+        if (profileError || !profileData?.facility_id) {
+          console.error("施設情報の取得に失敗しました");
+          setLoading(false);
+          return;
+        }
+        
+        // 施設情報を取得
+        const { data: facilityData, error: facilityError } = await supabase
+          .from("facilities")
+          .select("id, name")
+          .eq("id", profileData.facility_id)
+          .single();
+          
+        if (!facilityError && facilityData) {
+          setFacilityId(facilityData.id);
+          setFacilityName(facilityData.name);
+          
+          // 施設情報をキャッシュに保存
+          cacheFacility({
+            id: facilityData.id,
+            name: facilityData.name
+          });
+        }
+        
+        const { data, error } = await supabase
+          .from("temperature_items")
+          .select("id, item_name, display_name, default_value, display_order, department_id, facility_id")
+          .eq("department_id", departmentId)
+          .eq("facility_id", profileData.facility_id)
+          .order("display_order", { ascending: true });
+
+        if (error) {
+          console.error("Temperature Items Error:", error);
+        } else if (data) {
+          setTemperatureItems(data);
+        }
+      } catch (error) {
+        console.error("Error fetching items:", error);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     const fetchRecords = async () => {
       setLoading(true);
       
-      // ユーザーの施設IDを取得
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) {
-        console.error("ユーザー情報の取得に失敗しました");
-        setLoading(false);
-        return;
-      }
-      
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("facility_id")
-        .eq("id", userData.user.id)
-        .single();
+      try {
+        // まずキャッシュから施設情報を取得
+        const cachedFacility = getCachedFacility();
         
-      if (profileError || !profileData?.facility_id) {
-        console.error("施設情報の取得に失敗しました");
-        setLoading(false);
-        return;
-      }
+        if (cachedFacility && cachedFacility.id) {
+          // キャッシュに施設情報がある場合はそれを使用
+          const { data, error } = await supabase
+            .from("temperature_records")
+            .select(`
+              id,
+              record_date,
+              temperature_record_details (
+                id,
+                temperature_item_id,
+                value
+              ),
+              facility_id
+            `)
+            .eq("department_id", departmentId)
+            .eq("facility_id", cachedFacility.id)
+            .order("record_date", { ascending: false });
+    
+          if (error) {
+            console.error("Temperature Records Error:", error);
+          } else if (data) {
+            setRecords(data);
+            const dateSet = new Set(
+              data.map(record =>
+                new Date(record.record_date).toISOString().split("T")[0]
+              )
+            );
+            setDatesWithData(dateSet);
+          }
+          
+          setLoading(false);
+          return; // キャッシュから取得できたので処理終了
+        }
       
-      const { data, error } = await supabase
-        .from("temperature_records")
-        .select(`
-          id,
-          record_date,
-          temperature_record_details (
-            id,
-            temperature_item_id,
-            value
-          ),
-          facility_id
-        `)
-        .eq("department_id", departmentId)
-        .eq("facility_id", profileData.facility_id)
-        .order("record_date", { ascending: false });
-
-      if (error) {
-        console.error("Temperature Records Error:", error);
-      } else if (data) {
-        setRecords(data);
-        const dateSet = new Set(
-          data.map(record =>
-            new Date(record.record_date).toISOString().split("T")[0]
-          )
-        );
-        setDatesWithData(dateSet);
+        // キャッシュに施設情報がない場合はデータベースから取得
+        const userProfile = await getCurrentUser();
+        if (!userProfile || !userProfile.id) {
+          console.error("ユーザー情報の取得に失敗しました");
+          setLoading(false);
+          return;
+        }
+        
+        // 施設IDの取得がまだであれば取得
+        if (!facilityId) {
+          const { data: profileData, error: profileError } = await supabase
+            .from("profiles")
+            .select("facility_id")
+            .eq("id", userProfile.id)
+            .single();
+            
+          if (profileError || !profileData?.facility_id) {
+            console.error("施設情報の取得に失敗しました");
+            setLoading(false);
+            return;
+          }
+          
+          const { data, error } = await supabase
+            .from("temperature_records")
+            .select(`
+              id,
+              record_date,
+              temperature_record_details (
+                id,
+                temperature_item_id,
+                value
+              ),
+              facility_id
+            `)
+            .eq("department_id", departmentId)
+            .eq("facility_id", profileData.facility_id)
+            .order("record_date", { ascending: false });
+      
+          if (error) {
+            console.error("Temperature Records Error:", error);
+          } else if (data) {
+            setRecords(data);
+            const dateSet = new Set(
+              data.map(record =>
+                new Date(record.record_date).toISOString().split("T")[0]
+              )
+            );
+            setDatesWithData(dateSet);
+          }
+        } else {
+          // 既に施設IDがある場合はそれを使用
+          const { data, error } = await supabase
+            .from("temperature_records")
+            .select(`
+              id,
+              record_date,
+              temperature_record_details (
+                id,
+                temperature_item_id,
+                value
+              ),
+              facility_id
+            `)
+            .eq("department_id", departmentId)
+            .eq("facility_id", facilityId)
+            .order("record_date", { ascending: false });
+      
+          if (error) {
+            console.error("Temperature Records Error:", error);
+          } else if (data) {
+            setRecords(data);
+            const dateSet = new Set(
+              data.map(record =>
+                new Date(record.record_date).toISOString().split("T")[0]
+              )
+            );
+            setDatesWithData(dateSet);
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching records:", error);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     fetchItems();
     fetchRecords();
-  }, [departmentId]);
+  }, [departmentId, facilityId]);
 
   const CustomDayContent = (props: DayContentProps) => {
     const dateStr = props.date.toISOString().split("T")[0];
@@ -198,7 +332,16 @@ export default function TemperatureManagementClient() {
         {/* 通知エリア */}
         <div className="bg-accent/30 border border-border p-4 rounded-lg animate-fadeIn">
           <p className="text-sm text-foreground">
-            Welcome to the temperature management system for {departmentName}. Here you can track and manage temperature records.
+            {facilityName && (
+              <span className="font-semibold">施設「{facilityName}」</span>
+            )}
+            {userName && facilityName && (
+              <span> - </span>
+            )}
+            {userName && (
+              <span className="font-semibold">{userName}さん</span>
+            )}
+            の温度管理システムへようこそ。ここでは温度記録の管理ができます。
           </p>
         </div>
 
