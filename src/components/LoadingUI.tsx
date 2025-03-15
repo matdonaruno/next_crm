@@ -26,6 +26,7 @@ export function LoadingUI() {
   const pathname = usePathname();
   const [isLoginPage, setIsLoginPage] = useState(false);
   const [visible, setVisible] = useState(false);
+  const [showReloadMessage, setShowReloadMessage] = useState(false);
   
   // 現在のパスがログインページかをチェック
   useEffect(() => {
@@ -36,8 +37,19 @@ export function LoadingUI() {
   useEffect(() => {
     if (loading || loadingState !== 'idle') {
       setVisible(true);
+      // ローディングが10秒以上続いた場合、リロードメッセージを表示
+      const timer = setTimeout(() => {
+        if (loading || loadingState !== 'idle') {
+          setShowReloadMessage(true);
+        }
+      }, 10000);
+      
+      return () => {
+        clearTimeout(timer);
+      };
     } else {
       // ローディングが終了した場合、少し遅延させて非表示にすることでアニメーションを見せる
+      setShowReloadMessage(false);
       const timer = setTimeout(() => setVisible(false), 300);
       return () => clearTimeout(timer);
     }
@@ -119,18 +131,47 @@ export function LoadingUI() {
             layout
             className="text-xl font-semibold text-center mt-4 mb-2"
           >
-            {loadingState === 'authenticating' && '認証処理中'}
-            {loadingState === 'loading-profile' && 'プロファイル読み込み中'}
-            {loadingState === 'error' && 'エラーが発生しました'}
-            {loadingState === 'idle' && 'データ読み込み中'}
+            {loadingMessage || (
+              <>
+                {loadingState === 'authenticating' && '認証処理中'}
+                {loadingState === 'loading-profile' && 'プロファイル読み込み中'}
+                {loadingState === 'error' && 'エラーが発生しました'}
+                {loadingState === 'idle' && 'データ読み込み中'}
+              </>
+            )}
           </motion.h2>
           
-          <motion.p 
-            layout
-            className="text-gray-600 text-center mb-4"
-          >
-            {loadingMessage || 'しばらくお待ちください...'}
-          </motion.p>
+          {!loadingMessage && (
+            <motion.p 
+              layout
+              className="text-gray-600 text-center mb-4"
+            >
+              {'しばらくお待ちください...'}
+            </motion.p>
+          )}
+
+          {showReloadMessage && loadingState !== 'error' && (
+            <motion.div
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md"
+            >
+              <p className="text-sm text-yellow-700 text-center">
+                ローディングが長く続いています。<br />
+                問題が解決しない場合は、ブラウザをリロードしてください。
+              </p>
+              <div className="mt-2 flex justify-center">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={manualReload}
+                  className="px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-opacity-50 transition-colors text-sm"
+                >
+                  ページを再読み込み
+                </motion.button>
+              </div>
+            </motion.div>
+          )}
           
           {loadingState === 'error' && (
             <motion.div 
