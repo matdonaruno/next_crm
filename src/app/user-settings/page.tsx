@@ -2,17 +2,21 @@
 
 import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { AlertTriangle, Search } from "lucide-react";
+import { AlertTriangle, Search, UserRound, Mail, Building, Sprout, ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { AppHeader } from "@/components/ui/app-header";
+import { Separator } from "@/components/ui/separator";
+import { motion } from "framer-motion";
+import { supabase } from "@/lib/supabaseClient";
 
 type FormValues = {
-  fullname: string;
+  lastName: string;
+  firstName: string;
 };
 
 interface Facility {
@@ -22,7 +26,7 @@ interface Facility {
 
 export default function UserSettings() {
   const { user, profile, updateProfile } = useAuth();
-  const { register, handleSubmit, setValue } = useForm<FormValues>();
+  const { register, handleSubmit, setValue, formState: { errors } } = useForm<FormValues>();
   const router = useRouter();
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -37,12 +41,20 @@ export default function UserSettings() {
 
   useEffect(() => {
     if (profile) {
-      setValue("fullname", profile.fullname || "");
+      // フルネームを姓と名に分割
+      const fullnameParts = (profile.fullname || "").split(" ");
+      setValue("lastName", fullnameParts[0] || "");
+      setValue("firstName", fullnameParts[1] || "");
       
       // 施設IDが設定されている場合、選択された施設を設定
       if (profile.facility_id) {
+        console.log("プロファイルから施設ID検出: ", profile.facility_id);
         fetchSelectedFacility(profile.facility_id);
+      } else {
+        console.log("プロファイルに施設IDがありません");
       }
+    } else {
+      console.log("プロファイルがロードされていません");
     }
   }, [profile, setValue]);
 
@@ -74,14 +86,33 @@ export default function UserSettings() {
   // 選択された施設の詳細を取得
   const fetchSelectedFacility = async (facilityId: string) => {
     try {
+      console.log("施設ID取得: ", facilityId);
       const response = await fetch('/hospital_facilities.json');
       const data = await response.json();
       
       if (data.facilities[facilityId]) {
+        console.log("施設名取得成功: ", data.facilities[facilityId].name);
         setSelectedFacility({
           id: facilityId,
           name: data.facilities[facilityId].name
         });
+      } else {
+        // 施設IDはあるが、JSONデータに該当施設がない場合
+        console.log("施設IDに対応する施設データがありません");
+        // Supabaseから直接施設情報を取得してみる
+        const { data: facilityData, error: facilityError } = await supabase
+          .from("facilities")
+          .select("name")
+          .eq("id", facilityId)
+          .single();
+          
+        if (!facilityError && facilityData) {
+          console.log("Supabaseから施設名取得成功: ", facilityData.name);
+          setSelectedFacility({
+            id: facilityId,
+            name: facilityData.name
+          });
+        }
       }
     } catch (error) {
       console.error('施設情報の取得に失敗しました:', error);
@@ -120,9 +151,9 @@ export default function UserSettings() {
       setError("");
       setMessage("");
 
-      // フルネームが入力されていない場合はエラー
-      if (!data.fullname.trim()) {
-        setError("氏名は必須です。");
+      // 姓と名が入力されていない場合はエラー
+      if (!data.lastName.trim() || !data.firstName.trim()) {
+        setError("姓と名を入力してください。");
         return;
       }
 
@@ -132,9 +163,12 @@ export default function UserSettings() {
         return;
       }
 
+      // 姓と名を連結してフルネームを作成
+      const fullname = `${data.lastName} ${data.firstName}`;
+
       // プロファイル情報を更新
       const { error } = await updateProfile({
-        fullname: data.fullname,
+        fullname: fullname,
         facility_id: selectedFacility.id
       });
 
@@ -160,67 +194,97 @@ export default function UserSettings() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#fde3f1] to-[#e9ddfc]">
-      <AppHeader showBackButton={false} title="ユーザー設定" />
+    <div className="min-h-screen bg-gradient-to-b from-pink-50 to-purple-50">
+      <AppHeader showBackButton={true} title="ユーザー設定" />
       
-      <div className="container mx-auto p-4 space-y-6">
-        <Card className="w-full max-w-md mx-auto mt-8">
-          <CardHeader>
-            <CardTitle>プロファイル情報</CardTitle>
+      <div className="container mx-auto px-4 py-6">
+        <Card className="max-w-md mx-auto mt-8 border-pink-200 shadow-md">
+          <CardHeader className="bg-gradient-to-r from-pink-100 to-purple-100 rounded-t-lg">
+            <CardTitle className="flex items-center gap-2 text-pink-800">
+              <UserRound className="h-5 w-5" />
+              ユーザー設定
+            </CardTitle>
+            <CardDescription>プロフィール情報の確認と更新</CardDescription>
           </CardHeader>
-          <CardContent>
-            {/* 現在のプロファイル情報の表示 */}
-            {profile && (
-              <div className="mb-6 space-y-2">
-                <p className="text-sm text-gray-600">
-                  メールアドレス: {user?.email}
-                </p>
-                {profile.fullname && (
-                  <p className="text-sm text-gray-600">
-                    現在の氏名: {profile.fullname}
-                  </p>
-                )}
-                {selectedFacility ? (
-                  <p className="text-sm text-gray-600">
-                    所属施設: {selectedFacility.name}
-                  </p>
-                ) : profile.facility_id ? (
-                  <p className="text-sm text-gray-600">
-                    施設ID: {profile.facility_id}
-                  </p>
-                ) : (
-                  <div className="p-3 bg-yellow-50 border border-yellow-300 rounded-md">
-                    <div className="flex items-start">
-                      <AlertTriangle className="h-5 w-5 text-yellow-500 mr-2 mt-0.5" />
-                      <p className="text-sm text-yellow-700">
-                        所属施設が登録されていません。
-                        施設を選択してください。
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+          
+          <CardContent className="pt-6">
+            {/* 現在の設定表示 */}
+            <div className="mb-6 bg-pink-50 p-4 rounded-lg border border-pink-100">
+              <h3 className="text-sm font-medium text-pink-800 mb-3 flex items-center">
+                <Sprout className="h-4 w-4 mr-2 text-pink-500" />
+                現在の設定
+              </h3>
 
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <div>
-                <Label htmlFor="fullname">氏名（フルネーム）</Label>
-                <Input
-                  id="fullname"
-                  type="text"
-                  placeholder="例: 山田 太郎"
-                  {...register("fullname", { required: "氏名は必須です" })}
-                />
-                <p className="text-sm text-gray-500 mt-1">
-                  ※この名前は試薬登録時の署名として利用されます。
-                </p>
+              <div className="space-y-2 text-sm">
+                <div className="flex items-start">
+                  <UserRound className="h-4 w-4 mr-2 text-pink-400 mt-0.5" />
+                  <div>
+                    <p className="text-gray-500">氏名</p>
+                    <p className="font-medium">{profile?.fullname || "未設定"}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start">
+                  <Mail className="h-4 w-4 mr-2 text-pink-400 mt-0.5" />
+                  <div>
+                    <p className="text-gray-500">メールアドレス</p>
+                    <p className="font-medium">{user?.email || "未設定"}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start">
+                  <Building className="h-4 w-4 mr-2 text-pink-400 mt-0.5" />
+                  <div>
+                    <p className="text-gray-500">所属施設</p>
+                    <p className="font-medium">{selectedFacility?.name || "未設定"}</p>
+                  </div>
+                </div>
               </div>
-              
+            </div>
+
+            <Separator className="my-4 bg-pink-100" />
+
+            {/* 更新フォーム */}
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+              <h3 className="text-sm font-medium text-pink-800 mb-2">設定を変更する</h3>
+
+              {/* 姓と名の入力 */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="lastName" className="text-pink-700">
+                    姓
+                  </Label>
+                  <Input
+                    id="lastName"
+                    className="border-pink-200 focus:border-pink-400 focus:ring-pink-400"
+                    placeholder="姓"
+                    {...register("lastName", { required: "姓を入力してください" })}
+                  />
+                  {errors.lastName && <p className="text-xs text-red-500">{errors.lastName.message}</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="firstName" className="text-pink-700">
+                    名
+                  </Label>
+                  <Input
+                    id="firstName"
+                    className="border-pink-200 focus:border-pink-400 focus:ring-pink-400"
+                    placeholder="名"
+                    {...register("firstName", { required: "名を入力してください" })}
+                  />
+                  {errors.firstName && <p className="text-xs text-red-500">{errors.firstName.message}</p>}
+                </div>
+              </div>
+
+              {/* 施設選択 */}
               <div className="space-y-2">
-                <Label htmlFor="facility">所属施設</Label>
+                <Label htmlFor="facility" className="text-pink-700">
+                  所属施設
+                </Label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Search className="h-4 w-4 text-gray-400" />
+                    <Search className="h-4 w-4 text-pink-400" />
                   </div>
                   <Input
                     id="facility"
@@ -229,15 +293,15 @@ export default function UserSettings() {
                     value={facilitySearchTerm}
                     onChange={handleFacilitySearch}
                     onFocus={() => setShowFacilityDropdown(true)}
-                    className="pl-10"
+                    className="pl-10 border-pink-200 focus:border-pink-400 focus:ring-pink-400"
                   />
                   
                   {showFacilityDropdown && filteredFacilities.length > 0 && (
-                    <div className="absolute z-10 w-full mt-1 bg-white shadow-lg rounded-md max-h-60 overflow-auto">
+                    <div className="absolute z-10 w-full mt-1 bg-white shadow-lg rounded-md max-h-60 overflow-auto border border-pink-100">
                       {filteredFacilities.map(facility => (
                         <div
                           key={facility.id}
-                          className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                          className="px-4 py-2 hover:bg-pink-50 cursor-pointer"
                           onClick={() => handleSelectFacility(facility)}
                         >
                           {facility.name}
@@ -248,44 +312,70 @@ export default function UserSettings() {
                 </div>
                 
                 {selectedFacility && (
-                  <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-md">
-                    <p className="text-sm text-blue-700">
+                  <div className="mt-2 p-2 bg-pink-50 border border-pink-100 rounded-md">
+                    <p className="text-sm text-pink-700 flex items-center">
+                      <Building className="h-4 w-4 mr-2 text-pink-500" />
                       選択中: {selectedFacility.name}
                     </p>
                   </div>
                 )}
                 
-                <p className="text-sm text-gray-500">
+                <p className="text-xs text-gray-500">
                   ※所属施設を選択してください。施設名の一部を入力すると候補が表示されます。
                 </p>
               </div>
               
+              {/* エラーメッセージ */}
               {error && (
-                <div className="p-3 bg-red-50 border border-red-300 rounded-md">
-                  <p className="text-sm text-red-700">{error}</p>
+                <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+                  <p className="text-sm text-red-700 flex items-center">
+                    <AlertTriangle className="h-4 w-4 mr-2" />
+                    {error}
+                  </p>
                 </div>
               )}
               
+              {/* 成功メッセージ */}
               {message && (
-                <div className="p-3 bg-green-50 border border-green-300 rounded-md">
-                  <p className="text-sm text-green-700">{message}</p>
+                <div className="p-3 bg-green-50 border border-green-200 rounded-md">
+                  <p className="text-sm text-green-700">
+                    {message}
+                  </p>
                 </div>
               )}
               
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "更新中..." : "更新"}
-              </Button>
+              {/* 送信ボタン */}
+              <motion.div
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <Button
+                  type="submit"
+                  className="w-full bg-gradient-to-r from-pink-400 to-purple-500 hover:from-pink-500 hover:to-purple-600 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
+                  disabled={loading}
+                >
+                  {loading ? "更新中..." : "設定を保存"}
+                  {!loading && <ArrowRight className="ml-2 h-5 w-5" />}
+                </Button>
+              </motion.div>
+              
+              {/* ダッシュボードへ戻るボタン */}
+              <motion.div
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.98 }}
+                className="mt-3"
+              >
+                <Button 
+                  variant="outline"
+                  onClick={handleBackToDashboard}
+                  disabled={!profile?.fullname || !profile?.facility_id}
+                  className="w-full border-pink-200 text-pink-700 hover:bg-pink-50 rounded-xl"
+                >
+                  ダッシュボードへ戻る
+                </Button>
+              </motion.div>
             </form>
           </CardContent>
-          <CardFooter className="flex justify-between">
-            <Button 
-              variant="outline" 
-              onClick={handleBackToDashboard}
-              disabled={!profile?.fullname || !profile?.facility_id}
-            >
-              ダッシュボードへ戻る
-            </Button>
-          </CardFooter>
         </Card>
       </div>
     </div>
