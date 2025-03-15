@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, ThermometerSnowflake, ChevronLeft, Home } from 'lucide-react';
 import { Slot } from '@radix-ui/react-slot';
 import { supabase } from '@/lib/supabaseClient';
+import { getCachedFacility, cacheFacility } from '@/lib/facilityCache';
+import { getCurrentUser } from '@/lib/userCache';
 
 interface TemperatureItem {
   id: string;
@@ -13,6 +15,7 @@ interface TemperatureItem {
   default_value: number;
   display_order: number;   // 順序
   department_id: string;
+  facility_id: string;     // 施設ID
 }
 
 function NewTemperatureRecordContent() {
@@ -28,33 +31,118 @@ function NewTemperatureRecordContent() {
   const [temperatureItems, setTemperatureItems] = useState<TemperatureItem[]>([]);
   // 各項目の入力値を item.id => number|boolean で保持
   const [formValues, setFormValues] = useState<Record<string, number | boolean>>({});
+  const [facilityId, setFacilityId] = useState<string | null>(null);
+  const [facilityName, setFacilityName] = useState<string>("");
 
   useEffect(() => {
     if (!departmentId) return;
 
     const fetchItems = async () => {
-      const { data, error } = await supabase
-        .from("temperature_items")
-        .select("id, item_name, display_name, default_value, display_order, department_id")
-        .eq("department_id", departmentId)
-        .order("display_order", { ascending: true });
+      try {
+        // まずキャッシュから施設情報を取得
+        const cachedFacility = getCachedFacility();
+        
+        if (cachedFacility && cachedFacility.id) {
+          // キャッシュに施設情報がある場合はそれを使用
+          setFacilityId(cachedFacility.id);
+          setFacilityName(cachedFacility.name || '');
+          
+          // キャッシュから取得した施設IDでアイテムを取得
+          const { data, error } = await supabase
+            .from("temperature_items")
+            .select("id, item_name, display_name, default_value, display_order, department_id, facility_id")
+            .eq("department_id", departmentId)
+            .eq("facility_id", cachedFacility.id)
+            .order("display_order", { ascending: true });
 
-      if (error) {
-        console.error("Fetch Items Error:", error);
-        return;
-      }
-      if (data) {
-        setTemperatureItems(data);
+          if (error) {
+            console.error("Fetch Items Error:", error);
+            return;
+          }
+          
+          if (data) {
+            setTemperatureItems(data);
 
-        // 各項目の初期値 (bool => false, 数値 => default_value)
-        const initialValues: Record<string, number | boolean> = {};
-        data.forEach((item) => {
-          initialValues[item.id] =
-            item.item_name === "seika_samplecheck"
-              ? false
-              : item.default_value;
-        });
-        setFormValues(initialValues);
+            // 各項目の初期値設定
+            const initialValues: Record<string, number | boolean> = {};
+            data.forEach((item) => {
+              initialValues[item.id] =
+                item.item_name === "seika_samplecheck"
+                  ? false
+                  : item.default_value;
+            });
+            setFormValues(initialValues);
+          }
+          
+          return; // キャッシュから取得できたので処理終了
+        }
+        
+        // キャッシュに施設情報がない場合は、ユーザー情報から取得
+        const userProfile = await getCurrentUser();
+        if (!userProfile || !userProfile.id) {
+          console.error("ユーザー情報の取得に失敗しました");
+          return;
+        }
+        
+        // ユーザープロファイルから施設IDを取得
+        const { data: profileData, error: profileError } = await supabase
+          .from("profiles")
+          .select("facility_id")
+          .eq("id", userProfile.id)
+          .single();
+          
+        if (profileError || !profileData?.facility_id) {
+          console.error("施設情報の取得に失敗しました");
+          return;
+        }
+        
+        // 施設IDを保存
+        setFacilityId(profileData.facility_id);
+        
+        // 施設名を取得
+        const { data: facilityData, error: facilityError } = await supabase
+          .from("facilities")
+          .select("id, name")
+          .eq("id", profileData.facility_id)
+          .single();
+          
+        if (!facilityError && facilityData) {
+          setFacilityName(facilityData.name);
+          
+          // 施設情報をキャッシュに保存
+          cacheFacility({
+            id: facilityData.id,
+            name: facilityData.name
+          });
+        }
+        
+        // 特定の施設IDと部署IDに一致するアイテムを取得
+        const { data, error } = await supabase
+          .from("temperature_items")
+          .select("id, item_name, display_name, default_value, display_order, department_id, facility_id")
+          .eq("department_id", departmentId)
+          .eq("facility_id", profileData.facility_id)
+          .order("display_order", { ascending: true });
+
+        if (error) {
+          console.error("Fetch Items Error:", error);
+          return;
+        }
+        if (data) {
+          setTemperatureItems(data);
+
+          // 各項目の初期値 (bool => false, 数値 => default_value)
+          const initialValues: Record<string, number | boolean> = {};
+          data.forEach((item) => {
+            initialValues[item.id] =
+              item.item_name === "seika_samplecheck"
+                ? false
+                : item.default_value;
+          });
+          setFormValues(initialValues);
+        }
+      } catch (err) {
+        console.error("Error fetching temperature items:", err);
       }
     };
 
@@ -72,6 +160,11 @@ function NewTemperatureRecordContent() {
       alert("部署情報が不足しています。");
       return;
     }
+    
+    if (!facilityId) {
+      alert("施設情報の取得に失敗しました。再読み込みして試してください。");
+      return;
+    }
 
     // temperature_records にヘッダを作成
     const { data: recordData, error: recordError } = await supabase
@@ -80,6 +173,7 @@ function NewTemperatureRecordContent() {
         {
           department_id: departmentId,
           record_date: recordDate,
+          facility_id: facilityId, // 施設IDを追加
         },
       ])
       .select()
@@ -153,11 +247,21 @@ function NewTemperatureRecordContent() {
         </div>
       </header>
 
-      {/* 部署名表示 */}
+      {/* 施設・部署名表示 */}
       <div className="max-w-4xl mx-auto px-4 py-4">
-        <h2 className="cutefont text-lg font-medium text-gray-800">
-          部署: {departmentName}
-        </h2>
+        <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+          {facilityName && (
+            <h2 className="cutefont text-lg font-medium text-gray-800">
+              施設: {facilityName}
+            </h2>
+          )}
+          {facilityName && departmentName && (
+            <span className="hidden sm:inline text-gray-400">-</span>
+          )}
+          <h2 className="cutefont text-lg font-medium text-gray-800">
+            部署: {departmentName}
+          </h2>
+        </div>
       </div>
 
       {/* メインフォーム */}
