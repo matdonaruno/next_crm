@@ -38,13 +38,32 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const INACTIVITY_TIMEOUT = 30 * 60 * 1000;
 // セッション確認間隔（ミリ秒）- 5分
 const SESSION_CHECK_INTERVAL = 5 * 60 * 1000;
+// データ取得タイムアウト（ミリ秒）- 3秒
+const DATA_FETCH_TIMEOUT = 3000;
+// 自動リロード遅延（ミリ秒）- 1.5秒
+const AUTO_RELOAD_DELAY = 1500;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<any | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastActivity, setLastActivity] = useState<number>(Date.now());
+  const [isReloading, setIsReloading] = useState(false);
   const router = useRouter();
+
+  // ページの自動リロード
+  const reloadPage = () => {
+    if (typeof window !== 'undefined' && !isReloading) {
+      setIsReloading(true);
+      
+      console.log("AuthContext: データ取得に失敗したため、ページを自動リロードします...");
+      
+      // 少し遅延を設けてからリロード
+      setTimeout(() => {
+        window.location.reload();
+      }, AUTO_RELOAD_DELAY);
+    }
+  };
 
   // ユーザーアクティビティを追跡
   useEffect(() => {
@@ -195,6 +214,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.log("AuthContext: セッション初期化成功、ユーザーID:", data.session.user.id);
           setUser(data.session.user);
           
+          // タイムアウトを設定
+          const fetchTimeout = setTimeout(() => {
+            console.log("AuthContext: プロファイル取得タイムアウト、ページリロードを実行");
+            reloadPage();
+          }, DATA_FETCH_TIMEOUT);
+          
           // プロファイル情報を取得（最大2回試行）
           console.log("AuthContext: プロファイル情報取得を開始");
           let profileData = null;
@@ -230,6 +255,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
           }
 
+          // タイムアウトをクリア
+          clearTimeout(fetchTimeout);
+
           console.log("AuthContext: プロファイル取得結果", { 
             success: !!profileData,
             error: profileError?.message || "なし",
@@ -239,6 +267,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (!profileData) {
             console.error("AuthContext: プロファイル取得エラー:", profileError?.message);
             setProfile(null);
+            
+            // プロファイルが取得できなかった場合、自動リロード
+            reloadPage();
           } else {
             console.log("AuthContext: プロファイル取得成功:", profileData);
             setProfile(profileData);
@@ -270,6 +301,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (session?.user) {
           console.log("AuthContext: 認証状態変更 - ユーザーあり:", session.user.id);
           setUser(session.user);
+          
+          // タイムアウトを設定
+          const fetchTimeout = setTimeout(() => {
+            console.log("AuthContext: プロファイル取得タイムアウト、ページリロードを実行");
+            reloadPage();
+          }, DATA_FETCH_TIMEOUT);
           
           // プロファイル情報を取得（最大2回試行）
           console.log("AuthContext: 状態変更後のプロファイル情報取得:", session.user.id);
@@ -306,9 +343,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
           }
           
+          // タイムアウトをクリア
+          clearTimeout(fetchTimeout);
+          
           if (!profileData) {
             console.error('AuthContext: 状態変更後のプロファイル取得失敗:', profileError);
             setProfile(null);
+            
+            // プロファイルが取得できなかった場合、自動リロード
+            reloadPage();
           } else {
             console.log("AuthContext: 状態変更後のプロファイル取得成功:", profileData);
             setProfile(profileData);
@@ -353,12 +396,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         window.Cookies.remove(storageKey, { path: '/' });
       }
       
+      // タイムアウトを設定
+      const signInTimeout = setTimeout(() => {
+        console.log("signIn: ログイン処理タイムアウト、ページリロードを実行");
+        reloadPage();
+      }, DATA_FETCH_TIMEOUT);
+      
       // 直接fetchUserAndProfileを呼び出さず、認証とプロファイル取得を直接行う
       console.log("signIn: Supabaseで認証を実行");
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
+
+      // タイムアウトをクリア
+      clearTimeout(signInTimeout);
 
       console.log("signIn: 認証結果:", { 
         success: !!data?.user, 
@@ -384,6 +436,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(data.user);
       
       try {
+        // プロファイル情報取得タイムアウトを設定
+        const profileTimeout = setTimeout(() => {
+          console.log("signIn: プロファイル取得タイムアウト、ページリロードを実行");
+          reloadPage();
+        }, DATA_FETCH_TIMEOUT);
+        
         // プロファイル情報を取得（最大2回試行）
         console.log("signIn: プロファイル情報を取得中...", data.user.id);
         let profileData = null;
@@ -418,6 +476,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             profileError = secondAttempt.error;
           }
         }
+        
+        // タイムアウトをクリア
+        clearTimeout(profileTimeout);
 
         console.log("signIn: プロファイル取得結果:", { 
           profileData: profileData ? JSON.stringify(profileData) : 'なし', 
@@ -427,6 +488,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!profileData) {
           console.error('signIn: プロファイル情報の取得に失敗:', profileError);
           setProfile(null);
+          // ログイン時のプロファイル取得失敗はログインページでリロード
+          reloadPage();
         } else {
           console.log("signIn: プロファイル情報を取得:", profileData);
           setProfile(profileData);
@@ -434,6 +497,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (profileError) {
         console.error("signIn: プロファイル取得中にエラー:", profileError);
         // プロファイル取得に失敗しても認証自体は成功とする
+        // エラー発生時は自動リロード
+        reloadPage();
       }
       
       console.log("signIn: 認証処理完了、loading状態をfalseに設定");
