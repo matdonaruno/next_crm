@@ -8,6 +8,7 @@ import "/public/css/menu.css"
 import "/public/css/simple-css-waves.css"
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ClientTokenCleaner } from "@/components/ClientTokenCleaner";
+import { LoadingUI } from "@/components/LoadingUI";
 import { Toaster } from "@/components/ui/toaster";
 
 // フォント設定
@@ -44,6 +45,7 @@ export default function RootLayout({
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <AuthProvider>
           <ClientTokenCleaner />
+          <LoadingUI />
           {children}
           <Toaster />
         </AuthProvider>
