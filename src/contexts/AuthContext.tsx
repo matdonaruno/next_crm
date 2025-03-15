@@ -29,6 +29,7 @@ interface AuthContextType {
   loading: boolean;
   loadingState: 'idle' | 'authenticating' | 'loading-profile' | 'error';
   loadingMessage: string;
+  manualReload: () => void;
   signIn: (email: string, password: string) => Promise<{ error: any | null }>;
   signOut: () => Promise<void>;
   updateProfile: (data: Partial<UserProfile>) => Promise<{ error: any | null }>;
@@ -42,8 +43,6 @@ const INACTIVITY_TIMEOUT = 30 * 60 * 1000;
 const SESSION_CHECK_INTERVAL = 5 * 60 * 1000;
 // データ取得タイムアウト（ミリ秒）- 6秒に延長
 const DATA_FETCH_TIMEOUT = 6000;
-// 自動リロード遅延（ミリ秒）- 1.5秒
-const AUTO_RELOAD_DELAY = 1500;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<any | null>(null);
@@ -52,23 +51,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loadingState, setLoadingState] = useState<'idle' | 'authenticating' | 'loading-profile' | 'error'>('idle');
   const [loadingMessage, setLoadingMessage] = useState<string>('読み込み中...');
   const [lastActivity, setLastActivity] = useState<number>(Date.now());
-  const [isReloading, setIsReloading] = useState(false);
+  const [retryCount, setRetryCount] = useState<number>(0);
   const router = useRouter();
 
-  // ページの自動リロード
-  const reloadPage = () => {
-    if (typeof window !== 'undefined' && !isReloading) {
-      setIsReloading(true);
-      
-      console.log("AuthContext: データ取得に失敗したため、ページを自動リロードします...");
-      setLoadingState('error');
-      setLoadingMessage('データの取得に失敗しました。ページを再読み込みします...');
-      
-      // 少し遅延を設けてからリロード
-      setTimeout(() => {
-        window.location.reload();
-      }, AUTO_RELOAD_DELAY);
+  // 手動リロード
+  const manualReload = () => {
+    if (typeof window !== 'undefined') {
+      window.location.reload();
     }
+  };
+
+  // プロファイル取得タイムアウト処理
+  const handleProfileTimeout = () => {
+    console.log("AuthContext: プロファイル取得タイムアウト発生");
+    setLoadingState('error');
+    setLoadingMessage('プロファイル情報の取得に時間がかかっています。手動で再読み込みしてください。');
+    setLoading(false);
   };
 
   // ユーザーアクティビティを追跡
@@ -242,8 +240,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           // タイムアウトを設定
           const fetchTimeout = setTimeout(() => {
-            console.log("AuthContext: プロファイル取得タイムアウト、ページリロードを実行");
-            reloadPage();
+            handleProfileTimeout();
           }, DATA_FETCH_TIMEOUT);
           
           // プロファイル情報を取得（最大2回試行）
@@ -295,10 +292,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.error("AuthContext: プロファイル取得エラー:", profileError?.message);
             setProfile(null);
             setLoadingState('error');
-            setLoadingMessage('プロファイル情報の取得に失敗しました。再読み込みします...');
-            
-            // プロファイルが取得できなかった場合、自動リロード
-            reloadPage();
+            setLoadingMessage('プロファイル情報の取得に失敗しました。手動で再読み込みしてください。');
           } else {
             console.log("AuthContext: プロファイル取得成功:", profileData);
             setProfile(profileData);
@@ -341,8 +335,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           // タイムアウトを設定
           const fetchTimeout = setTimeout(() => {
-            console.log("AuthContext: プロファイル取得タイムアウト、ページリロードを実行");
-            reloadPage();
+            handleProfileTimeout();
           }, DATA_FETCH_TIMEOUT);
           
           // プロファイル情報を取得（最大2回試行）
@@ -388,10 +381,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.error('AuthContext: 状態変更後のプロファイル取得失敗:', profileError);
             setProfile(null);
             setLoadingState('error');
-            setLoadingMessage('プロファイル情報の取得に失敗しました。再読み込みします...');
-            
-            // プロファイルが取得できなかった場合、自動リロード
-            reloadPage();
+            setLoadingMessage('プロファイル情報の取得に失敗しました。手動で再読み込みしてください。');
           } else {
             console.log("AuthContext: 状態変更後のプロファイル取得成功:", profileData);
             setProfile(profileData);
@@ -444,8 +434,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       // タイムアウトを設定
       const signInTimeout = setTimeout(() => {
-        console.log("signIn: ログイン処理タイムアウト、ページリロードを実行");
-        reloadPage();
+        console.log("signIn: ログイン処理タイムアウト");
+        setLoadingState('error');
+        setLoadingMessage('ログイン処理がタイムアウトしました。再試行してください。');
+        setLoading(false);
       }, DATA_FETCH_TIMEOUT);
       
       // 直接fetchUserAndProfileを呼び出さず、認証とプロファイル取得を直接行う
@@ -490,8 +482,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         // プロファイル情報取得タイムアウトを設定
         const profileTimeout = setTimeout(() => {
-          console.log("signIn: プロファイル取得タイムアウト、ページリロードを実行");
-          reloadPage();
+          console.log("signIn: プロファイル取得タイムアウト");
+          setLoadingState('error');
+          setLoadingMessage('プロファイル情報の取得に時間がかかっています。手動で再読み込みしてください。');
+          setLoading(false);
         }, DATA_FETCH_TIMEOUT);
         
         // プロファイル情報を取得（最大2回試行）
@@ -542,9 +536,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.error('signIn: プロファイル情報の取得に失敗:', profileError);
           setProfile(null);
           setLoadingState('error');
-          setLoadingMessage('プロファイル情報の取得に失敗しました。再読み込みします...');
-          // ログイン時のプロファイル取得失敗はログインページでリロード
-          reloadPage();
+          setLoadingMessage('プロファイル情報の取得に失敗しました。手動で再読み込みしてください。');
         } else {
           console.log("signIn: プロファイル情報を取得:", profileData);
           setProfile(profileData);
@@ -555,9 +547,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error("signIn: プロファイル取得中にエラー:", profileError);
         // プロファイル取得に失敗しても認証自体は成功とする
         setLoadingState('error');
-        setLoadingMessage('プロファイル情報の取得中にエラーが発生しました。再読み込みします...');
-        // エラー発生時は自動リロード
-        reloadPage();
+        setLoadingMessage('プロファイル情報の取得中にエラーが発生しました。手動で再読み込みしてください。');
       }
       
       console.log("signIn: 認証処理完了、loading状態をfalseに設定");
@@ -655,6 +645,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
     loadingState,
     loadingMessage,
+    manualReload,
     signIn,
     signOut,
     updateProfile,

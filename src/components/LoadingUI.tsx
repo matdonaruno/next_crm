@@ -13,7 +13,7 @@ const stateColors = {
 };
 
 export function LoadingUI() {
-  const { loading, loadingState, loadingMessage } = useAuth();
+  const { loading, loadingState, loadingMessage, manualReload } = useAuth();
   
   // ローディング中でなければ何も表示しない
   if (!loading && loadingState === 'idle') {
@@ -49,9 +49,16 @@ export function LoadingUI() {
         {loadingState === 'error' && (
           <div className="text-center">
             <p className="text-sm text-gray-500 mb-4">
-              自動的に再読み込みされます。
-              何度も同じエラーが発生する場合は、管理者にお問い合わせください。
+              時間をおいてもう一度お試しください。
+              問題が解決しない場合は管理者にお問い合わせください。
             </p>
+            
+            <button
+              onClick={manualReload}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-colors"
+            >
+              再読み込み
+            </button>
           </div>
         )}
       </div>
