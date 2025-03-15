@@ -1,18 +1,30 @@
 'use client';
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Cookies from 'js-cookie';
 import { usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 
 export function ClientTokenCleaner() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, isTransitioning } = useAuth();
   const isLoginPage = pathname === '/login' || pathname === '/direct-login';
+  const redirectedRef = useRef(false);
+  const lastPathRef = useRef(pathname);
   
   // セッション管理の改善
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      console.log("ClientTokenCleaner: 初期化", { isLoginPage });
+      console.log("ClientTokenCleaner: 初期化", { isLoginPage, isTransitioning });
+      
+      // 遷移中は処理をスキップ（ちらつき防止）
+      if (isTransitioning) {
+        console.log("ClientTokenCleaner: 遷移中のため処理をスキップします");
+        return;
+      }
       
       // 古いトークンキーを削除する処理
       const oldKey = 'supabase.auth.token';
@@ -30,6 +42,22 @@ export function ClientTokenCleaner() {
       // ログインページでは不整合チェックをスキップ（意図的なセッションクリアのため）
       if (isLoginPage) {
         console.log("ClientTokenCleaner: ログインページのため、不整合チェックをスキップします");
+        
+        // ログイン済みならホームページにリダイレクト
+        if (user && !redirectedRef.current) {
+          console.log("ClientTokenCleaner: ログイン済みユーザーをリダイレクト");
+          redirectedRef.current = true;
+          router.push('/');
+        }
+        
+        return;
+      }
+      
+      // 未ログインなら保護ページからログインページへリダイレクト
+      if (!user && !isLoginPage && !redirectedRef.current) {
+        console.log("ClientTokenCleaner: 未ログインユーザーをログインページへリダイレクト");
+        redirectedRef.current = true;
+        router.push('/login');
         return;
       }
       
@@ -93,7 +121,19 @@ export function ClientTokenCleaner() {
       // 初期化時にセッションを確認
       checkSession();
     }
-  }, [isLoginPage]);
+  }, [isLoginPage, isTransitioning, user, router]);
+  
+  // パスが変わったらリダイレクトフラグをリセット
+  useEffect(() => {
+    if (pathname !== lastPathRef.current) {
+      console.log("ClientTokenCleaner: パスが変更されたためリダイレクトフラグをリセット", {
+        oldPath: lastPathRef.current,
+        newPath: pathname
+      });
+      redirectedRef.current = false;
+      lastPathRef.current = pathname;
+    }
+  }, [pathname]);
   
   // このコンポーネントは何も表示しない
   return null;
