@@ -31,7 +31,7 @@ const cookieStorage = {
     Cookies.set(key, value, {
       expires: 7, // 7日間有効
       secure: process.env.NODE_ENV === 'production', // 本番環境ではHTTPSのみ
-      sameSite: 'strict', // CSRF対策
+      sameSite: 'lax', // PKCEフローとの互換性のためlaxに変更
       path: '/' // すべてのパスで利用可能
     });
     console.log(`クッキーを設定しました: ${key}`);
@@ -70,7 +70,7 @@ const initStorage = () => {
         Cookies.set(storageKey, currentSession, {
           expires: 7,
           secure: process.env.NODE_ENV === 'production',
-          sameSite: 'strict',
+          sameSite: 'lax', // PKCEフローとの互換性のためlaxに変更
           path: '/'
         });
         // 移行後にローカルストレージから削除
@@ -104,10 +104,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     debug: process.env.NODE_ENV === 'development' // 開発環境のみデバッグ有効
   },
   global: {
-    // リクエストのタイムアウト設定を10秒に延長
+    // リクエストのタイムアウト設定を15秒に延長
     fetch: (url, options) => {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒タイムアウト
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15秒タイムアウト（10秒から延長）
       
       return fetch(url, {
         ...options,
@@ -123,7 +123,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // デバッグ用：Supabaseクライアントの初期化確認
 console.log("Supabaseクライアントを初期化しました", { 
   storageKey,
-  timeout: "10秒",
+  timeout: "15秒",
   flowType: "pkce",
   storage: "cookie-based"
 });

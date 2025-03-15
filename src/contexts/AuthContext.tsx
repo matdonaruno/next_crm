@@ -38,12 +38,15 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const INACTIVITY_TIMEOUT = 30 * 60 * 1000;
 // セッション確認間隔（ミリ秒）- 5分
 const SESSION_CHECK_INTERVAL = 5 * 60 * 1000;
+// 認証タイムアウト（ミリ秒）- 15秒（8秒から15秒に延長）
+const AUTH_TIMEOUT = 15000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<any | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastActivity, setLastActivity] = useState<number>(Date.now());
+  const [sessionPollingCount, setSessionPollingCount] = useState(0);
   const router = useRouter();
 
   // ユーザーアクティビティを追跡
@@ -176,9 +179,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // セッション取得のプロミスを作成
         const authSessionPromise = supabase.auth.getSession();
         
-        // タイムアウト用のプロミスを作成（8秒後にタイムアウト）
+        // タイムアウト用のプロミスを作成（15秒後にタイムアウト - 延長）
         const timeoutPromise = new Promise<{data: {session: null}, error: Error}>((_, reject) => {
-          setTimeout(() => reject(new Error("認証タイムアウト: セッション取得に時間がかかりすぎています")), 8000);
+          setTimeout(() => reject(new Error("認証タイムアウト: セッション取得に時間がかかりすぎています")), AUTH_TIMEOUT);
         });
         
         // 両方のプロミスを競争させる
@@ -206,20 +209,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           console.log("AuthContext: プロファイル情報取得を開始");
           try {
-            const { data: profileData, error: profileError } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', data.session.user.id)
-              .single();
+            // 複数回試行する
+            let profileAttempt = 0;
+            let profileData = null;
+            let profileError = null;
+            
+            while (profileAttempt < 3 && !profileData) {
+              profileAttempt++;
+              console.log(`AuthContext: プロファイル取得試行 ${profileAttempt}/3`);
+              
+              const result = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', data.session.user.id)
+                .single();
+                
+              if (result.data) {
+                profileData = result.data;
+                break;
+              } else {
+                profileError = result.error;
+                // 失敗した場合は0.5秒待機してから再試行
+                if (profileAttempt < 3) {
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                }
+              }
+            }
 
             console.log("AuthContext: プロファイル取得結果", { 
               success: !!profileData, 
+              attempts: profileAttempt,
               error: profileError?.message || "なし",
               timestamp: new Date().toISOString()
             });
 
-            if (profileError) {
-              console.error("AuthContext: プロファイル取得エラー:", profileError.message);
+            if (!profileData) {
+              console.error("AuthContext: プロファイル取得エラー:", profileError?.message);
               setProfile(null);
             } else {
               console.log("AuthContext: プロファイル取得成功:", profileData);
@@ -244,8 +269,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
     
+    // セッションが取得できるまでポーリング
+    const startSessionPolling = async () => {
+      // 最初の初期化を実行
+      await initializeAuth();
+      
+      // セッションがない、かつプロファイルが取得できない場合は、最大3回までポーリング
+      const checkSession = async () => {
+        if (!user && sessionPollingCount < 3) {
+          console.log(`AuthContext: セッションポーリング試行 ${sessionPollingCount + 1}/3`);
+          setSessionPollingCount(prev => prev + 1);
+          
+          // 1秒待機してから再試行
+          setTimeout(async () => {
+            await initializeAuth();
+            // まだユーザーがなければ再度チェック
+            if (!user) {
+              checkSession();
+            }
+          }, 1000);
+        }
+      };
+      
+      checkSession();
+    };
+    
     // 初期化処理を実行
-    initializeAuth();
+    startSessionPolling();
     
     // 認証状態変更のリスナー
     console.log("AuthContext: 認証状態変更リスナーを設定");
@@ -259,13 +309,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           // プロファイル情報を取得
           console.log("AuthContext: 状態変更後のプロファイル情報取得:", session.user.id);
-          const { data: profileData, error: profileError } = await supabase
-            .from('profiles')
-            .select('id, fullname, facility_id')
-            .eq('id', session.user.id)
-            .single();
           
-          if (profileError) {
+          // 複数回試行する
+          let profileAttempt = 0;
+          let profileData = null;
+          let profileError = null;
+          
+          while (profileAttempt < 3 && !profileData) {
+            profileAttempt++;
+            console.log(`AuthContext: 状態変更後のプロファイル取得試行 ${profileAttempt}/3`);
+            
+            const result = await supabase
+              .from('profiles')
+              .select('id, fullname, facility_id')
+              .eq('id', session.user.id)
+              .single();
+              
+            if (result.data) {
+              profileData = result.data;
+              break;
+            } else {
+              profileError = result.error;
+              // 失敗した場合は0.5秒待機してから再試行
+              if (profileAttempt < 3) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+              }
+            }
+          }
+          
+          if (!profileData) {
             console.error('AuthContext: 状態変更後のプロファイル取得失敗:', profileError);
             setProfile(null);
           } else {
@@ -289,13 +361,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log("AuthContext: クリーンアップ - リスナー解除");
       subscription.unsubscribe();
     };
-  }, []);
+  }, [sessionPollingCount]);
 
   // ログイン処理
   const signIn = async (email: string, password: string) => {
     try {
       console.log("signIn: ログイン処理を開始:", email);
       setLoading(true); // ログイン処理開始時にloadingをtrueに設定
+      
+      // ローカルストレージとセッションストレージをクリア
+      if (typeof window !== 'undefined') {
+        console.log("signIn: ローカルストレージとセッションストレージをクリア");
+        localStorage.clear();
+        sessionStorage.clear();
+      }
+      
+      // Supabase URLからプロジェクトIDを抽出
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      const projectId = supabaseUrl.match(/https:\/\/(.*?)\.supabase\.co/)?.[1] || 'bsgvaomswzkywbiubtjg';
+      const storageKey = `sb-${projectId}-auth-token`;
+      
+      // クッキーを削除
+      if (typeof window !== 'undefined' && window.Cookies) {
+        console.log("signIn: クッキーを削除");
+        window.Cookies.remove(storageKey, { path: '/' });
+      }
       
       // 既存のセッションをクリア（他のデバイスからのログインを防ぐため）
       console.log("signIn: 既存のセッションをクリア");
@@ -332,20 +422,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(data.user);
       
       try {
-        // プロファイル情報を取得
+        // プロファイル情報を取得（複数回試行）
         console.log("signIn: プロファイル情報を取得中...", data.user.id);
-        const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .select('id, fullname, facility_id')
-          .eq('id', data.user.id)
-          .single();
+        
+        let profileAttempt = 0;
+        let profileData = null;
+        let profileError = null;
+        
+        while (profileAttempt < 3 && !profileData) {
+          profileAttempt++;
+          console.log(`signIn: プロファイル取得試行 ${profileAttempt}/3`);
+          
+          const result = await supabase
+            .from('profiles')
+            .select('id, fullname, facility_id')
+            .eq('id', data.user.id)
+            .single();
+            
+          if (result.data) {
+            profileData = result.data;
+            break;
+          } else {
+            profileError = result.error;
+            // 失敗した場合は0.5秒待機してから再試行
+            if (profileAttempt < 3) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+          }
+        }
 
         console.log("signIn: プロファイル取得結果:", { 
           profileData: profileData ? JSON.stringify(profileData) : 'なし', 
+          attempts: profileAttempt,
           profileError: profileError?.message || 'なし' 
         });
 
-        if (profileError) {
+        if (!profileData) {
           console.error('signIn: プロファイル情報の取得に失敗:', profileError);
           setProfile(null);
         } else {
@@ -376,26 +488,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
       const projectId = supabaseUrl.match(/https:\/\/(.*?)\.supabase\.co/)?.[1] || 'bsgvaomswzkywbiubtjg';
       const storageKey = `sb-${projectId}-auth-token`;
+      const codeVerifierKey = `sb-${projectId}-auth-code-verifier`;
       
-      // グローバルスコープでログアウト（すべてのデバイスからログアウト）
-      await supabase.auth.signOut({ scope: 'global' });
-      console.log("signOut: ログアウト成功");
+      // 先にユーザー状態をクリア
+      setUser(null);
+      setProfile(null);
       
-      // クッキーを明示的に削除（念のため）
+      // クッキーを明示的に削除
       if (typeof window !== 'undefined' && window.Cookies) {
         try {
           window.Cookies.remove(storageKey, { path: '/' });
+          window.Cookies.remove(codeVerifierKey, { path: '/' });
           console.log("signOut: クッキーを削除しました");
         } catch (e) {
           console.error("signOut: クッキー削除エラー", e);
         }
       }
       
-      setUser(null);
-      setProfile(null);
-      router.push('/login');
+      // ローカルストレージとセッションストレージをクリア
+      if (typeof window !== 'undefined') {
+        console.log("signOut: ストレージをクリア");
+        localStorage.clear();
+        sessionStorage.clear();
+      }
+      
+      // グローバルスコープでログアウト（すべてのデバイスからログアウト）
+      await supabase.auth.signOut({ scope: 'global' });
+      console.log("signOut: ログアウト成功");
+      
+      // ログインページにリダイレクト
+      router.push('/login?refresh=true&ts=' + Date.now());
     } catch (error) {
       console.error('Error signing out:', error);
+      
+      // エラーがあっても強制的にログアウト
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login?refresh=true&ts=' + Date.now();
+      }
     }
   };
 
