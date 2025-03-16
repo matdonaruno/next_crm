@@ -1,7 +1,7 @@
 'use client';
 
 import { Calendar } from "@/components/ui/calendar";
-import { Bell, Plus, FileText, ChevronLeft, Home, Check, X } from "lucide-react";
+import { Bell, Plus, FileText, ChevronLeft, Home, Check, X, Activity } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -13,6 +13,7 @@ interface TemperatureRecordDetail {
   id: string;
   temperature_item_id: string;
   value: number;
+  data_source?: string; // 'manual'または'sensor'
 }
 
 interface TemperatureRecord {
@@ -20,6 +21,7 @@ interface TemperatureRecord {
   record_date: string;
   temperature_record_details: TemperatureRecordDetail[];
   facility_id: string;
+  is_auto_recorded?: boolean; // 自動記録されたかどうか
 }
 
 interface TemperatureItem {
@@ -30,6 +32,15 @@ interface TemperatureItem {
   display_order: number;
   department_id: string;
   facility_id: string;
+}
+
+// ESPセンサーからのリアルタイムデータ
+interface SensorData {
+  ahtTemp: number | null;
+  bmpTemp: number | null;
+  ahtHum: number | null;
+  bmpPres: number | null;
+  lastUpdated: string | null;
 }
 
 export default function TemperatureManagementClient() {
@@ -46,6 +57,16 @@ export default function TemperatureManagementClient() {
   const [facilityName, setFacilityName] = useState<string>("");
   const [facilityId, setFacilityId] = useState<string>("");
   const [userName, setUserName] = useState<string>("");
+
+  // センサーデータの状態
+  const [sensorData, setSensorData] = useState<SensorData>({
+    ahtTemp: null,
+    bmpTemp: null,
+    ahtHum: null,
+    bmpPres: null,
+    lastUpdated: null
+  });
+  const [showSensorData, setShowSensorData] = useState<boolean>(false);
 
   useEffect(() => {
     if (!departmentId) return;
@@ -274,6 +295,69 @@ export default function TemperatureManagementClient() {
     fetchRecords();
   }, [departmentId, facilityId]);
 
+  // 最新のセンサーデータを取得する関数
+  const fetchLatestSensorData = async () => {
+    if (!facilityId || !departmentId) return;
+    
+    try {
+      // センサーデバイスを取得
+      const { data: deviceData, error: deviceError } = await supabase
+        .from('sensor_devices')
+        .select('id')
+        .eq('facility_id', facilityId)
+        .eq('department_id', departmentId)
+        .single();
+        
+      if (deviceError) {
+        console.log('No sensor device found for this department');
+        return;
+      }
+      
+      // デバイスからの最新のセンサーログを取得
+      const { data: logData, error: logError } = await supabase
+        .from('sensor_logs')
+        .select('raw_data, recorded_at')
+        .eq('sensor_device_id', deviceData.id)
+        .order('recorded_at', { ascending: false })
+        .limit(1)
+        .single();
+        
+      if (logError) {
+        console.log('No sensor logs found');
+        return;
+      }
+      
+      // センサーデータがあればフラグを立てる
+      setShowSensorData(true);
+      
+      // センサーデータを設定
+      setSensorData({
+        ahtTemp: logData.raw_data.ahtTemp || null,
+        bmpTemp: logData.raw_data.bmpTemp || null,
+        ahtHum: logData.raw_data.ahtHum || null,
+        bmpPres: logData.raw_data.bmpPres || null,
+        lastUpdated: logData.recorded_at
+      });
+    } catch (error) {
+      console.error('Error fetching sensor data:', error);
+    }
+  };
+  
+  // リアルタイムセンサーデータの取得
+  useEffect(() => {
+    if (!facilityId || !departmentId) return;
+
+    // 初回データ取得
+    fetchLatestSensorData();
+    
+    // 1分ごとに更新
+    const interval = setInterval(fetchLatestSensorData, 60 * 1000);
+    
+    return () => {
+      clearInterval(interval);
+    };
+  }, [facilityId, departmentId]);
+
   const CustomDayContent = (props: DayContentProps) => {
     const dateStr = props.date.toISOString().split("T")[0];
     const hasData = datesWithData.has(dateStr);
@@ -345,6 +429,49 @@ export default function TemperatureManagementClient() {
           </p>
         </div>
 
+        {/* リアルタイムセンサーデータ表示 */}
+        {showSensorData && sensorData.lastUpdated && (
+          <div className="bg-white p-4 rounded-lg border border-border shadow-sm animate-fadeIn">
+            <h3 className="text-sm font-medium mb-3 flex items-center">
+              <Activity className="h-4 w-4 mr-2 text-purple-500" />
+              リアルタイムセンサーデータ
+              <span className="ml-auto text-xs text-gray-500">
+                最終更新: {new Date(sensorData.lastUpdated).toLocaleString()}
+              </span>
+            </h3>
+            
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {sensorData.ahtTemp !== null && (
+                <div className="bg-gradient-to-br from-red-50 to-orange-50 p-3 rounded-lg border border-red-100">
+                  <div className="text-xs text-gray-500 mb-1">AHT20 温度</div>
+                  <div className="text-xl font-semibold text-red-600">{sensorData.ahtTemp.toFixed(1)}℃</div>
+                </div>
+              )}
+              
+              {sensorData.bmpTemp !== null && (
+                <div className="bg-gradient-to-br from-amber-50 to-yellow-50 p-3 rounded-lg border border-amber-100">
+                  <div className="text-xs text-gray-500 mb-1">BMP280 温度</div>
+                  <div className="text-xl font-semibold text-amber-600">{sensorData.bmpTemp.toFixed(1)}℃</div>
+                </div>
+              )}
+              
+              {sensorData.ahtHum !== null && (
+                <div className="bg-gradient-to-br from-blue-50 to-cyan-50 p-3 rounded-lg border border-blue-100">
+                  <div className="text-xs text-gray-500 mb-1">AHT20 湿度</div>
+                  <div className="text-xl font-semibold text-blue-600">{sensorData.ahtHum.toFixed(1)}%</div>
+                </div>
+              )}
+              
+              {sensorData.bmpPres !== null && (
+                <div className="bg-gradient-to-br from-indigo-50 to-violet-50 p-3 rounded-lg border border-indigo-100">
+                  <div className="text-xs text-gray-500 mb-1">BMP280 気圧</div>
+                  <div className="text-xl font-semibold text-indigo-600">{sensorData.bmpPres.toFixed(1)}hPa</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* カレンダー */}
         <div className="bg-white p-4 rounded-lg border border-border text-black">
           <Calendar
@@ -408,6 +535,9 @@ export default function TemperatureManagementClient() {
                   >
                     <td className="px-4 py-3">
                       {new Date(record.record_date).toLocaleDateString()}
+                      {record.is_auto_recorded && (
+                        <span className="ml-2 px-1.5 py-0.5 text-xs bg-blue-100 text-blue-800 rounded">自動</span>
+                      )}
                     </td>
                     {temperatureItems.map((item) => {
                       const detail = record.temperature_record_details.find(
@@ -415,6 +545,8 @@ export default function TemperatureManagementClient() {
                       );
                       const rawVal = detail ? detail.value : item.default_value;
                       const isBoolItem = item.item_name === "seika_samplecheck";
+                      const isSensorData = detail?.data_source === 'sensor';
+                      
                       if (isBoolItem) {
                         return (
                           <td key={item.id} className="px-4 py-3 text-center">
@@ -428,7 +560,12 @@ export default function TemperatureManagementClient() {
                       } else {
                         return (
                           <td key={item.id} className="px-4 py-3 text-center">
-                            {rawVal}℃
+                            <span className={isSensorData ? "text-blue-600 font-medium" : ""}>
+                              {rawVal}℃
+                            </span>
+                            {isSensorData && (
+                              <span className="ml-1 text-xs text-blue-500">●</span>
+                            )}
                           </td>
                         );
                       }
@@ -450,6 +587,17 @@ export default function TemperatureManagementClient() {
           )}
         </div>
       </main>
+      
+      <style jsx global>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .animate-fadeIn {
+          animation: fadeIn 0.5s ease-out forwards;
+        }
+      `}</style>
     </div>
   );
 }
