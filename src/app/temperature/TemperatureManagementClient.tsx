@@ -491,7 +491,16 @@ export default function TemperatureManagementClient() {
         </div>
 
         {/* 新規登録ボタン */}
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "16px" }}>
+          <button
+            onClick={() => {
+              router.push(`/temperature/sensor-data?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`);
+            }}
+            className="button-style text-primary-foreground rounded-md px-4 py-2.5 font-medium transition-all duration-200 hover:bg-blue-300 focus:outline-none focus:ring-2 focus:ring-primary/20 flex items-center justify-center gap-2"
+          >
+            <Activity className="h-5 w-5" />
+            センサーデータ履歴
+          </button>
           <button
             onClick={() => {
               window.location.href = `/temperature/new?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`;

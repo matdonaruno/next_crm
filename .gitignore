@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ESP8266関連ファイル（証明書や認証情報を含む）
+/src/esp8266/
