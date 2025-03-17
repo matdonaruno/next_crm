@@ -457,18 +457,260 @@ function ReagentRegistrationContent() {
     [products, setValue, addDebugLog]
   );
 
+  // 1次元バーコード専用のパース処理（GS1-128、EANなど）
+  const parseLinearBarcode = useCallback(
+    (originalBarcode: string) => {
+      addDebugLog("1次元バーコードのパース処理を実行: " + originalBarcode);
+      
+      // バーコードの前処理（スペースや特殊文字を削除）
+      const cleanBarcode = originalBarcode.replace(/[\s\-]/g, "");
+      
+      // GS1-128形式のバーコードをパース
+      // 例: 01049123451234520510ABCD1234
+      // 01: GTIN (14桁)
+      // 17: 有効期限 (YYMMDD)
+      // 10: ロット番号 (可変長)
+      
+      // より柔軟な正規表現パターン
+      const gs1Regex = /01(\d{14}).*?17(\d{6}).*?10([A-Za-z0-9]+)/;
+      const match = cleanBarcode.match(gs1Regex);
+      
+      addDebugLog("1次元バーコード正規表現パターン: " + gs1Regex);
+      
+      if (match) {
+        const gtin = match[1];
+        const expiryRaw = match[2];
+        const lot = match[3];
+        
+        addDebugLog("1次元バーコードからのGTIN: " + gtin);
+        addDebugLog("1次元バーコードからの生の有効期限: " + expiryRaw);
+        addDebugLog("1次元バーコードからのロット番号: " + lot);
+        
+        // YY(>=50なら1900年代、<50なら2000年代) としてパース
+        const yearPrefix = parseInt(expiryRaw.substring(0, 2)) >= 50 ? "19" : "20";
+        const formattedExpiry = `${yearPrefix}${expiryRaw.substring(0, 2)}-${expiryRaw.substring(
+          2,
+          4
+        )}-${expiryRaw.substring(4, 6)}`;
+        setValue("expirationDate", formattedExpiry);
+        
+        // ロット番号の処理
+        setValue("lotNo", lot);
+        
+        // GTIN/JANを設定
+        setValue("janCode", gtin);
+
+        // 商品マスタから検索
+        const product = products.find((p) => p.code === gtin);
+        if (product) {
+          setValue("reagentName", product.name);
+          setValue("specification", product.specification || "規格未設定");
+          setValue("unit", product.unit || "");
+          addDebugLog("GTIN/JANコード一致: " + product.name);
+          addDebugLog("規格: " + (product.specification || "規格未設定"));
+          addDebugLog("単位: " + (product.unit || "未設定"));
+        } else {
+          addDebugLog("GTIN/JANコード不一致: " + gtin);
+        }
+        
+        setBarcodeDetected(true);
+        return true;
+      }
+      
+      // 1次元バーコードの代替パターン
+      const fallbackRegex = /(01)?(\d{14})(17)?(\d{6})?(10)?([A-Za-z0-9]+)?/;
+      const fallbackMatch = cleanBarcode.match(fallbackRegex);
+      
+      if (fallbackMatch) {
+        addDebugLog("1次元バーコード代替パターンでマッチ: " + JSON.stringify(fallbackMatch));
+        const gtin = fallbackMatch[2];
+        const expiryRaw = fallbackMatch[4];
+        const lot = fallbackMatch[6];
+        
+        // JANコードを設定
+        setValue("janCode", gtin);
+        
+        // 有効期限の処理（存在する場合）
+        if (expiryRaw && expiryRaw.length === 6) {
+          const yearPrefix = parseInt(expiryRaw.substring(0, 2)) >= 50 ? "19" : "20";
+          const formattedExpiry = `${yearPrefix}${expiryRaw.substring(0, 2)}-${expiryRaw.substring(
+            2,
+            4
+          )}-${expiryRaw.substring(4, 6)}`;
+          setValue("expirationDate", formattedExpiry);
+        }
+        
+        // ロット番号の処理（存在する場合）
+        if (lot) {
+          setValue("lotNo", lot);
+        }
+        
+        // 商品マスタから検索
+        const product = products.find((p) => p.code === gtin);
+        if (product) {
+          setValue("reagentName", product.name);
+          setValue("specification", product.specification || "規格未設定");
+          setValue("unit", product.unit || "");
+          addDebugLog("GTIN/JANコード一致（代替）: " + product.name);
+          addDebugLog("規格: " + (product.specification || "規格未設定"));
+          addDebugLog("単位: " + (product.unit || "未設定"));
+          setBarcodeDetected(true);
+          return true;
+        } else {
+          addDebugLog("GTIN/JANコード不一致（代替）: " + gtin);
+        }
+      } else {
+        addDebugLog("どのパターンにも一致しませんでした");
+      }
+      
+      // どのパターンにも一致しなかった場合は、汎用パーサーを試す
+      return parseGS1Barcode(originalBarcode);
+    },
+    [parseGS1Barcode, products, setValue, addDebugLog]
+  );
+
+  // 2次元バーコード専用のパース処理（QRコード、データマトリックスなど）
+  const parseQRCode = useCallback(
+    (originalBarcode: string) => {
+      addDebugLog("2次元バーコードのパース処理を実行: " + originalBarcode);
+      
+      // QRコード特有の形式（例: 9114175095 102995266 17270800）
+      // スペースで区切られたフォーマットの処理
+      const qrParts = originalBarcode.split(/\s+/);
+      let gtin = null;
+      let lot = null;
+      let expiry = null;
+      let success = false;
+      
+      // 先頭の91などのプレフィックスを無視して14桁または13桁のGTINを探す
+      for (const part of qrParts) {
+        if (part.length >= 8) {
+          const possibleGtin = part.replace(/^91/, ""); // 91プレフィックスを除去
+          if (/^\d{8,14}$/.test(possibleGtin)) {
+            gtin = possibleGtin.padStart(14, '0'); // 14桁に正規化
+            addDebugLog("QRコード形式から可能性のあるGTIN: " + gtin);
+            
+            // GTINが見つかれば設定
+            if (gtin) {
+              setValue("janCode", gtin);
+              
+              // 商品マスタから検索
+              const product = products.find(p => p.code === gtin);
+              if (product) {
+                setValue("reagentName", product.name);
+                setValue("specification", product.specification || "規格未設定");
+                setValue("unit", product.unit || "");
+                addDebugLog("QRコードからの商品情報取得: " + product.name);
+                success = true;
+              }
+            }
+            break;
+          }
+        }
+      }
+      
+      // ロット番号の抽出
+      // 10から始まる部分をロット番号として処理
+      const lotPart = qrParts.find(part => part.startsWith("10"));
+      if (lotPart) {
+        lot = lotPart.substring(2); // "10"を削除
+        addDebugLog("QRコード形式からロット番号: " + lot);
+        setValue("lotNo", lot);
+        success = true;
+      }
+      
+      // 有効期限の抽出
+      // 17から始まる部分を有効期限として処理
+      const expiryPart = qrParts.find(part => part.startsWith("17"));
+      if (expiryPart) {
+        expiry = expiryPart.substring(2); // "17"を削除
+        addDebugLog("QRコード形式から有効期限: " + expiry);
+        
+        // 日付のフォーマットを処理
+        if (expiry && expiry.length === 6) {
+          // YYMMDD形式
+          const yy = expiry.substring(0, 2);
+          const mm = expiry.substring(2, 4);
+          const dd = expiry.substring(4, 6);
+          
+          // 年の補完（2000年代か1900年代か）
+          const yearPrefix = parseInt(yy) >= 50 ? "19" : "20";
+          const formattedExpiry = `${yearPrefix}${yy}-${mm}-${dd}`;
+          setValue("expirationDate", formattedExpiry);
+          success = true;
+        }
+      }
+      
+      // QRコードの代替パターン（コロン区切り）
+      if (!success && originalBarcode.includes(':')) {
+        const colonParts = originalBarcode.split(':');
+        // コロン区切りのQRコードでは、キーと値のペアが期待される
+        for (let i = 0; i < colonParts.length - 1; i++) {
+          const key = colonParts[i].trim();
+          const value = colonParts[i + 1].trim();
+          
+          if (key.endsWith("01") && /^\d{8,14}$/.test(value)) {
+            setValue("janCode", value.padStart(14, '0'));
+            success = true;
+          } else if (key.endsWith("10")) {
+            setValue("lotNo", value);
+            success = true;
+          } else if (key.endsWith("17") && value.length === 6) {
+            // YYMMDD形式
+            const yy = value.substring(0, 2);
+            const mm = value.substring(2, 4);
+            const dd = value.substring(4, 6);
+            
+            // 年の補完（2000年代か1900年代か）
+            const yearPrefix = parseInt(yy) >= 50 ? "19" : "20";
+            const formattedExpiry = `${yearPrefix}${yy}-${mm}-${dd}`;
+            setValue("expirationDate", formattedExpiry);
+            success = true;
+          }
+        }
+      }
+      
+      // 検出結果を設定
+      setBarcodeDetected(success);
+      
+      // 成功したか、パースできなかった場合は汎用パーサーを試す
+      if (success) {
+        return true;
+      } else {
+        return parseGS1Barcode(originalBarcode);
+      }
+    },
+    [parseGS1Barcode, products, setValue, addDebugLog]
+  );
+
   // バーコード検出ハンドラ
   const handleBarcodeDetected = useCallback(
-    (barcodeData: string) => {
-      addDebugLog("バーコード検出: " + barcodeData);
-      const success = parseGS1Barcode(barcodeData);
+    (barcodeData: string, format: string) => {
+      addDebugLog(`バーコード検出: ${barcodeData} (フォーマット: ${format})`);
+      
+      // バーコードフォーマットに基づいて適切なパーサーを選択
+      let success = false;
+      
+      // 2Dバーコード（QRコード、データマトリックスなど）
+      if (format === 'qr_code' || format === 'data_matrix' || format === 'pdf417') {
+        success = parseQRCode(barcodeData);
+      } 
+      // 1Dバーコード（GS1-128、EANなど）
+      else if (format === 'code_128' || format === 'ean_13' || format === 'ean_8' || format === 'upc_a' || format === 'upc_e') {
+        success = parseLinearBarcode(barcodeData);
+      } 
+      // フォーマットが不明またはフォールバック（以前の方法を使用）
+      else {
+        success = parseGS1Barcode(barcodeData);
+      }
+      
       if (success) {
         addDebugLog("バーコード処理成功");
       } else {
         addDebugLog("バーコード処理失敗、手動入力必要");
       }
     },
-    [parseGS1Barcode, addDebugLog]
+    [parseGS1Barcode, parseLinearBarcode, parseQRCode, addDebugLog]
   );
 
   // バーコードスキャンエラー処理
