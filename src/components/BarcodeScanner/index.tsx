@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, Camera, Image as ImageIcon, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Loader2, Camera, Image as ImageIcon, RefreshCw, CheckCircle2, QrCode } from 'lucide-react';
 import styles from './styles.module.css';
 
 // BarcodeDetector APIのpolyfillをインポート
@@ -124,9 +124,28 @@ export default function BarcodeScanner({
   const [isCameraMode, setIsCameraMode] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isBarcodeAPISupported, setIsBarcodeAPISupported] = useState(false);
-  const [barcodeType, setBarcodeType] = useState<BarcodeType>('gs1_128'); // デフォルトはGS1-128に戻す
+  const [barcodeType, setBarcodeType] = useState<BarcodeType>('gs1_128');
   const [detectedBarcode, setDetectedBarcode] = useState<{value: string, format: string} | null>(null);
   const [showCamera, setShowCamera] = useState(true);
+  const [barcodeMode, setBarcodeMode] = useState<'cross' | 'horizontal' | 'vertical' | 'auto'>('horizontal');
+
+  // バーコードモードに基づいてバーコードタイプを設定
+  useEffect(() => {
+    switch (barcodeMode) {
+      case 'horizontal':
+        setBarcodeType('gs1_128');
+        break;
+      case 'vertical':
+        setBarcodeType('gs1_128_vertical');
+        break;
+      case 'cross':
+        setBarcodeType('cross');
+        break;
+      case 'auto':
+        setBarcodeType('qr_code');
+        break;
+    }
+  }, [barcodeMode]);
 
   // 現在のバーコードタイプに基づいてフォーマットを選択
   const getSelectedFormats = useCallback(() => {
@@ -134,9 +153,9 @@ export default function BarcodeScanner({
       case 'gs1_128':
       case 'gs1_128_vertical':
       case 'cross':
-        return ['code_128', 'ean_13', 'ean_8', 'upc_a', 'upc_e']; // 一般的な1Dバーコード形式を追加
+        return ['code_128', 'ean_13', 'ean_8', 'upc_a', 'upc_e'];
       case 'qr_code':
-        return ['qr_code', 'data_matrix', 'pdf417']; // 2Dバーコード形式を追加
+        return ['qr_code', 'data_matrix', 'pdf417'];
       default:
         return BARCODE_FORMATS;
     }
@@ -712,44 +731,107 @@ export default function BarcodeScanner({
             <p><strong>値:</strong> {detectedBarcode.value}</p>
           </div>
         ) : (
-          <div className={styles.viewfinderContainer}>
-            {isCameraMode && showCamera ? (
-              <>
-                <video 
-                  ref={videoRef} 
-                  className={styles.video} 
-                  playsInline 
-                  muted
-                />
-                {renderViewfinder()}
-              </>
-            ) : (
-              capturedImage ? (
-                <img src={capturedImage} alt="Captured" className={styles.capturedImage} />
+          <>
+            <div className={styles.viewfinderContainer}>
+              {isCameraMode && showCamera ? (
+                <>
+                  <video 
+                    ref={videoRef} 
+                    className={styles.video} 
+                    playsInline 
+                    muted
+                  />
+                  {renderViewfinder()}
+                </>
               ) : (
-                <div className={styles.uploadPlaceholder}>
-                  <ImageIcon size={48} />
-                  <p>画像を選択してください</p>
-                </div>
-              )
-            )}
-            
-            <canvas ref={canvasRef} style={{ display: 'none' }} />
-          </div>
+                capturedImage ? (
+                  <img src={capturedImage} alt="Captured" className={styles.capturedImage} />
+                ) : (
+                  <div className={styles.uploadPlaceholder}>
+                    <ImageIcon size={48} />
+                    <p>画像を選択してください</p>
+                  </div>
+                )
+              )}
+              
+              <canvas ref={canvasRef} style={{ display: 'none' }} />
+            </div>
+
+            {/* バーコードスキャンモード選択 */}
+            <div className="mb-6">
+              <div className="grid grid-cols-4 gap-2 max-w-md mx-auto">
+                <Button 
+                  onClick={() => setBarcodeMode('horizontal')}
+                  className={`flex flex-col items-center justify-center gap-1 h-auto py-2 px-2 rounded-lg transition-all duration-300 ${
+                    barcodeMode === 'horizontal' 
+                      ? 'bg-gradient-to-r from-pink-200 to-purple-200 text-[#8167a9] ring-2 ring-[#8167a9]' 
+                      : 'bg-white/50 border border-gray-200 hover:border-[#8167a9]'
+                  }`}
+                >
+                  <div className="w-8 h-8 flex items-center justify-center rounded-full bg-[#8167a9]/5">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-[#8167a9]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M3 12h18" />
+                      <path d="M3 6h18" />
+                      <path d="M3 18h18" />
+                    </svg>
+                  </div>
+                  <span className="text-xs font-medium">横型</span>
+                </Button>
+
+                <Button 
+                  onClick={() => setBarcodeMode('vertical')}
+                  className={`flex flex-col items-center justify-center gap-1 h-auto py-2 px-2 rounded-lg transition-all duration-300 ${
+                    barcodeMode === 'vertical' 
+                      ? 'bg-gradient-to-r from-pink-200 to-purple-200 text-[#8167a9] ring-2 ring-[#8167a9]' 
+                      : 'bg-white/50 border border-gray-200 hover:border-[#8167a9]'
+                  }`}
+                >
+                  <div className="w-8 h-8 flex items-center justify-center rounded-full bg-[#8167a9]/5">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-[#8167a9]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 3v18" />
+                      <path d="M6 12h12" />
+                      <path d="M6 6h12" />
+                      <path d="M6 18h12" />
+                    </svg>
+                  </div>
+                  <span className="text-xs font-medium">縦型</span>
+                </Button>
+
+                <Button 
+                  onClick={() => setBarcodeMode('cross')}
+                  className={`flex flex-col items-center justify-center gap-1 h-auto py-2 px-2 rounded-lg transition-all duration-300 ${
+                    barcodeMode === 'cross' 
+                      ? 'bg-gradient-to-r from-pink-200 to-purple-200 text-[#8167a9] ring-2 ring-[#8167a9]' 
+                      : 'bg-white/50 border border-gray-200 hover:border-[#8167a9]'
+                  }`}
+                >
+                  <div className="w-8 h-8 flex items-center justify-center rounded-full bg-[#8167a9]/5">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-[#8167a9]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                  </div>
+                  <span className="text-xs font-medium">十字型</span>
+                </Button>
+
+                <Button 
+                  onClick={() => setBarcodeMode('auto')}
+                  className={`flex flex-col items-center justify-center gap-1 h-auto py-2 px-2 rounded-lg transition-all duration-300 ${
+                    barcodeMode === 'auto' 
+                      ? 'bg-gradient-to-r from-pink-200 to-purple-200 text-[#8167a9] ring-2 ring-[#8167a9]' 
+                      : 'bg-white/50 border border-gray-200 hover:border-[#8167a9]'
+                  }`}
+                >
+                  <div className="w-8 h-8 flex items-center justify-center rounded-full bg-[#8167a9]/5">
+                    <QrCode className="h-4 w-4 text-[#8167a9]" />
+                  </div>
+                  <span className="text-xs font-medium">QRコード</span>
+                </Button>
+              </div>
+            </div>
+          </>
         )}
         
         <div className={styles.controls}>
-          {/* バーコードタイプ切り替えボタン */}
-          {!detectedBarcode && (
-            <Button 
-              variant="outline" 
-              onClick={toggleBarcodeType}
-              className="mb-2 w-full"
-            >
-              {getBarcodeTypeName()}モードに設定中
-            </Button>
-          )}
-          
           {isCameraMode && !detectedBarcode ? (
             <>
               <Button 
