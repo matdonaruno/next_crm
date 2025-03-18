@@ -841,40 +841,45 @@ function ReagentRegistrationContent() {
     setShowCamera(!showCamera);
   };
 
+  // バーコードスキャンモード選択
+  const [barcodeMode, setBarcodeMode] = useState<'cross' | 'horizontal' | 'vertical' | 'auto'>('auto');
+
   return (
     <TooltipProvider>
-      <div className="min-h-screen w-full flex flex-col bg-gradient-to-b from-[#fde3f1] to-[#e9ddfc]">
+      <div className="min-h-screen w-full flex flex-col bg-white">
         {/* 共通ヘッダーコンポーネントを使用 */}
         <AppHeader showBackButton={true} title="Clinical reagent manager" />
 
         <div className="flex-grow flex flex-col items-center py-8 px-4">
           <div className="max-w-4xl w-full mx-auto">
             <div className="text-center mb-8">
-              <h1
-                className="text-4xl font-bold mb-4"
-                style={{ color: '#8167a9' }}
-              >
-                試薬登録
-              </h1>
-              <h2
-                className="text-3xl mb-4"
-                style={{ color: '#8167a9' }}
-              >
-                『{departmentName}』
-              </h2>
-              <p className="text-lg" style={{ color: '#8167a9' }}>
-                Barcode scan select 1D/2D for automatic data entry
-              </p>
-              
-              {/* ユーザー情報表示 - 中央揃え */}
-              <div className="mt-2 text-center">
+              <div className="bg-gradient-to-br from-pink-50 to-purple-50 rounded-2xl p-6 shadow-sm border border-[#8167a9]/10">
+                <div className="space-y-2">
+                  <h1
+                    className="text-4xl font-bold bg-gradient-to-r from-[#8167a9] to-[#a18cd1] bg-clip-text text-transparent"
+                  >
+                    試薬登録
+                  </h1>
+                  <h2
+                    className="text-3xl bg-gradient-to-r from-[#8167a9] to-[#a18cd1] bg-clip-text text-transparent"
+                  >
+                    『{departmentName}』
+                  </h2>
+                  <p className="text-lg text-[#8167a9] font-medium">
+                    Barcode scan select 1D/2D for automatic data entry
+                  </p>
+                </div>
+              </div>
+
+              {/* ユーザー情報表示 - 右詰め */}
+              <div className="flex justify-end gap-2 mt-2">
                 {facilityName && (
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-gray-600 bg-white/50 px-3 py-1.5 rounded-full inline-block">
                     施設「{facilityName}」
                   </p>
                 )}
                 {currentUserName && (
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-gray-600 bg-white/50 px-3 py-1.5 rounded-full inline-block">
                     {currentUserName}さんがログインしています！
                   </p>
                 )}
@@ -904,10 +909,84 @@ function ReagentRegistrationContent() {
                 <div className="mb-6 text-center">
                   <Button 
                     onClick={toggleCamera}
-                    className="bg-[#8167a9] hover:bg-[#6a5491] text-white"
+                    className="inline-flex items-center justify-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 shadow hover:bg-primary/90 h-9 px-8 mx-auto bg-gradient-to-r from-pink-300 to-purple-400 hover:from-pink-300 hover:to-purple-400 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
                   >
                     {showCamera ? "カメラを閉じる" : "バーコードをスキャン"}
                   </Button>
+                </div>
+
+                {/* バーコードスキャンモード選択 */}
+                <div className="mb-6">
+                  <div className="grid grid-cols-4 gap-2 max-w-md mx-auto">
+                    <Button 
+                      onClick={() => setBarcodeMode('cross')}
+                      className={`flex flex-col items-center justify-center gap-1 h-auto py-2 px-2 rounded-lg transition-all duration-300 ${
+                        barcodeMode === 'cross' 
+                          ? 'bg-gradient-to-r from-pink-200 to-purple-200 text-[#8167a9] ring-2 ring-[#8167a9]' 
+                          : 'bg-white/50 border border-gray-200 hover:border-[#8167a9]'
+                      }`}
+                    >
+                      <div className="w-8 h-8 flex items-center justify-center rounded-full bg-[#8167a9]/5">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-[#8167a9]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 5v14M5 12h14" />
+                        </svg>
+                      </div>
+                      <span className="text-xs font-medium">十字型</span>
+                    </Button>
+
+                    <Button 
+                      onClick={() => setBarcodeMode('horizontal')}
+                      className={`flex flex-col items-center justify-center gap-1 h-auto py-2 px-2 rounded-lg transition-all duration-300 ${
+                        barcodeMode === 'horizontal' 
+                          ? 'bg-gradient-to-r from-pink-200 to-purple-200 text-[#8167a9] ring-2 ring-[#8167a9]' 
+                          : 'bg-white/50 border border-gray-200 hover:border-[#8167a9]'
+                      }`}
+                    >
+                      <div className="w-8 h-8 flex items-center justify-center rounded-full bg-[#8167a9]/5">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-[#8167a9]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M3 12h18" />
+                          <path d="M3 6h18" />
+                          <path d="M3 18h18" />
+                        </svg>
+                      </div>
+                      <span className="text-xs font-medium">横型</span>
+                    </Button>
+
+                    <Button 
+                      onClick={() => setBarcodeMode('vertical')}
+                      className={`flex flex-col items-center justify-center gap-1 h-auto py-2 px-2 rounded-lg transition-all duration-300 ${
+                        barcodeMode === 'vertical' 
+                          ? 'bg-gradient-to-r from-pink-200 to-purple-200 text-[#8167a9] ring-2 ring-[#8167a9]' 
+                          : 'bg-white/50 border border-gray-200 hover:border-[#8167a9]'
+                      }`}
+                    >
+                      <div className="w-8 h-8 flex items-center justify-center rounded-full bg-[#8167a9]/5">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-[#8167a9]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 3v18" />
+                          <path d="M6 12h12" />
+                          <path d="M6 6h12" />
+                          <path d="M6 18h12" />
+                        </svg>
+                      </div>
+                      <span className="text-xs font-medium">縦型</span>
+                    </Button>
+
+                    <Button 
+                      onClick={() => setBarcodeMode('auto')}
+                      className={`flex flex-col items-center justify-center gap-1 h-auto py-2 px-2 rounded-lg transition-all duration-300 ${
+                        barcodeMode === 'auto' 
+                          ? 'bg-gradient-to-r from-pink-200 to-purple-200 text-[#8167a9] ring-2 ring-[#8167a9]' 
+                          : 'bg-white/50 border border-gray-200 hover:border-[#8167a9]'
+                      }`}
+                    >
+                      <div className="w-8 h-8 flex items-center justify-center rounded-full bg-[#8167a9]/5">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-[#8167a9]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                        </svg>
+                      </div>
+                      <span className="text-xs font-medium">自動</span>
+                    </Button>
+                  </div>
                 </div>
 
                 {/* エラーメッセージ */}
@@ -1002,7 +1081,7 @@ function ReagentRegistrationContent() {
                       <div className="pt-4">
                         <Button 
                           type="submit" 
-                          className="w-full bg-[#8167a9] hover:bg-[#6a5491] text-white" 
+                          className="inline-flex items-center justify-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 shadow hover:bg-primary/90 h-9 px-4 w-full bg-gradient-to-r from-pink-300 to-purple-400 hover:from-pink-300 hover:to-purple-400 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300" 
                           disabled={isSubmitting}
                         >
                           {isSubmitting ? "登録中..." : "登録する"}

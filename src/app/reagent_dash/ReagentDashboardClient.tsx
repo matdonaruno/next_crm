@@ -21,6 +21,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/contexts/AuthContext";
 import Papa from 'papaparse'; // CSVパーサーライブラリを追加
 import { AppHeader } from "@/components/ui/app-header";
+import { motion } from "framer-motion";
 
 interface Reagent {
   id: number;
@@ -901,12 +902,18 @@ export default function ReagentDashboardClient() {
                 )}
               </Button>
             </div>
-            <Button
-              onClick={() => router.push(`/reagent/register-new?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`)}
-              className="bg-[hsl(12,6.5%,15.1%)] hover:bg-[hsl(12,6.5%,10%)] text-white"
+            <motion.div
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.98 }}
             >
-              <Plus className="mr-2 h-4 w-4" /> Register Reagent
-            </Button>
+              <Button
+                onClick={() => router.push(`/reagent/register-new?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`)}
+                className="inline-flex items-center justify-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 shadow hover:bg-primary/90 h-9 px-4 w-full bg-gradient-to-r from-pink-300 to-purple-400 hover:from-pink-300 hover:to-purple-400 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
+              >
+                <Plus className="mr-2 h-5 w-5" />
+                Register Reagent
+              </Button>
+            </motion.div>
           </div>
 
           <Card>

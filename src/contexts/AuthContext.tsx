@@ -39,14 +39,20 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // 非アクティブタイムアウト（ミリ秒）- 30分
 const INACTIVITY_TIMEOUT = 30 * 60 * 1000;
-// セッション確認間隔（ミリ秒）- 5分
-const SESSION_CHECK_INTERVAL = 5 * 60 * 1000;
-// データ取得タイムアウト（ミリ秒）- 15秒に延長
+// セッション確認間隔（ミリ秒）- 30分
+const SESSION_CHECK_INTERVAL = 30 * 60 * 1000;
+// データ取得タイムアウト（ミリ秒）- 15秒
 const DATA_FETCH_TIMEOUT = 15000;
 // 最大再試行回数
 const MAX_RETRY_COUNT = 3;
 // 再試行間隔（ミリ秒）
 const RETRY_INTERVAL = 1000;
+// セッションキャッシュキー
+const SESSION_CACHE_KEY = 'auth_session_cache';
+// プロファイルキャッシュキー
+const PROFILE_CACHE_KEY = 'auth_profile_cache';
+// キャッシュ有効期限（ミリ秒）- 30分
+const CACHE_EXPIRY = 30 * 60 * 1000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<any | null>(null);
@@ -73,39 +79,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // すべての認証関連ストレージをクリア
-  const clearAllAuthStorage = () => {
-    try {
-      console.log("AuthContext: すべての認証ストレージをクリア");
-      
-      // Supabase URLからプロジェクトIDを抽出
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-      const projectId = supabaseUrl.match(/https:\/\/(.*?)\.supabase\.co/)?.[1] || 'bsgvaomswzkywbiubtjg';
-      const storageKey = `sb-${projectId}-auth-token`;
-      const codeVerifierKey = `sb-${projectId}-auth-code-verifier`;
-      
-      // クッキーを削除
-      if (typeof window !== 'undefined' && window.Cookies) {
-        window.Cookies.remove(storageKey, { path: '/' });
-        window.Cookies.remove(codeVerifierKey, { path: '/' });
-      }
-      
-      // ローカルストレージをクリア
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.removeItem(storageKey);
-        window.localStorage.removeItem(codeVerifierKey);
-      }
-      
-      // セッションストレージをクリア
-      if (typeof window !== 'undefined' && window.sessionStorage) {
-        window.sessionStorage.removeItem(storageKey);
-        window.sessionStorage.removeItem(codeVerifierKey);
-      }
-      
-      console.log("AuthContext: 認証ストレージのクリア完了");
-    } catch (e) {
-      console.error("AuthContext: ストレージクリア中にエラー:", e);
+  // セッションキャッシュの管理
+  const getCachedSession = () => {
+    if (typeof window === 'undefined') return null;
+    const cached = localStorage.getItem(SESSION_CACHE_KEY);
+    if (!cached) return null;
+    
+    const { session, timestamp } = JSON.parse(cached);
+    if (Date.now() - timestamp > CACHE_EXPIRY) {
+      localStorage.removeItem(SESSION_CACHE_KEY);
+      return null;
     }
+    return session;
+  };
+
+  const setCachedSession = (session: any) => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(SESSION_CACHE_KEY, JSON.stringify({
+      session,
+      timestamp: Date.now()
+    }));
+  };
+
+  // プロファイルキャッシュの管理
+  const getCachedProfile = () => {
+    if (typeof window === 'undefined') return null;
+    const cached = localStorage.getItem(PROFILE_CACHE_KEY);
+    if (!cached) return null;
+    
+    const { profile, timestamp } = JSON.parse(cached);
+    if (Date.now() - timestamp > CACHE_EXPIRY) {
+      localStorage.removeItem(PROFILE_CACHE_KEY);
+      return null;
+    }
+    return profile;
+  };
+
+  const setCachedProfile = (profile: UserProfile) => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify({
+      profile,
+      timestamp: Date.now()
+    }));
   };
 
   // プロファイル取得タイムアウト処理
@@ -116,14 +131,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   };
 
-  // プロファイル情報を取得する関数（再試行ロジック含む）
+  // プロファイル情報を取得する関数（キャッシュ対応）
   const fetchProfileWithRetry = async (userId: string, maxRetries = MAX_RETRY_COUNT): Promise<{ data: UserProfile | null, error: any | null }> => {
+    // キャッシュされたプロファイルを確認
+    const cachedProfile = getCachedProfile();
+    if (cachedProfile) {
+      console.log("AuthContext: キャッシュされたプロファイルを使用");
+      return { data: cachedProfile, error: null };
+    }
+
     console.log(`AuthContext: プロファイル情報取得開始 (最大${maxRetries}回試行)`);
     let retryAttempt = 0;
     
     while (retryAttempt < maxRetries) {
       try {
-        // 再試行回数が0より大きい場合はメッセージを更新
         if (retryAttempt > 0) {
           setLoadingMessage(`プロファイル情報を再取得中... (${retryAttempt}/${maxRetries})`);
         }
@@ -138,12 +159,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
         if (data) {
           console.log("AuthContext: プロファイル取得成功:", data);
+          // プロファイルをキャッシュ
+          setCachedProfile(data);
           return { data, error: null };
         }
         
         console.log("AuthContext: プロファイル取得失敗:", error);
         
-        // 最後の試行でなければ待機してから再試行
         if (retryAttempt < maxRetries - 1) {
           await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL));
         }
@@ -152,7 +174,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (e) {
         console.error("AuthContext: プロファイル取得中に例外発生:", e);
         
-        // 最後の試行でなければ待機してから再試行
         if (retryAttempt < maxRetries - 1) {
           await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL));
         }
@@ -161,7 +182,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
     
-    // すべての試行が失敗
     return { data: null, error: new Error("プロファイル情報の取得に失敗しました") };
   };
 
@@ -207,29 +227,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // 定期的なセッション確認
   useEffect(() => {
-    if (!user) return; // ユーザーがログインしていない場合は何もしない
+    if (!user) return;
 
     console.log("AuthContext: 定期的なセッション確認を開始");
     
     const sessionCheckInterval = setInterval(async () => {
       try {
+        // キャッシュされたセッションを確認
+        const cachedSession = getCachedSession();
+        if (cachedSession) {
+          console.log("AuthContext: キャッシュされたセッションを使用");
+          return;
+        }
+
         console.log("AuthContext: セッションの有効性を確認中...");
         const { data, error } = await supabase.auth.getSession();
         
         if (error || !data.session) {
           console.log("AuthContext: セッションが無効になっています、ログアウトします");
           clearInterval(sessionCheckInterval);
-          // セッションが無効になっている場合は、ユーザー状態をクリアしてログインページにリダイレクト
           setUser(null);
           setProfile(null);
           router.push('/login');
+        } else {
+          // セッションをキャッシュ
+          setCachedSession(data.session);
         }
       } catch (e) {
         console.error("AuthContext: セッション確認中にエラーが発生しました", e);
       }
     }, SESSION_CHECK_INTERVAL);
     
-    // クリーンアップ
     return () => {
       clearInterval(sessionCheckInterval);
     };
@@ -618,4 +646,42 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-} 
+}
+
+// すべての認証関連ストレージをクリア
+const clearAllAuthStorage = () => {
+  try {
+    console.log("AuthContext: すべての認証ストレージをクリア");
+    
+    // Supabase URLからプロジェクトIDを抽出
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const projectId = supabaseUrl.match(/https:\/\/(.*?)\.supabase\.co/)?.[1] || 'bsgvaomswzkywbiubtjg';
+    const storageKey = `sb-${projectId}-auth-token`;
+    const codeVerifierKey = `sb-${projectId}-auth-code-verifier`;
+    
+    // クッキーを削除
+    if (typeof window !== 'undefined' && window.Cookies) {
+      window.Cookies.remove(storageKey, { path: '/' });
+      window.Cookies.remove(codeVerifierKey, { path: '/' });
+    }
+    
+    // ローカルストレージをクリア
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(storageKey);
+      window.localStorage.removeItem(codeVerifierKey);
+      // キャッシュもクリア
+      window.localStorage.removeItem(SESSION_CACHE_KEY);
+      window.localStorage.removeItem(PROFILE_CACHE_KEY);
+    }
+    
+    // セッションストレージをクリア
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.removeItem(storageKey);
+      window.sessionStorage.removeItem(codeVerifierKey);
+    }
+    
+    console.log("AuthContext: 認証ストレージのクリア完了");
+  } catch (e) {
+    console.error("AuthContext: ストレージクリア中にエラー:", e);
+  }
+}; 

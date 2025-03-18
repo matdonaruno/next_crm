@@ -369,7 +369,7 @@ export default function BarcodeScanner({
    * バーコードスキャンのループ処理
    */
   useEffect(() => {
-    if (!isBarcodeAPISupported || !isScanning || !videoRef.current || !canvasRef.current || !showCamera) return;
+    if (!isBarcodeAPISupported || !isScanning || !videoRef.current || !canvasRef.current) return;
     
     let animationFrameId: number | null = null;
     let lastDetectionTime = 0;
