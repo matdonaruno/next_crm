@@ -8,6 +8,8 @@ import { supabase } from "@/lib/supabaseClient";
 import { DayContentProps } from "react-day-picker";
 import { getCachedFacility, cacheFacility } from '@/lib/facilityCache';
 import { getCurrentUser } from '@/lib/userCache';
+import { motion } from "framer-motion";
+import { Button } from "@/components/ui/button";
 
 interface TemperatureRecordDetail {
   id: string;
@@ -491,25 +493,35 @@ export default function TemperatureManagementClient() {
         </div>
 
         {/* 新規登録ボタン */}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: "16px" }}>
-          <button
-            onClick={() => {
-              router.push(`/temperature/sensor-data?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`);
-            }}
-            className="button-style text-primary-foreground rounded-md px-4 py-2.5 font-medium transition-all duration-200 hover:bg-blue-300 focus:outline-none focus:ring-2 focus:ring-primary/20 flex items-center justify-center gap-2"
+        <div className="flex justify-end gap-4">
+          <motion.div
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.98 }}
           >
-            <Activity className="h-5 w-5" />
-            センサーデータ履歴
-          </button>
-          <button
-            onClick={() => {
-              window.location.href = `/temperature/new?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`;
-            }}
-            className="button-style text-primary-foreground rounded-md px-4 py-2.5 font-medium transition-all duration-200 hover:bg-violet-300 focus:outline-none focus:ring-2 focus:ring-primary/20 flex items-center justify-center gap-2"
+            <Button
+              onClick={() => {
+                router.push(`/temperature/sensor-data?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`);
+              }}
+              className="bg-gradient-to-r from-blue-400 to-indigo-500 hover:from-blue-500 hover:to-indigo-600 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
+            >
+              <Activity className="h-5 w-5 mr-2" />
+              センサーデータ履歴
+            </Button>
+          </motion.div>
+          <motion.div
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.98 }}
           >
-            <Plus className="h-5 w-5" />
-            Add New Temperature Record
-          </button>
+            <Button
+              onClick={() => {
+                window.location.href = `/temperature/new?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`;
+              }}
+              className="bg-gradient-to-r from-pink-400 to-purple-500 hover:from-pink-500 hover:to-purple-600 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
+            >
+              <Plus className="h-5 w-5 mr-2" />
+              Add New Temperature Record
+            </Button>
+          </motion.div>
         </div>
 
         {/* データリスト */}
