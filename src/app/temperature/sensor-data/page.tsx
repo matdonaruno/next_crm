@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ChevronLeft, Home, Bell, Activity, Calendar, Download, Filter, RefreshCw } from 'lucide-react';
+import { ChevronLeft, Home, Bell, Activity, Calendar, Download, Filter, RefreshCw, ArrowLeft } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { Line } from 'react-chartjs-2';
 import {
@@ -18,6 +18,8 @@ import {
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { ja } from 'date-fns/locale';
+import { motion } from 'framer-motion';
+import { Button } from '@/components/ui/button';
 
 // Chart.jsの設定
 ChartJS.register(
@@ -89,7 +91,6 @@ function SensorDataContent() {
   });
   const [facilityName, setFacilityName] = useState<string>("");
   const [facilityId, setFacilityId] = useState<string>("");
-  const [dataType, setDataType] = useState<'temperature' | 'humidity' | 'pressure'>('temperature');
 
   // 施設情報の取得
   useEffect(() => {
@@ -97,11 +98,48 @@ function SensorDataContent() {
       try {
         // キャッシュから施設情報を取得
         const cachedFacility = localStorage.getItem('facilityCache');
+        console.log('Cached facility:', cachedFacility);
+        
         if (cachedFacility) {
           const { id, name } = JSON.parse(cachedFacility);
+          console.log('Setting facility from cache:', { id, name });
           setFacilityId(id);
           setFacilityName(name);
           return;
+        }
+
+        // キャッシュにない場合はSupabaseから取得
+        const { data: userData, error: userError } = await supabase
+          .from('profiles')
+          .select('facility_id')
+          .single();
+
+        if (userError) {
+          console.error('ユーザー情報取得エラー:', userError);
+          return;
+        }
+
+        if (userData?.facility_id) {
+          const { data: facilityData, error: facilityError } = await supabase
+            .from('facilities')
+            .select('id, name')
+            .eq('id', userData.facility_id)
+            .single();
+
+          if (facilityError) {
+            console.error('施設情報取得エラー:', facilityError);
+            return;
+          }
+
+          console.log('Setting facility from DB:', facilityData);
+          setFacilityId(facilityData.id);
+          setFacilityName(facilityData.name);
+
+          // キャッシュに保存
+          localStorage.setItem('facilityCache', JSON.stringify({
+            id: facilityData.id,
+            name: facilityData.name
+          }));
         }
       } catch (error) {
         console.error('施設情報の取得に失敗:', error);
@@ -113,9 +151,13 @@ function SensorDataContent() {
 
   // センサーデータとデバイス情報の取得
   useEffect(() => {
-    if (!departmentId || !facilityId) return;
+    if (!departmentId || !facilityId) {
+      console.log('Missing required data:', { departmentId, facilityId });
+      return;
+    }
 
     const fetchSensorData = async () => {
+      console.log('Fetching sensor data for:', { departmentId, facilityId });
       setLoading(true);
       try {
         // センサーデバイスの取得
@@ -132,6 +174,7 @@ function SensorDataContent() {
           return;
         }
 
+        console.log('Found sensor device:', deviceData);
         setSensorDevice(deviceData);
 
         // センサーログの取得
@@ -145,11 +188,17 @@ function SensorDataContent() {
 
         if (logError) {
           console.error('センサーログ取得エラー:', logError);
+          setSensorLogs([]);
         } else if (logData) {
+          console.log('Found sensor logs:', logData.length);
           setSensorLogs(logData);
+        } else {
+          console.log('No sensor logs found');
+          setSensorLogs([]);
         }
       } catch (error) {
         console.error('データ取得エラー:', error);
+        setSensorLogs([]);
       } finally {
         setLoading(false);
       }
@@ -175,11 +224,15 @@ function SensorDataContent() {
 
         if (error) {
           console.error('センサーログ更新エラー:', error);
+          setSensorLogs([]);
         } else if (data) {
           setSensorLogs(data);
+        } else {
+          setSensorLogs([]);
         }
       } catch (error) {
         console.error('データ更新エラー:', error);
+        setSensorLogs([]);
       } finally {
         setLoading(false);
       }
@@ -225,59 +278,48 @@ function SensorDataContent() {
     const ahtHumData = sensorLogs.map(log => log.raw_data?.ahtHum ?? null);
     const bmpPresData = sensorLogs.map(log => log.raw_data?.bmpPres ?? null);
 
-    // データタイプに応じたデータセット
-    if (dataType === 'temperature') {
-      return {
-        labels,
-        datasets: [
-          {
-            label: 'AHT20温度 (℃)',
-            data: ahtTempData,
-            borderColor: 'rgb(255, 99, 132)',
-            backgroundColor: 'rgba(255, 99, 132, 0.5)',
-            tension: 0.1,
-            pointRadius: 2,
-          },
-          {
-            label: 'BMP280温度 (℃)',
-            data: bmpTempData,
-            borderColor: 'rgb(255, 159, 64)',
-            backgroundColor: 'rgba(255, 159, 64, 0.5)',
-            tension: 0.1,
-            pointRadius: 2,
-          }
-        ]
-      };
-    } else if (dataType === 'humidity') {
-      return {
-        labels,
-        datasets: [
-          {
-            label: 'AHT20湿度 (%)',
-            data: ahtHumData,
-            borderColor: 'rgb(54, 162, 235)',
-            backgroundColor: 'rgba(54, 162, 235, 0.5)',
-            tension: 0.1,
-            pointRadius: 2,
-          }
-        ]
-      };
-    } else {
-      return {
-        labels,
-        datasets: [
-          {
-            label: 'BMP280気圧 (hPa)',
-            data: bmpPresData,
-            borderColor: 'rgb(75, 192, 192)',
-            backgroundColor: 'rgba(75, 192, 192, 0.5)',
-            tension: 0.1,
-            pointRadius: 2,
-          }
-        ]
-      };
-    }
-  }, [sensorLogs, dataType]);
+    return {
+      labels,
+      datasets: [
+        {
+          label: 'AHT20温度 (℃)',
+          data: ahtTempData,
+          borderColor: 'rgb(255, 99, 132)',
+          backgroundColor: 'rgba(255, 99, 132, 0.5)',
+          tension: 0.1,
+          pointRadius: 2,
+          yAxisID: 'y1',
+        },
+        {
+          label: 'BMP280温度 (℃)',
+          data: bmpTempData,
+          borderColor: 'rgb(255, 159, 64)',
+          backgroundColor: 'rgba(255, 159, 64, 0.5)',
+          tension: 0.1,
+          pointRadius: 2,
+          yAxisID: 'y1',
+        },
+        {
+          label: 'AHT20湿度 (%)',
+          data: ahtHumData,
+          borderColor: 'rgb(54, 162, 235)',
+          backgroundColor: 'rgba(54, 162, 235, 0.5)',
+          tension: 0.1,
+          pointRadius: 2,
+          yAxisID: 'y2',
+        },
+        {
+          label: 'BMP280気圧 (hPa)',
+          data: bmpPresData,
+          borderColor: 'rgb(75, 192, 192)',
+          backgroundColor: 'rgba(75, 192, 192, 0.5)',
+          tension: 0.1,
+          pointRadius: 2,
+          yAxisID: 'y3',
+        }
+      ]
+    };
+  }, [sensorLogs]);
 
   // グラフオプション
   const chartOptions = {
@@ -289,7 +331,7 @@ function SensorDataContent() {
       },
       title: {
         display: true,
-        text: dataType === 'temperature' ? '温度データ' : dataType === 'humidity' ? '湿度データ' : '気圧データ',
+        text: 'センサーデータ',
       },
     },
     scales: {
@@ -312,10 +354,37 @@ function SensorDataContent() {
           text: '日付'
         }
       },
-      y: {
+      y1: {
+        type: 'linear' as const,
+        display: true,
+        position: 'left' as const,
         title: {
           display: true,
-          text: dataType === 'temperature' ? '温度 (℃)' : dataType === 'humidity' ? '湿度 (%)' : '気圧 (hPa)'
+          text: '温度 (℃)'
+        }
+      },
+      y2: {
+        type: 'linear' as const,
+        display: true,
+        position: 'right' as const,
+        title: {
+          display: true,
+          text: '湿度 (%)'
+        },
+        grid: {
+          drawOnChartArea: false
+        }
+      },
+      y3: {
+        type: 'linear' as const,
+        display: true,
+        position: 'right' as const,
+        title: {
+          display: true,
+          text: '気圧 (hPa)'
+        },
+        grid: {
+          drawOnChartArea: false
         }
       }
     }
@@ -389,18 +458,6 @@ function SensorDataContent() {
                 onChange={(e) => setEndDate(e.target.value)}
                 className="border border-gray-300 rounded-md px-3 py-2 text-sm"
               />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">データタイプ</label>
-              <select
-                value={dataType}
-                onChange={(e) => setDataType(e.target.value as any)}
-                className="border border-gray-300 rounded-md px-3 py-2 text-sm"
-              >
-                <option value="temperature">温度データ</option>
-                <option value="humidity">湿度データ</option>
-                <option value="pressure">気圧データ</option>
-              </select>
             </div>
             <div className="flex items-center gap-2 ml-auto">
               <button
@@ -519,6 +576,34 @@ function SensorDataContent() {
               </table>
             </div>
           )}
+        </div>
+
+        {/* ボタン部分 */}
+        <div className="flex justify-end gap-4">
+          <motion.div
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <Button
+              onClick={() => router.push(`/temperature?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`)}
+              className="bg-gradient-to-r from-pink-400 to-purple-500 hover:from-pink-500 hover:to-purple-600 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
+            >
+              温度管理画面へ戻る
+              <ArrowLeft className="ml-2 h-5 w-5" />
+            </Button>
+          </motion.div>
+          <motion.div
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <Button
+              onClick={downloadCSV}
+              className="bg-gradient-to-r from-blue-400 to-indigo-500 hover:from-blue-500 hover:to-indigo-600 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
+            >
+              CSVダウンロード
+              <Download className="ml-2 h-5 w-5" />
+            </Button>
+          </motion.div>
         </div>
       </main>
     </div>
