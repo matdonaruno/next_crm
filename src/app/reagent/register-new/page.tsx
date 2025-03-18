@@ -42,7 +42,6 @@ interface Product {
 
 // SearchParamsを取得するコンポーネント
 function ReagentRegistrationContent() {
-  // 認証チェックの代わりに直接認証状態を取得
   const { user, profile, loading } = useAuth();
   
   const { register, setValue, getValues, reset, formState: { /* errors */ } } = useForm<FormValues>();
@@ -51,24 +50,21 @@ function ReagentRegistrationContent() {
   const departmentName = searchParams?.get('department') || '';
   const departmentId = searchParams?.get('departmentId') || '';
   
-  const [error, setError] = useState<string>("");
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [showCamera, setShowCamera] = useState<boolean>(true);
-  const [currentUserName, setCurrentUserName] = useState("");
-  const [facilityName, setFacilityName] = useState("");
+  const [showCamera, setShowCamera] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [barcodeDetected, setBarcodeDetected] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [departments, setDepartments] = useState<{ id: string; name: string; }[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const { toast } = useToast(); // トースト通知を使用
   
-  // 部署一覧、商品CSV、バーコード読み取り状況
-  // 部署一覧は現在使用していませんが、将来的に部署選択機能を実装する予定
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [departments, setDepartments] = useState<{id: string, name: string}[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  // バーコード検出状態は内部的に使用
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [barcodeDetected, setBarcodeDetected] = useState<boolean>(false);
+  const [currentUserName, setCurrentUserName] = useState("");
+  const [facilityName, setFacilityName] = useState("");
   
   // デバッグログ
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const addDebugLog = useCallback((message: string) => {
     console.log(message); // コンソールにも出力
     setDebugLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
@@ -136,8 +132,17 @@ function ReagentRegistrationContent() {
   useEffect(() => {
     if (!loading && user && profile) {
       fetchUserAndFacilityInfo();
+      
+      // カメラが確実に初期化されるよう少し遅延させる
+      setShowCamera(false);
+      const cameraInitTimeout = setTimeout(() => {
+        setShowCamera(true);
+        addDebugLog("カメラ自動起動");
+      }, 1000);
+      
+      return () => clearTimeout(cameraInitTimeout);
     }
-  }, [loading, user, profile, fetchUserAndFacilityInfo]);
+  }, [loading, user, profile, fetchUserAndFacilityInfo, addDebugLog]);
 
   // 試薬登録処理
   const registerReagent = async (startUsage: boolean) => {
@@ -577,9 +582,9 @@ function ReagentRegistrationContent() {
       // QRコード特有の形式（例: 9114175095 102995266 17270800）
       // スペースで区切られたフォーマットの処理
       const qrParts = originalBarcode.split(/\s+/);
-      let gtin = null;
-      let lot = null;
-      let expiry = null;
+      let gtin: string | null = null;
+      let lot: string | null = null;
+      let expiry: string | null = null;
       let success = false;
       
       // 先頭の91などのプレフィックスを無視して14桁または13桁のGTINを探す
@@ -841,9 +846,6 @@ function ReagentRegistrationContent() {
     setShowCamera(!showCamera);
   };
 
-  // バーコードスキャンモード選択
-  const [barcodeMode, setBarcodeMode] = useState<'cross' | 'horizontal' | 'vertical' | 'auto'>('auto');
-
   return (
     <TooltipProvider>
       <div className="min-h-screen w-full flex flex-col bg-white">
@@ -911,7 +913,7 @@ function ReagentRegistrationContent() {
                     onClick={toggleCamera}
                     className="inline-flex items-center justify-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 shadow hover:bg-primary/90 h-9 px-8 mx-auto bg-gradient-to-r from-pink-300 to-purple-400 hover:from-pink-300 hover:to-purple-400 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
                   >
-                    {showCamera ? "カメラを閉じる" : "バーコードをスキャン"}
+                    {showCamera ? "カメラを閉じる" : "カメラを再起動する"}
                   </Button>
                 </div>
 

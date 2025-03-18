@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Camera, Image as ImageIcon, RefreshCw, CheckCircle2, QrCode } from 'lucide-react';
+import Image from 'next/image';
 import styles from './styles.module.css';
 
 // BarcodeDetector APIのpolyfillをインポート
@@ -492,7 +493,7 @@ export default function BarcodeScanner({
       setIsProcessing(true);
       
       // 画像を読み込む
-      const img = new Image();
+      const img = document.createElement('img');
       img.src = imageUrl;
       
       await new Promise<void>((resolve, reject) => {
@@ -639,23 +640,6 @@ export default function BarcodeScanner({
     }
   };
 
-  // バーコードタイプを切り替える関数
-  const toggleBarcodeType = () => {
-    setBarcodeType(prevType => {
-      if (prevType === 'cross') return 'gs1_128';
-      if (prevType === 'gs1_128') return 'gs1_128_vertical';
-      if (prevType === 'gs1_128_vertical') return 'qr_code';
-      return 'cross';
-    });
-    setError(null);
-    
-    // リセットして再スキャン
-    if (isCameraMode && isScanning) {
-      // カメラは継続して使用
-      console.log(`バーコードタイプを切り替えました: ${barcodeType}`);
-    }
-  };
-
   // バーコードタイプに応じたビューファインダーを表示
   const renderViewfinder = () => {
     if (!isScanning) return null;
@@ -698,22 +682,6 @@ export default function BarcodeScanner({
     }
   };
 
-  // バーコードタイプの表示名を取得
-  const getBarcodeTypeName = () => {
-    switch (barcodeType) {
-      case 'cross':
-        return '十字型（縦横両対応）';
-      case 'gs1_128':
-        return 'GS1-128 横向き';
-      case 'gs1_128_vertical':
-        return 'GS1-128 縦向き';
-      case 'qr_code':
-        return 'QRコード';
-      default:
-        return 'バーコード';
-    }
-  };
-
   return (
     <Card className={styles.scannerContainer}>
       <CardContent className={styles.scannerContent}>
@@ -745,7 +713,15 @@ export default function BarcodeScanner({
                 </>
               ) : (
                 capturedImage ? (
-                  <img src={capturedImage} alt="Captured" className={styles.capturedImage} />
+                  <div className="relative w-full h-full">
+                    <Image
+                      src={capturedImage}
+                      alt="Captured"
+                      fill
+                      className="object-contain"
+                      unoptimized
+                    />
+                  </div>
                 ) : (
                   <div className={styles.uploadPlaceholder}>
                     <ImageIcon size={48} />

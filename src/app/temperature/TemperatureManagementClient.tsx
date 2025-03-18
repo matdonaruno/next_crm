@@ -2,7 +2,7 @@
 
 import { Calendar } from "@/components/ui/calendar";
 import { Bell, Plus, FileText, ChevronLeft, Home, Check, X, Activity } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { DayContentProps } from "react-day-picker";
@@ -298,7 +298,7 @@ export default function TemperatureManagementClient() {
   }, [departmentId, facilityId]);
 
   // 最新のセンサーデータを取得する関数
-  const fetchLatestSensorData = async () => {
+  const fetchLatestSensorData = useCallback(async () => {
     if (!facilityId || !departmentId) return;
     
     try {
@@ -343,22 +343,22 @@ export default function TemperatureManagementClient() {
     } catch (error) {
       console.error('Error fetching sensor data:', error);
     }
-  };
+  }, [facilityId, departmentId]);
   
   // リアルタイムセンサーデータの取得
   useEffect(() => {
     if (!facilityId || !departmentId) return;
 
-    // 初回データ取得
+    // 最新のセンサーデータを取得
     fetchLatestSensorData();
-    
+
     // 1分ごとに更新
     const interval = setInterval(fetchLatestSensorData, 60 * 1000);
     
     return () => {
       clearInterval(interval);
     };
-  }, [facilityId, departmentId]);
+  }, [facilityId, departmentId, fetchLatestSensorData]);
 
   const CustomDayContent = (props: DayContentProps) => {
     const dateStr = props.date.toISOString().split("T")[0];
