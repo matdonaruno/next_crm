@@ -6,22 +6,48 @@ export async function POST(request: Request) {
     const { ahtTemp, ahtHum, bmpTemp, bmpPres, deviceId, ipAddress } = await request.json();
     const ip = request.headers.get('x-forwarded-for') || ipAddress || 'unknown';
     
-    console.log(`受信センサーデータ: ${ip} - AHT温度: ${ahtTemp}℃, BMP温度: ${bmpTemp}℃`);
+    console.log(`受信センサーデータ: ${ip} - AHT温度: ${ahtTemp}℃, BMP温度: ${bmpTemp}℃, デバイスID: ${deviceId || 'なし'}`);
     
-    // 1. IPアドレスからセンサーデバイスを特定
-    const { data: deviceData, error: deviceError } = await supabase
-      .from('sensor_devices')
-      .select('id, facility_id, department_id')
-      .eq('ip_address', ip)
-      .single();
+    // デバイスIDとIPアドレスの両方で検索（deviceIdを優先）
+    let deviceData = null;
+    
+    // 1. まずデバイスIDで検索
+    if (deviceId) {
+      const deviceResult = await supabase
+        .from('sensor_devices')
+        .select('id, facility_id, department_id')
+        .eq('device_id', deviceId)
+        .single();
+        
+      deviceData = deviceResult.data;
+      // エラー情報はログとして記録するだけで実際には使用しない
+      if (deviceResult.error) {
+        console.log(`デバイスID ${deviceId} の検索でエラー: ${deviceResult.error.message}`);
+      }
+    }
+    
+    // 2. デバイスIDで見つからない場合はIPアドレスで検索（後方互換性）
+    if (!deviceData && ip !== 'unknown') {
+      const ipResult = await supabase
+        .from('sensor_devices')
+        .select('id, facility_id, department_id')
+        .eq('ip_address', ip)
+        .single();
+        
+      deviceData = ipResult.data;
+      if (ipResult.error) {
+        console.log(`IPアドレス ${ip} の検索でエラー: ${ipResult.error.message}`);
+      }
+    }
       
-    if (deviceError || !deviceData) {
-      console.log(`未登録デバイス(${ip})からのデータ: ${ahtTemp}℃, ${bmpTemp}℃`);
+    if (!deviceData) {
+      console.log(`未登録デバイス(${deviceId || ip})からのデータ: ${ahtTemp}℃, ${bmpTemp}℃`);
       
       // 未登録デバイスの場合はログだけ残す
       await supabase.from('sensor_logs').insert({
         raw_data: { ahtTemp, ahtHum, bmpTemp, bmpPres },
-        ip_address: ip
+        ip_address: ip,
+        device_id: deviceId || null
       });
       
       return NextResponse.json({ 
@@ -34,13 +60,29 @@ export async function POST(request: Request) {
     await supabase.from('sensor_logs').insert({
       sensor_device_id: deviceData.id,
       raw_data: { ahtTemp, ahtHum, bmpTemp, bmpPres },
-      ip_address: ip
+      ip_address: ip,
+      device_id: deviceId || null
     });
     
     // 3. センサーデバイスの最終更新時間を更新
+    // デバイスIDと現在のIPアドレスも更新
+    const updateData: any = { 
+      last_seen: new Date().toISOString() 
+    };
+    
+    // IPアドレスが変わっていれば更新
+    if (ip !== 'unknown') {
+      updateData.ip_address = ip;
+    }
+    
+    // デバイスIDが設定されていなければ更新
+    if (deviceId) {
+      updateData.device_id = deviceId;
+    }
+    
     await supabase
       .from('sensor_devices')
-      .update({ last_seen: new Date().toISOString() })
+      .update(updateData)
       .eq('id', deviceData.id);
     
     // 4. このデバイスに紐づいているマッピング情報を取得

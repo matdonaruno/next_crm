@@ -218,19 +218,26 @@ void sendSensorData() {
 
   http.addHeader("Content-Type", "application/json");
 
+  // MACアドレスを取得してデバイスIDとして使用
+  String deviceId = WiFi.macAddress();
+  deviceId.replace(":", ""); // コロンを削除して単純な文字列に
+
   // JSON作成
   StaticJsonDocument<256> jsonDoc;
-  // MACアドレス等は省略 (必要なら自分で追記)
   jsonDoc["ahtTemp"] = ahtTemp;
   jsonDoc["ahtHum"]  = ahtHum;
   jsonDoc["bmpTemp"] = bmpTemp;
   jsonDoc["bmpPres"] = bmpPres;
+  jsonDoc["deviceId"] = deviceId; // MACアドレスベースのデバイスIDを追加
+  jsonDoc["ipAddress"] = WiFi.localIP().toString(); // IPアドレスも送信（互換性のため）
 
   String payload;
   serializeJson(jsonDoc, payload);
   
   Serial.print("Payload: ");
   Serial.println(payload);
+  Serial.print("Device ID (MAC): ");
+  Serial.println(deviceId);
 
   int httpCode = http.POST(payload);
   if (httpCode > 0) {

@@ -11,11 +11,12 @@ interface SensorDevice {
   id: string;
   device_name: string;
   ip_address: string;
+  device_id?: string;
   last_seen: string | null;
   status: string;
+  isOnline: boolean;
   facilities: { name: string } | null;
   departments: { name: string } | null;
-  isOnline: boolean;
 }
 
 interface SensorLog {
@@ -48,7 +49,8 @@ export default function SensorMonitor() {
         .select(`
           id, 
           device_name, 
-          ip_address, 
+          ip_address,
+          device_id,
           last_seen, 
           status,
           facilities(name),
@@ -70,7 +72,7 @@ export default function SensorMonitor() {
           };
         });
         
-        setDevices(devices as SensorDevice[]);
+        setDevices(devices as unknown as SensorDevice[]);
       }
       
       // 最新のセンサーログ
@@ -89,7 +91,7 @@ export default function SensorMonitor() {
       if (logError) {
         console.error('ログ取得エラー:', logError);
       } else if (logData) {
-        setLogs(logData as SensorLog[]);
+        setLogs(logData as unknown as SensorLog[]);
       }
     } catch (error) {
       console.error('データ取得エラー:', error);
@@ -177,6 +179,10 @@ export default function SensorMonitor() {
                     <div className="flex justify-between">
                       <span className="text-gray-500">IPアドレス:</span>
                       <span>{device.ip_address}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">デバイスID:</span>
+                      <span>{device.device_id || '未設定'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">施設:</span>

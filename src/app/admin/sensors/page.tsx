@@ -13,6 +13,7 @@ interface SensorDevice {
   id: string;
   device_name: string;
   ip_address: string;
+  device_id?: string;
   location: string;
   last_seen: string | null;
   status: string;
@@ -44,6 +45,7 @@ export default function SensorManagement() {
   const [newDevice, setNewDevice] = useState({
     device_name: '',
     ip_address: '',
+    device_id: '',
     location: '',
     facility_id: '',
     department_id: '',
@@ -58,7 +60,8 @@ export default function SensorManagement() {
         .select(`
           id, 
           device_name, 
-          ip_address, 
+          ip_address,
+          device_id,
           location, 
           last_seen, 
           status,
@@ -70,7 +73,7 @@ export default function SensorManagement() {
         .order('created_at', { ascending: false });
         
       if (!error && data) {
-        setDevices(data as SensorDevice[]);
+        setDevices(data as unknown as SensorDevice[]);
       } else {
         console.error('デバイス取得エラー:', error);
       }
@@ -109,6 +112,7 @@ export default function SensorManagement() {
         .insert({
           device_name: newDevice.device_name,
           ip_address: newDevice.ip_address,
+          device_id: newDevice.device_id || null,
           location: newDevice.location,
           facility_id: newDevice.facility_id || null,
           department_id: newDevice.department_id || null,
@@ -135,6 +139,7 @@ export default function SensorManagement() {
       setNewDevice({
         device_name: '',
         ip_address: '',
+        device_id: '',
         location: '',
         facility_id: '',
         department_id: '',
@@ -261,6 +266,17 @@ export default function SensorManagement() {
               </div>
               
               <div>
+                <Label htmlFor="device_id">デバイスID (MACアドレス由来)</Label>
+                <Input 
+                  id="device_id" 
+                  placeholder="例: 00:1A:2B:3C:4D:5E"
+                  value={newDevice.device_id}
+                  onChange={(e) => setNewDevice({...newDevice, device_id: e.target.value})}
+                  className="border-pink-200"
+                />
+              </div>
+              
+              <div>
                 <Label htmlFor="facility">施設</Label>
                 <select 
                   id="facility"
@@ -340,6 +356,16 @@ export default function SensorManagement() {
                   id="edit_device_name" 
                   value={currentDevice.device_name}
                   onChange={(e) => setCurrentDevice({...currentDevice, device_name: e.target.value})}
+                  className="border-pink-200"
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="edit_device_id">デバイスID (MACアドレス由来)</Label>
+                <Input 
+                  id="edit_device_id" 
+                  value={currentDevice.device_id || ''}
+                  onChange={(e) => setCurrentDevice({...currentDevice, device_id: e.target.value})}
                   className="border-pink-200"
                 />
               </div>
@@ -462,6 +488,10 @@ export default function SensorManagement() {
                     <div className="flex justify-between">
                       <span className="text-gray-500">IPアドレス:</span>
                       <span>{device.ip_address}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">デバイスID:</span>
+                      <span>{device.device_id || '未設定'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">施設:</span>

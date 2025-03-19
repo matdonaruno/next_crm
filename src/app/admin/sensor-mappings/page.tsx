@@ -17,7 +17,8 @@ interface SensorDevice {
 interface TemperatureItem {
   id: string;
   display_name: string;
-  departments: { name: string } | null;
+  department_id?: string;
+  departments?: { name: string };
 }
 
 interface SensorMapping {
@@ -62,7 +63,14 @@ export default function SensorMappings() {
         if (itemError) {
           console.error('温度アイテム取得エラー:', itemError);
         } else if (itemData) {
-          setTemperatureItems(itemData as TemperatureItem[]);
+          // データ形式を修正して設定
+          const formattedItems = itemData.map((item: any) => ({
+            id: item.id,
+            display_name: item.display_name,
+            department_id: item.department_id,
+            departments: item.departments
+          })) as TemperatureItem[];
+          setTemperatureItems(formattedItems);
         }
         
         // 既存のマッピングを取得
@@ -81,7 +89,20 @@ export default function SensorMappings() {
         if (mappingError) {
           console.error('マッピング取得エラー:', mappingError);
         } else if (mappingData) {
-          setMappings(mappingData as SensorMapping[]);
+          // データ形式を修正して設定
+          const formattedMappings = mappingData.map((mapping: any) => ({
+            id: mapping.id,
+            sensor_device_id: mapping.sensor_device_id,
+            sensor_type: mapping.sensor_type,
+            temperature_item_id: mapping.temperature_item_id,
+            offset_value: mapping.offset_value,
+            sensor_devices: mapping.sensor_devices?.[0] || { device_name: '' },
+            temperature_items: {
+              display_name: mapping.temperature_items?.[0]?.display_name || '',
+              departments: mapping.temperature_items?.[0]?.departments?.[0] || { name: '' }
+            }
+          })) as SensorMapping[];
+          setMappings(formattedMappings);
         }
       } catch (error) {
         console.error('データ取得エラー:', error);
@@ -143,9 +164,19 @@ export default function SensorMappings() {
           return;
         }
         
+        // 取得したデータを正しい形式に変換
+        const formattedData = {
+          ...data,
+          sensor_devices: data.sensor_devices?.[0] || { device_name: '' },
+          temperature_items: {
+            display_name: data.temperature_items?.[0]?.display_name || '',
+            departments: data.temperature_items?.[0]?.departments?.[0] || { name: '' }
+          }
+        } as SensorMapping;
+        
         // マッピング一覧を更新
         const updatedMappings = [...mappings];
-        updatedMappings[index] = data as SensorMapping;
+        updatedMappings[index] = formattedData;
         setMappings(updatedMappings);
         
         alert('マッピングが保存されました');
