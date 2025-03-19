@@ -162,6 +162,7 @@ export default function SensorManagement() {
         .update({
           device_name: currentDevice.device_name,
           ip_address: currentDevice.ip_address,
+          device_id: currentDevice.device_id || null,
           location: currentDevice.location,
           facility_id: currentDevice.facility_id,
           department_id: currentDevice.department_id,
