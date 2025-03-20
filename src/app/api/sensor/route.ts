@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
+import { getJstTimestamp, getJstDateString } from '@/lib/utils';
 
 export async function POST(request: Request) {
   try {
+    const startTime = Date.now(); // 処理開始時間
+    console.log(`センサーAPI: リクエスト受信 ${new Date().toISOString()}`);
+    
     const { ahtTemp, ahtHum, bmpTemp, bmpPres, deviceId, ipAddress } = await request.json();
     const ip = request.headers.get('x-forwarded-for') || ipAddress || 'unknown';
     
@@ -11,33 +15,28 @@ export async function POST(request: Request) {
     // デバイスIDとIPアドレスの両方で検索（deviceIdを優先）
     let deviceData = null;
     
-    // 1. まずデバイスIDで検索
-    if (deviceId) {
-      const deviceResult = await supabase
+    // 1. デバイス検索を並列実行
+    const [deviceByIdResult, deviceByIpResult] = await Promise.allSettled([
+      // デバイスIDで検索
+      deviceId ? supabase
         .from('sensor_devices')
         .select('id, facility_id, department_id')
         .eq('device_id', deviceId)
-        .single();
-        
-      deviceData = deviceResult.data;
-      // エラー情報はログとして記録するだけで実際には使用しない
-      if (deviceResult.error) {
-        console.log(`デバイスID ${deviceId} の検索でエラー: ${deviceResult.error.message}`);
-      }
-    }
-    
-    // 2. デバイスIDで見つからない場合はIPアドレスで検索（後方互換性）
-    if (!deviceData && ip !== 'unknown') {
-      const ipResult = await supabase
+        .single() : Promise.resolve({ data: null }),
+      
+      // IPアドレスで検索（後方互換性）
+      ip !== 'unknown' ? supabase
         .from('sensor_devices')
         .select('id, facility_id, department_id')
         .eq('ip_address', ip)
-        .single();
-        
-      deviceData = ipResult.data;
-      if (ipResult.error) {
-        console.log(`IPアドレス ${ip} の検索でエラー: ${ipResult.error.message}`);
-      }
+        .single() : Promise.resolve({ data: null })
+    ]);
+    
+    // デバイスIDでの検索結果を優先
+    if (deviceByIdResult.status === 'fulfilled' && deviceByIdResult.value.data) {
+      deviceData = deviceByIdResult.value.data;
+    } else if (deviceByIpResult.status === 'fulfilled' && deviceByIpResult.value.data) {
+      deviceData = deviceByIpResult.value.data;
     }
       
     if (!deviceData) {
@@ -47,60 +46,66 @@ export async function POST(request: Request) {
       await supabase.from('sensor_logs').insert({
         raw_data: { ahtTemp, ahtHum, bmpTemp, bmpPres },
         ip_address: ip,
-        device_id: deviceId || null
+        device_id: deviceId || null,
+        recorded_at: getJstTimestamp() // 日本時間のタイムスタンプを使用
       });
+      
+      const endTime = Date.now();
+      console.log(`センサーAPI: 未登録デバイス処理完了 (${endTime - startTime}ms)`);
       
       return NextResponse.json({ 
         status: 'unregistered', 
-        message: 'Device not registered' 
+        message: 'Device not registered',
+        processingTime: endTime - startTime
       }, { status: 200 });
     }
     
-    // 2. センサーログを記録
-    await supabase.from('sensor_logs').insert({
-      sensor_device_id: deviceData.id,
-      raw_data: { ahtTemp, ahtHum, bmpTemp, bmpPres },
-      ip_address: ip,
-      device_id: deviceId || null
-    });
+    // 2. センサーログ記録と、デバイス更新を並列実行
+    const updateData: any = { last_seen: getJstTimestamp() };
+    if (ip !== 'unknown') updateData.ip_address = ip;
+    if (deviceId) updateData.device_id = deviceId;
     
-    // 3. センサーデバイスの最終更新時間を更新
-    // デバイスIDと現在のIPアドレスも更新
-    const updateData: any = { 
-      last_seen: new Date().toISOString() 
-    };
-    
-    // IPアドレスが変わっていれば更新
-    if (ip !== 'unknown') {
-      updateData.ip_address = ip;
-    }
-    
-    // デバイスIDが設定されていなければ更新
-    if (deviceId) {
-      updateData.device_id = deviceId;
-    }
-    
-    await supabase
-      .from('sensor_devices')
-      .update(updateData)
-      .eq('id', deviceData.id);
-    
-    // 4. このデバイスに紐づいているマッピング情報を取得
-    const { data: mappings, error: mappingError } = await supabase
-      .from('sensor_mappings')
-      .select('sensor_type, temperature_item_id, offset_value')
-      .eq('sensor_device_id', deviceData.id);
+    const [logInsertResult, deviceUpdateResult, mappingsResult] = await Promise.all([
+      // センサーログを記録
+      supabase.from('sensor_logs').insert({
+        sensor_device_id: deviceData.id,
+        raw_data: { ahtTemp, ahtHum, bmpTemp, bmpPres },
+        ip_address: ip,
+        device_id: deviceId || null,
+        recorded_at: getJstTimestamp()
+      }),
       
-    if (mappingError || !mappings.length) {
+      // センサーデバイスの最終更新時間を更新
+      supabase
+        .from('sensor_devices')
+        .update(updateData)
+        .eq('id', deviceData.id),
+        
+      // マッピング情報を取得
+      supabase
+        .from('sensor_mappings')
+        .select('sensor_type, temperature_item_id, offset_value')
+        .eq('sensor_device_id', deviceData.id)
+    ]);
+    
+    // マッピング情報がなければ早期リターン
+    if (mappingsResult.error || !mappingsResult.data || mappingsResult.data.length === 0) {
       console.log(`デバイス${deviceData.id}のマッピング情報が見つかりません`);
+      
+      const endTime = Date.now();
+      console.log(`センサーAPI: マッピングなしで処理完了 (${endTime - startTime}ms)`);
+      
       return NextResponse.json({ 
         status: 'no_mapping', 
-        message: 'No sensor mappings found' 
+        message: 'No sensor mappings found',
+        processingTime: endTime - startTime
       }, { status: 200 });
     }
     
-    // 5. 現在日付（YYYY-MM-DD形式）
-    const recordDate = new Date().toISOString().split('T')[0];
+    const mappings = mappingsResult.data;
+    
+    // 5. 現在日付（YYYY-MM-DD形式）- 日本時間で取得
+    const recordDate = getJstDateString();
     
     // 6. 既存レコードをチェック（同じ日に既に記録があるか）
     const { data: existingRecord, error: recordError } = await supabase
@@ -130,9 +135,14 @@ export async function POST(request: Request) {
         
       if (insertError || !newRecord) {
         console.error('記録の作成に失敗:', insertError);
+        
+        const endTime = Date.now();
+        console.log(`センサーAPI: エラーで処理完了 (${endTime - startTime}ms)`);
+        
         return NextResponse.json({ 
           status: 'error', 
-          message: 'Failed to create record' 
+          message: 'Failed to create record',
+          processingTime: endTime - startTime
         }, { status: 500 });
       }
       
@@ -142,53 +152,34 @@ export async function POST(request: Request) {
       console.log(`既存の記録を更新: ID ${recordId}`);
     }
     
-    // 8. 各センサーデータをマッピングに従って保存
-    for (const mapping of mappings) {
+    // 8. 各センサーデータの処理を並列実行
+    const detailUpdates = mappings.map(mapping => {
       let sensorValue;
       switch (mapping.sensor_type) {
         case 'ahtTemp': sensorValue = ahtTemp; break;
         case 'bmpTemp': sensorValue = bmpTemp; break;
         case 'ahtHum': sensorValue = ahtHum; break;
         case 'bmpPres': sensorValue = bmpPres; break;
-        default: continue;
+        default: return Promise.resolve(); // マッピングなしはスキップ
       }
       
       // オフセット値を適用
       sensorValue += mapping.offset_value || 0;
       
-      // 既存の詳細レコードをチェック
-      const { data: existingDetail, error: detailError } = await supabase
-        .from('temperature_record_details')
-        .select('id')
-        .eq('temperature_record_id', recordId)
-        .eq('temperature_item_id', mapping.temperature_item_id)
-        .single();
-        
-      if (detailError || !existingDetail) {
-        // 新しい詳細レコードを挿入
-        await supabase
-          .from('temperature_record_details')
-          .insert({
-            temperature_record_id: recordId,
-            temperature_item_id: mapping.temperature_item_id,
-            value: sensorValue,
-            data_source: 'sensor'
-          });
-      } else {
-        // 既存の詳細レコードを更新
-        await supabase
-          .from('temperature_record_details')
-          .update({ 
-            value: sensorValue,
-            data_source: 'sensor'
-          })
-          .eq('id', existingDetail.id);
-      }
-    }
+      // 既存レコードをチェックして、新規追加か更新かを判断して処理
+      return processDetailRecord(recordId, mapping.temperature_item_id, sensorValue);
+    });
+    
+    // すべての詳細レコード処理を待機
+    await Promise.all(detailUpdates.filter(Boolean));
+    
+    const endTime = Date.now();
+    console.log(`センサーAPI: 処理完了 (${endTime - startTime}ms)`);
     
     return NextResponse.json({ 
       status: 'success', 
-      message: 'Data recorded successfully' 
+      message: 'Data recorded successfully',
+      processingTime: endTime - startTime
     });
     
   } catch (error) {
@@ -197,5 +188,42 @@ export async function POST(request: Request) {
       status: 'error', 
       message: 'Internal server error' 
     }, { status: 500 });
+  }
+}
+
+// 詳細レコード処理の補助関数
+async function processDetailRecord(recordId: string, itemId: string, value: number) {
+  try {
+    // 既存の詳細レコードをチェック
+    const { data: existingDetail, error: detailError } = await supabase
+      .from('temperature_record_details')
+      .select('id')
+      .eq('temperature_record_id', recordId)
+      .eq('temperature_item_id', itemId)
+      .single();
+      
+    if (detailError || !existingDetail) {
+      // 新しい詳細レコードを挿入
+      return supabase
+        .from('temperature_record_details')
+        .insert({
+          temperature_record_id: recordId,
+          temperature_item_id: itemId,
+          value: value,
+          data_source: 'sensor'
+        });
+    } else {
+      // 既存の詳細レコードを更新
+      return supabase
+        .from('temperature_record_details')
+        .update({ 
+          value: value,
+          data_source: 'sensor'
+        })
+        .eq('id', existingDetail.id);
+    }
+  } catch (error) {
+    console.error(`詳細レコード処理エラー(項目ID: ${itemId}):`, error);
+    throw error;
   }
 } 

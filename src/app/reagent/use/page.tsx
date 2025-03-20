@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { AppHeader } from "@/components/ui/app-header";
+import { getJstTimestamp } from "@/lib/utils";
 
 type FormValues = {
   reagent_id: string;
@@ -51,7 +52,7 @@ export default function ReagentUse() {
         .from("reagents")
         .update({
           used: true,
-          used_at: new Date().toISOString(),
+          used_at: getJstTimestamp(),
           used_by: user?.id
         })
         .eq("id", data.reagent_id)
@@ -70,7 +71,7 @@ export default function ReagentUse() {
             {
               reagent_id: data.reagent_id,
               user_id: user.id,
-              used_at: new Date().toISOString(),
+              used_at: getJstTimestamp(),
               facility_id: profile.facility_id
             },
           ]);

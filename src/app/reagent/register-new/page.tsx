@@ -19,6 +19,7 @@ import BarcodeScanner from "@/components/BarcodeScanner";
 import { AppHeader } from "@/components/ui/app-header";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/contexts/AuthContext";
+import { getJstTimestamp } from "@/lib/utils";
 
 type FormValues = {
   department: string;
@@ -192,10 +193,10 @@ function ReagentRegistrationContent() {
         specification: formValues.specification || "",
         "lotNo": formValues.lotNo, // 大文字小文字を正確に
         "expirationDate": formValues.expirationDate, // 大文字小文字を正確に
-        "registrationDate": new Date().toISOString(), // 大文字小文字を正確に
+        "registrationDate": getJstTimestamp(), // 日本時間に変換して保存
         "registeredBy": userData.user.id, // 大文字小文字を正確に
         used: startUsage,
-        "used_at": startUsage ? new Date().toISOString() : null,
+        "used_at": startUsage ? getJstTimestamp() : null, // 日本時間に変換して保存
         "used_by": startUsage ? userData.user.id : null,
         unit: formValues.unit || "", // 単位（フォームから取得）
         facility_id: profileData.facility_id, // ユーザープロファイルから取得した施設ID

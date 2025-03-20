@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { useForm } from "react-hook-form";
 import { Home } from "lucide-react";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
+import { getJstTimestamp } from "@/lib/utils";
 
 type ReagentItemFormValues = {
   name: string;
@@ -229,7 +230,7 @@ export default function ReagentDetailPage() {
       const { error } = await supabase
         .from("reagents")
         .update({
-          ended_at: new Date().toISOString(),
+          ended_at: getJstTimestamp(),
           ended_by: currentUserId,
         })
         .eq("id", reagentId)
@@ -249,45 +250,33 @@ export default function ReagentDetailPage() {
   // 試薬アイテム登録フォーム送信時の処理
   const onSubmit = async (data: ReagentItemFormValues) => {
     try {
-      // ユーザーの施設IDを取得
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) {
-        setError("ユーザー情報の取得に失敗しました");
+      if (!reagent) {
+        setError("試薬情報の取得に失敗しました");
         return;
       }
       
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("facility_id")
-        .eq("id", userData.user.id)
-        .single();
-        
-      if (profileError || !profileData?.facility_id) {
-        setError("施設情報の取得に失敗しました");
-        return;
-      }
-      
-      // 試薬アイテムを登録
-      const { error: insertError } = await supabase.from("reagent_items").insert([
+      // 試薬アイテムの登録
+      const { error } = await supabase.from("reagent_items").insert([
         {
           name: data.name,
           usagestartdate: data.usageStartDate,
-          user: currentUserId || data.user,
-          reagent_package_id: reagentId,
-          facility_id: profileData.facility_id, // 施設IDを設定
+          reagent_package_id: reagent.id,
+          user: currentUserId,
+          facility_id: reagent.facility_id,
+          created_at: getJstTimestamp() // 日本時間のタイムスタンプ
         },
       ]);
 
-      if (insertError) {
-        setError(insertError.message);
-        return;
+      if (error) {
+        setError(error.message);
+      } else {
+        fetchItems();
+        // フォームをリセット
+        reset({
+          name: "",
+          usageStartDate: today,
+        });
       }
-
-      // フォームをリセット
-      reset();
-      
-      // 試薬アイテム一覧を再取得
-      fetchItems();
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : '不明なエラーが発生しました';
       setError(errorMessage);

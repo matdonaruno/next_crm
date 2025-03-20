@@ -7,7 +7,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -22,6 +22,14 @@ import { useAuth } from "@/contexts/AuthContext";
 import Papa from 'papaparse'; // CSVパーサーライブラリを追加
 import { AppHeader } from "@/components/ui/app-header";
 import { motion } from "framer-motion";
+import { getJstTimestamp } from "@/lib/utils";
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
+import { Line } from 'react-chartjs-2';
+import { formatDistanceToNow, isWithinInterval, subMonths } from "date-fns";
+import { ja } from "date-fns/locale";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface Reagent {
   id: number;
@@ -611,7 +619,7 @@ export default function ReagentDashboardClient() {
       const { error } = await supabase
         .from("reagent_items")
         .update({
-          ended_at: new Date().toISOString(),
+          ended_at: getJstTimestamp(),
           ended_by: userId,
         })
         .eq("id", itemId)
@@ -647,7 +655,7 @@ export default function ReagentDashboardClient() {
         .from("reagents")
         .update({
           used: true,
-          used_at: new Date().toISOString(),
+          used_at: getJstTimestamp(),
           used_by: userId,
         })
         .eq("id", reagentId)
@@ -682,7 +690,7 @@ export default function ReagentDashboardClient() {
       const { error } = await supabase
         .from("reagents")
         .update({
-          ended_at: new Date().toISOString(),
+          ended_at: getJstTimestamp(),
           ended_by: userId,
         })
         .eq("id", reagentId)
