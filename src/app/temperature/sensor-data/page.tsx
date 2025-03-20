@@ -20,6 +20,8 @@ import 'chartjs-adapter-date-fns';
 import { ja } from 'date-fns/locale';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
+import { useSimpleAuth } from '@/hooks/useSimpleAuth';
+import { useSessionCheck } from '@/hooks/useSessionCheck';
 
 // Chart.jsの設定
 ChartJS.register(
@@ -75,9 +77,24 @@ function SensorDataContent() {
   const searchParams = useSearchParams();
   const departmentName = searchParams?.get("department") || "部署未指定";
   const departmentId = searchParams?.get("departmentId") || "";
+  const deviceId = searchParams?.get("deviceId") || ""; // URLからデバイスIDを取得
+  
+  // セッション確認を無効化
+  useSessionCheck(false, []);
+  
+  // シンプルな認証を使用
+  const { user, loading: authLoading } = useSimpleAuth();
+  
+  // ユーザーがログインしていない場合はログインページにリダイレクト
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push('/login');
+    }
+  }, [authLoading, user, router]);
 
   const [sensorLogs, setSensorLogs] = useState<SensorLog[]>([]);
   const [sensorDevice, setSensorDevice] = useState<SensorDevice | null>(null);
+  const [availableDevices, setAvailableDevices] = useState<SensorDevice[]>([]); // 利用可能なデバイスのリスト
   const [loading, setLoading] = useState(true);
   const [startDate, setStartDate] = useState<string>(() => {
     // デフォルトで7日前
@@ -91,24 +108,32 @@ function SensorDataContent() {
   });
   const [facilityName, setFacilityName] = useState<string>("");
   const [facilityId, setFacilityId] = useState<string>("");
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>(deviceId); // 選択されたデバイスID
 
   // 施設情報の取得
   useEffect(() => {
     const fetchFacilityInfo = async () => {
       try {
+        console.log('施設情報を取得中...');
+        
         // キャッシュから施設情報を取得
         const cachedFacility = localStorage.getItem('facilityCache');
-        console.log('Cached facility:', cachedFacility);
+        console.log('キャッシュされた施設情報:', cachedFacility);
         
         if (cachedFacility) {
-          const { id, name } = JSON.parse(cachedFacility);
-          console.log('Setting facility from cache:', { id, name });
-          setFacilityId(id);
-          setFacilityName(name);
-          return;
+          try {
+            const { id, name } = JSON.parse(cachedFacility);
+            console.log('キャッシュから施設情報を設定します:', { id, name });
+            setFacilityId(id);
+            setFacilityName(name);
+            return;
+          } catch (e) {
+            console.error('キャッシュされた施設情報の解析に失敗しました:', e);
+          }
         }
 
         // キャッシュにない場合はSupabaseから取得
+        console.log('Supabaseから施設情報を取得します...');
         const { data: userData, error: userError } = await supabase
           .from('profiles')
           .select('facility_id')
@@ -119,7 +144,10 @@ function SensorDataContent() {
           return;
         }
 
+        console.log('取得したユーザー情報:', userData);
+
         if (userData?.facility_id) {
+          console.log(`施設ID ${userData.facility_id} の詳細を取得中...`);
           const { data: facilityData, error: facilityError } = await supabase
             .from('facilities')
             .select('id, name')
@@ -131,15 +159,22 @@ function SensorDataContent() {
             return;
           }
 
-          console.log('Setting facility from DB:', facilityData);
+          console.log('取得した施設情報:', facilityData);
           setFacilityId(facilityData.id);
           setFacilityName(facilityData.name);
 
           // キャッシュに保存
-          localStorage.setItem('facilityCache', JSON.stringify({
-            id: facilityData.id,
-            name: facilityData.name
-          }));
+          try {
+            localStorage.setItem('facilityCache', JSON.stringify({
+              id: facilityData.id,
+              name: facilityData.name
+            }));
+            console.log('施設情報をキャッシュに保存しました');
+          } catch (e) {
+            console.error('施設情報のキャッシュに失敗:', e);
+          }
+        } else {
+          console.warn('ユーザーに施設IDが設定されていません');
         }
       } catch (error) {
         console.error('施設情報の取得に失敗:', error);
@@ -151,37 +186,74 @@ function SensorDataContent() {
 
   // センサーデータとデバイス情報の取得
   useEffect(() => {
-    if (!departmentId || !facilityId) {
-      console.log('Missing required data:', { departmentId, facilityId });
+    if (!facilityId) {
+      console.log('施設IDが不足しています');
       return;
     }
 
-    const fetchSensorData = async () => {
-      console.log('Fetching sensor data for:', { departmentId, facilityId });
-      setLoading(true);
+    // すべての利用可能なセンサーデバイスを取得
+    const fetchAvailableDevices = async () => {
       try {
-        // センサーデバイスの取得
-        const { data: deviceData, error: deviceError } = await supabase
+        console.log('利用可能なセンサーデバイスを検索中...');
+        let query = supabase
           .from('sensor_devices')
           .select('id, device_name, ip_address, location')
-          .eq('department_id', departmentId)
-          .eq('facility_id', facilityId)
-          .single();
+          .eq('facility_id', facilityId);
+        
+        // 部署IDが指定されている場合は絞り込み
+        if (departmentId) {
+          query = query.eq('department_id', departmentId);
+        }
+        
+        const { data, error } = await query;
 
-        if (deviceError) {
-          console.error('センサーデバイス取得エラー:', deviceError);
-          setLoading(false);
+        if (error) {
+          console.error('センサーデバイス取得エラー:', error);
           return;
         }
 
-        console.log('Found sensor device:', deviceData);
-        setSensorDevice(deviceData);
+        if (data && data.length > 0) {
+          console.log(`${data.length}件のセンサーデバイスが見つかりました:`, data);
+          setAvailableDevices(data);
+          
+          // デバイスIDが指定されていない場合は最初のデバイスを選択
+          if (!selectedDeviceId && data.length > 0) {
+            console.log('最初のデバイスを自動選択します:', data[0]);
+            setSelectedDeviceId(data[0].id);
+            setSensorDevice(data[0]);
+          } else if (selectedDeviceId) {
+            // 指定されたデバイスIDを持つデバイスを探す
+            const device = data.find(d => d.id === selectedDeviceId);
+            if (device) {
+              setSensorDevice(device);
+            }
+          }
+        } else {
+          console.log('センサーデバイスが見つかりませんでした');
+        }
+      } catch (error) {
+        console.error('デバイス検索エラー:', error);
+      }
+    };
 
-        // センサーログの取得
+    fetchAvailableDevices();
+  }, [facilityId, departmentId, selectedDeviceId]);
+
+  // 選択されたデバイスのセンサーログを取得
+  useEffect(() => {
+    if (!selectedDeviceId) {
+      console.log('デバイスIDが選択されていません');
+      return;
+    }
+
+    const fetchSensorLogs = async () => {
+      console.log(`デバイスID ${selectedDeviceId} のログを検索中...`);
+      setLoading(true);
+      try {
         const { data: logData, error: logError } = await supabase
           .from('sensor_logs')
           .select('id, raw_data, recorded_at')
-          .eq('sensor_device_id', deviceData.id)
+          .eq('sensor_device_id', selectedDeviceId)
           .gte('recorded_at', `${startDate}T00:00:00`)
           .lte('recorded_at', `${endDate}T23:59:59`)
           .order('recorded_at', { ascending: true });
@@ -189,11 +261,11 @@ function SensorDataContent() {
         if (logError) {
           console.error('センサーログ取得エラー:', logError);
           setSensorLogs([]);
-        } else if (logData) {
-          console.log('Found sensor logs:', logData.length);
+        } else if (logData && logData.length > 0) {
+          console.log(`センサーログを ${logData.length} 件発見しました`);
           setSensorLogs(logData);
         } else {
-          console.log('No sensor logs found');
+          console.log('センサーログが見つかりませんでした。検索期間を確認してください。');
           setSensorLogs([]);
         }
       } catch (error) {
@@ -204,20 +276,24 @@ function SensorDataContent() {
       }
     };
 
-    fetchSensorData();
-  }, [departmentId, facilityId, startDate, endDate]);
+    fetchSensorLogs();
+  }, [selectedDeviceId, startDate, endDate]);
 
   // データ更新
   const refreshData = () => {
-    if (!departmentId || !facilityId || !sensorDevice) return;
+    if (!selectedDeviceId) {
+      console.log('更新に必要なデバイスIDが不足しています');
+      return;
+    }
     
     const fetchUpdatedData = async () => {
+      console.log('データを更新しています...');
       setLoading(true);
       try {
         const { data, error } = await supabase
           .from('sensor_logs')
           .select('id, raw_data, recorded_at')
-          .eq('sensor_device_id', sensorDevice.id)
+          .eq('sensor_device_id', selectedDeviceId)
           .gte('recorded_at', `${startDate}T00:00:00`)
           .lte('recorded_at', `${endDate}T23:59:59`)
           .order('recorded_at', { ascending: true });
@@ -225,9 +301,11 @@ function SensorDataContent() {
         if (error) {
           console.error('センサーログ更新エラー:', error);
           setSensorLogs([]);
-        } else if (data) {
+        } else if (data && data.length > 0) {
+          console.log(`センサーログを ${data.length} 件更新しました`);
           setSensorLogs(data);
         } else {
+          console.log('更新されたセンサーログはありません');
           setSensorLogs([]);
         }
       } catch (error) {
@@ -459,6 +537,25 @@ function SensorDataContent() {
                 className="border border-gray-300 rounded-md px-3 py-2 text-sm"
               />
             </div>
+            
+            {/* デバイス選択ドロップダウン */}
+            {availableDevices.length > 1 && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">デバイス選択</label>
+                <select
+                  value={selectedDeviceId}
+                  onChange={(e) => setSelectedDeviceId(e.target.value)}
+                  className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+                >
+                  {availableDevices.map(device => (
+                    <option key={device.id} value={device.id}>
+                      {device.device_name} {device.location ? `(${device.location})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            
             <div className="flex items-center gap-2 ml-auto">
               <button
                 onClick={refreshData}

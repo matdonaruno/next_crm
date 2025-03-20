@@ -11,6 +11,7 @@ import { Mail, Lock, ArrowRight, Cross, Sparkles } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import Cookies from 'js-cookie';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useSessionCheck } from '@/hooks/useSessionCheck';
 
 const AuthForm = () => {
   const router = useRouter();
@@ -99,6 +100,9 @@ const AuthForm = () => {
       }, 1000);
     }
   }, [redirecting, user]);
+
+  // ログインページでは完全なセッション確認を有効にする
+  useSessionCheck(true, []);
 
   const handleAuth = async () => {
     setError("");

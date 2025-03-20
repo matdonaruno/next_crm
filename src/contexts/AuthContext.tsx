@@ -39,8 +39,13 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // 非アクティブタイムアウト（ミリ秒）- 30分
 const INACTIVITY_TIMEOUT = 30 * 60 * 1000;
-// セッション確認間隔（ミリ秒）- 30分
-const SESSION_CHECK_INTERVAL = 30 * 60 * 1000;
+
+// セッション確認間隔（ミリ秒）- 5分に設定（元々は短い間隔だった可能性がある）
+const SESSION_CHECK_INTERVAL = 5 * 60 * 1000;
+
+// セッション確認の有効化フラグ - 特定のページでは false に設定することで確認を無効化できる
+let SESSION_CHECK_ENABLED = true;
+
 // データ取得タイムアウト（ミリ秒）- 15秒
 const DATA_FETCH_TIMEOUT = 15000;
 // 最大再試行回数
@@ -53,6 +58,11 @@ const SESSION_CACHE_KEY = 'auth_session_cache';
 const PROFILE_CACHE_KEY = 'auth_profile_cache';
 // キャッシュ有効期限（ミリ秒）- 30分
 const CACHE_EXPIRY = 30 * 60 * 1000;
+
+// グローバルフラグを設定する関数
+export const setSessionCheckEnabled = (enabled: boolean) => {
+  SESSION_CHECK_ENABLED = enabled;
+};
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<any | null>(null);
@@ -228,6 +238,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 定期的なセッション確認
   useEffect(() => {
     if (!user) return;
+    if (!SESSION_CHECK_ENABLED) {
+      console.log("AuthContext: セッション確認は無効化されています");
+      return;
+    }
 
     console.log("AuthContext: 定期的なセッション確認を開始");
     
@@ -237,6 +251,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const cachedSession = getCachedSession();
         if (cachedSession) {
           console.log("AuthContext: キャッシュされたセッションを使用");
+          return;
+        }
+
+        // セッション確認をスキップする条件
+        if (!SESSION_CHECK_ENABLED) {
+          console.log("AuthContext: セッション確認はスキップされました");
           return;
         }
 

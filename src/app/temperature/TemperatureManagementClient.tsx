@@ -10,6 +10,9 @@ import { getCachedFacility, cacheFacility } from '@/lib/facilityCache';
 import { getCurrentUser } from '@/lib/userCache';
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { useSimpleAuth } from '@/hooks/useSimpleAuth';
+import { useSessionCheck } from '@/hooks/useSessionCheck';
 
 interface TemperatureRecordDetail {
   id: string;
@@ -51,24 +54,40 @@ export default function TemperatureManagementClient() {
   const departmentName = searchParams?.get("department") || "部署未指定";
   const departmentId = searchParams?.get("departmentId") || "";
 
-  const [date, setDate] = useState<Date | undefined>(undefined);
+  const [date, setDate] = useState<Date | undefined>(new Date());
   const [temperatureItems, setTemperatureItems] = useState<TemperatureItem[]>([]);
   const [records, setRecords] = useState<TemperatureRecord[]>([]);
   const [datesWithData, setDatesWithData] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [facilityName, setFacilityName] = useState<string>("");
   const [facilityId, setFacilityId] = useState<string>("");
   const [userName, setUserName] = useState<string>("");
 
   // センサーデータの状態
+  const [showSensorData, setShowSensorData] = useState(true);
   const [sensorData, setSensorData] = useState<SensorData>({
     ahtTemp: null,
     bmpTemp: null,
     ahtHum: null,
     bmpPres: null,
-    lastUpdated: null
+    lastUpdated: ""
   });
-  const [showSensorData, setShowSensorData] = useState<boolean>(false);
+
+  // 自動記録データの表示設定
+  const [includeAutoRecords, setIncludeAutoRecords] = useState<boolean>(false);
+
+  // シンプルな認証フックを使用
+  const { user, loading: authLoading } = useSimpleAuth();
+  
+  // このページではセッション確認を必要最小限にする
+  useSessionCheck(true, []);
+  
+  // ユーザーがログインしていない場合はログインページにリダイレクト
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push('/login');
+    }
+  }, [authLoading, user, router]);
 
   useEffect(() => {
     if (!departmentId) return;
@@ -105,7 +124,8 @@ export default function TemperatureManagementClient() {
             setTemperatureItems(data);
           }
           
-          setLoading(false);
+          // 施設IDが設定されたので、ここでfetchRecordsを呼び出す
+          fetchRecords(cachedFacility.id);
           return; // キャッシュから取得できたので処理終了
         }
       
@@ -159,6 +179,11 @@ export default function TemperatureManagementClient() {
         } else if (data) {
           setTemperatureItems(data);
         }
+        
+        // データベースから取得した施設IDでfetchRecordsを呼び出す
+        if (profileData.facility_id) {
+          fetchRecords(profileData.facility_id);
+        }
       } catch (error) {
         console.error("Error fetching items:", error);
       } finally {
@@ -166,126 +191,63 @@ export default function TemperatureManagementClient() {
       }
     };
 
-    const fetchRecords = async () => {
+    const fetchRecords = async (currentFacilityId: string) => {
+      if (!currentFacilityId) {
+        console.error("施設IDが不明です");
+        return;
+      }
+      
       setLoading(true);
-      
       try {
-        // まずキャッシュから施設情報を取得
-        const cachedFacility = getCachedFacility();
+        console.log("レコード取得開始:", { departmentId, facilityId: currentFacilityId, includeAutoRecords });
         
-        if (cachedFacility && cachedFacility.id) {
-          // キャッシュに施設情報がある場合はそれを使用
-          const { data, error } = await supabase
-            .from("temperature_records")
-            .select(`
+        // is_auto_recordedフィルターを追加
+        let query = supabase
+          .from("temperature_records")
+          .select(`
+            id,
+            record_date,
+            is_auto_recorded,
+            temperature_record_details (
               id,
-              record_date,
-              temperature_record_details (
-                id,
-                temperature_item_id,
-                value
-              ),
-              facility_id
-            `)
-            .eq("department_id", departmentId)
-            .eq("facility_id", cachedFacility.id)
-            .order("record_date", { ascending: false });
-    
-          if (error) {
-            console.error("Temperature Records Error:", error);
-          } else if (data) {
-            setRecords(data);
-            const dateSet = new Set(
-              data.map(record =>
-                new Date(record.record_date).toISOString().split("T")[0]
-              )
-            );
-            setDatesWithData(dateSet);
-          }
-          
-          setLoading(false);
-          return; // キャッシュから取得できたので処理終了
-        }
-      
-        // キャッシュに施設情報がない場合はデータベースから取得
-        const userProfile = await getCurrentUser();
-        if (!userProfile || !userProfile.id) {
-          console.error("ユーザー情報の取得に失敗しました");
-          setLoading(false);
-          return;
+              temperature_item_id,
+              value,
+              data_source
+            ),
+            facility_id
+          `)
+          .eq("department_id", departmentId)
+          .eq("facility_id", currentFacilityId);
+        
+        // 自動記録を含まない場合（デフォルト）
+        if (!includeAutoRecords) {
+          query = query.eq("is_auto_recorded", false);
         }
         
-        // 施設IDの取得がまだであれば取得
-        if (!facilityId) {
-          const { data: profileData, error: profileError } = await supabase
-            .from("profiles")
-            .select("facility_id")
-            .eq("id", userProfile.id)
-            .single();
-            
-          if (profileError || !profileData?.facility_id) {
-            console.error("施設情報の取得に失敗しました");
-            setLoading(false);
-            return;
-          }
+        // 日付の降順で取得
+        const { data, error } = await query.order("record_date", { ascending: false });
+
+        if (error) throw error;
+
+        console.log(`${data?.length || 0}件のレコードを取得しました`);
+        setRecords(data || []);
+        
+        // 日付データの集合を作成
+        const dates = new Set<string>();
+        data?.forEach((record) => {
+          // レコードの日付をYYYY-MM-DD形式の文字列に変換
+          const recordDate = new Date(record.record_date);
+          const year = recordDate.getFullYear();
+          const month = String(recordDate.getMonth() + 1).padStart(2, '0');
+          const day = String(recordDate.getDate()).padStart(2, '0');
+          const localDateStr = `${year}-${month}-${day}`;
           
-          const { data, error } = await supabase
-            .from("temperature_records")
-            .select(`
-              id,
-              record_date,
-              temperature_record_details (
-                id,
-                temperature_item_id,
-                value
-              ),
-              facility_id
-            `)
-            .eq("department_id", departmentId)
-            .eq("facility_id", profileData.facility_id)
-            .order("record_date", { ascending: false });
-      
-          if (error) {
-            console.error("Temperature Records Error:", error);
-          } else if (data) {
-            setRecords(data);
-            const dateSet = new Set(
-              data.map(record =>
-                new Date(record.record_date).toISOString().split("T")[0]
-              )
-            );
-            setDatesWithData(dateSet);
-          }
-        } else {
-          // 既に施設IDがある場合はそれを使用
-          const { data, error } = await supabase
-            .from("temperature_records")
-            .select(`
-              id,
-              record_date,
-              temperature_record_details (
-                id,
-                temperature_item_id,
-                value
-              ),
-              facility_id
-            `)
-            .eq("department_id", departmentId)
-            .eq("facility_id", facilityId)
-            .order("record_date", { ascending: false });
-      
-          if (error) {
-            console.error("Temperature Records Error:", error);
-          } else if (data) {
-            setRecords(data);
-            const dateSet = new Set(
-              data.map(record =>
-                new Date(record.record_date).toISOString().split("T")[0]
-              )
-            );
-            setDatesWithData(dateSet);
-          }
-        }
+          dates.add(localDateStr);
+          console.log(`レコード日付変換: ${record.record_date} → ${localDateStr}`);
+        });
+        
+        console.log(`${dates.size}件の日付にデータがあります:`, [...dates]);
+        setDatesWithData(dates);
       } catch (error) {
         console.error("Error fetching records:", error);
       } finally {
@@ -294,40 +256,134 @@ export default function TemperatureManagementClient() {
     };
 
     fetchItems();
-    fetchRecords();
-  }, [departmentId, facilityId]);
+  }, [departmentId, includeAutoRecords]);
+
+  // includeAutoRecordsが変更された場合に再取得
+  useEffect(() => {
+    if (facilityId && departmentId) {
+      const fetchRecordsAgain = async () => {
+        setLoading(true);
+        try {
+          console.log("フィルター変更によるレコード再取得:", { includeAutoRecords });
+          
+          let query = supabase
+            .from("temperature_records")
+            .select(`
+              id,
+              record_date,
+              is_auto_recorded,
+              temperature_record_details (
+                id,
+                temperature_item_id,
+                value,
+                data_source
+              ),
+              facility_id
+            `)
+            .eq("department_id", departmentId)
+            .eq("facility_id", facilityId);
+          
+          if (!includeAutoRecords) {
+            query = query.eq("is_auto_recorded", false);
+          }
+          
+          const { data, error } = await query.order("record_date", { ascending: false });
+
+          if (error) throw error;
+
+          console.log(`フィルター変更後: ${data?.length || 0}件のレコードを取得しました`);
+          setRecords(data || []);
+          
+          const dates = new Set<string>();
+          data?.forEach((record) => {
+            // レコードの日付をYYYY-MM-DD形式の文字列に変換
+            const recordDate = new Date(record.record_date);
+            const year = recordDate.getFullYear();
+            const month = String(recordDate.getMonth() + 1).padStart(2, '0');
+            const day = String(recordDate.getDate()).padStart(2, '0');
+            const localDateStr = `${year}-${month}-${day}`;
+            
+            dates.add(localDateStr);
+            console.log(`レコード日付変換: ${record.record_date} → ${localDateStr}`);
+          });
+          
+          console.log(`フィルター変更後: ${dates.size}件の日付にデータがあります`);
+          setDatesWithData(dates);
+        } catch (error) {
+          console.error("Error fetching records after filter change:", error);
+        } finally {
+          setLoading(false);
+        }
+      };
+      
+      fetchRecordsAgain();
+    }
+  }, [facilityId, departmentId, includeAutoRecords]);
 
   // 最新のセンサーデータを取得する関数
   const fetchLatestSensorData = useCallback(async () => {
-    if (!facilityId || !departmentId) return;
+    if (!facilityId || !departmentId) {
+      console.log('必要なデータが不足しています:', { facilityId, departmentId });
+      return;
+    }
     
     try {
-      // センサーデバイスを取得
-      const { data: deviceData, error: deviceError } = await supabase
+      console.log('最新センサーデータを取得しています:', { facilityId, departmentId });
+      
+      // センサーデバイスを取得 - sensor_dataと同じ方法で取得
+      let query = supabase
         .from('sensor_devices')
         .select('id')
-        .eq('facility_id', facilityId)
-        .eq('department_id', departmentId)
-        .single();
+        .eq('facility_id', facilityId);
+      
+      // 部署IDが指定されている場合は絞り込み
+      if (departmentId) {
+        query = query.eq('department_id', departmentId);
+      }
+      
+      const { data: deviceData, error: deviceError } = await query;
         
       if (deviceError) {
-        console.log('No sensor device found for this department');
+        console.error('センサーデバイス取得エラー:', deviceError);
         return;
       }
       
+      if (!deviceData || deviceData.length === 0) {
+        console.log('この部署のセンサーデバイスが見つかりません');
+        return;
+      }
+      
+      // 最初のデバイスを使用
+      console.log('センサーデバイスを発見:', deviceData[0]);
+      const deviceId = deviceData[0].id;
+      
       // デバイスからの最新のセンサーログを取得
+      console.log(`デバイスID ${deviceId} の最新ログを検索中...`);
       const { data: logData, error: logError } = await supabase
         .from('sensor_logs')
         .select('raw_data, recorded_at')
-        .eq('sensor_device_id', deviceData.id)
+        .eq('sensor_device_id', deviceId)
         .order('recorded_at', { ascending: false })
         .limit(1)
         .single();
         
       if (logError) {
-        console.log('No sensor logs found');
+        console.error('センサーログ取得エラー:', logError);
         return;
       }
+      
+      console.log('最新のセンサーログを取得しました:', logData);
+      
+      // UTCタイムスタンプを変換
+      const utcDate = new Date(logData.recorded_at);
+      // UTCから直接変換してJSTの現地時間として表示（UTCから9時間引く）
+      const jstDate = new Date(utcDate.getTime() - 9 * 60 * 60 * 1000);
+      
+      console.log('タイムスタンプの解析:', {
+        original: logData.recorded_at,
+        parsed: utcDate,
+        formatted: jstDate.toLocaleString()
+      });
       
       // センサーデータがあればフラグを立てる
       setShowSensorData(true);
@@ -340,15 +396,23 @@ export default function TemperatureManagementClient() {
         bmpPres: logData.raw_data.bmpPres || null,
         lastUpdated: logData.recorded_at
       });
+      
+      console.log('センサーデータを設定しました:', {
+        timestamp: logData.recorded_at,
+        localTime: jstDate.toLocaleString(),
+        utcTime: new Date(logData.recorded_at).toUTCString()
+      });
     } catch (error) {
-      console.error('Error fetching sensor data:', error);
+      console.error('センサーデータ取得エラー:', error);
     }
   }, [facilityId, departmentId]);
   
   // リアルタイムセンサーデータの取得
   useEffect(() => {
-    if (!facilityId || !departmentId) return;
+    if (!facilityId) return;
 
+    console.log('リアルタイムセンサーデータ取得を開始します');
+    
     // 最新のセンサーデータを取得
     fetchLatestSensorData();
 
@@ -361,18 +425,42 @@ export default function TemperatureManagementClient() {
   }, [facilityId, departmentId, fetchLatestSensorData]);
 
   const CustomDayContent = (props: DayContentProps) => {
-    const dateStr = props.date.toISOString().split("T")[0];
-    const hasData = datesWithData.has(dateStr);
+    // カレンダーコンポーネントの日付を処理する
+    // カレンダーの日付はブラウザのローカルタイムゾーンで表示されるので、
+    // これをYYYY-MM-DD形式の文字列に変換する
+    const year = props.date.getFullYear();
+    const month = String(props.date.getMonth() + 1).padStart(2, '0');
+    const day = String(props.date.getDate()).padStart(2, '0');
+    const localDateStr = `${year}-${month}-${day}`;
+    
+    // この日付にデータがあるかチェック
+    const hasData = datesWithData.has(localDateStr);
+    
+    // 今日の日付（ローカルタイム）
+    const today = new Date();
+    const isToday = props.date.getDate() === today.getDate() &&
+                   props.date.getMonth() === today.getMonth() &&
+                   props.date.getFullYear() === today.getFullYear();
+    
+    // デバッグ情報の出力（今日の日付またはデータがある日付のみ）
+    if (isToday || hasData) {
+      console.log(`カレンダー日付チェック: ${localDateStr}, データあり: ${hasData}`, {
+        dateObj: props.date,
+        dateStr: localDateStr,
+        hasData: hasData,
+        allDatesCount: datesWithData.size
+      });
+    }
 
     return (
-      <div className="relative flex items-center justify-center">
+      <div className="relative flex items-center justify-center w-full h-full">
         {hasData && (
           <div 
-            className="absolute w-7 h-7 bg-purple-400/40 rounded-full"
+            className="absolute w-12 h-12 bg-purple-400/40 rounded-full"
             style={{ filter: "blur(8px)" }}
           />
         )}
-        <span className="relative z-10">{props.date.getDate()}</span>
+        <span className="relative z-10 text-base font-medium">{props.date.getDate()}</span>
       </div>
     );
   };
@@ -414,7 +502,7 @@ export default function TemperatureManagementClient() {
       </div>
 
       {/* メインコンテンツ */}
-      <main className="mx-auto mb-6 space-y-6" style={{ width: "80%" }}>
+      <main className="mx-auto mb-6 space-y-6 w-[95%] max-w-5xl">
         {/* 通知エリア */}
         <div className="bg-accent/30 border border-border p-4 rounded-lg animate-fadeIn">
           <p className="text-sm text-foreground">
@@ -438,7 +526,13 @@ export default function TemperatureManagementClient() {
               <Activity className="h-4 w-4 mr-2 text-purple-500" />
               リアルタイムセンサーデータ
               <span className="ml-auto text-xs text-gray-500">
-                最終更新: {new Date(sensorData.lastUpdated).toLocaleString()}
+                最終更新: {(() => {
+                  // UTCタイムスタンプを取得
+                  const utcDate = new Date(sensorData.lastUpdated);
+                  // UTCから直接変換してJSTの現地時間として表示（UTCから9時間引く）
+                  const jstDate = new Date(utcDate.getTime() - 9 * 60 * 60 * 1000);
+                  return jstDate.toLocaleString();
+                })()}
               </span>
             </h3>
             
@@ -476,17 +570,50 @@ export default function TemperatureManagementClient() {
 
         {/* カレンダー */}
         <div className="bg-white p-4 rounded-lg border border-border text-black">
+          <style 
+            dangerouslySetInnerHTML={{
+              __html: `
+              .rdp {
+                --rdp-cell-size: 70px !important;
+                --rdp-accent-color: rgba(147, 51, 234, 0.2);
+                --rdp-background-color: rgba(147, 51, 234, 0.1);
+                margin: 0;
+                width: 100%;
+              }
+              .rdp-months {
+                justify-content: space-around;
+                width: 100%;
+              }
+              .rdp-month {
+                width: 100%;
+              }
+              .rdp-table {
+                width: 100%;
+                max-width: none;
+              }
+              .rdp-caption {
+                padding: 0 0 1.5rem 0;
+              }
+              .rdp-cell {
+                height: var(--rdp-cell-size);
+                width: var(--rdp-cell-size);
+                padding: 0;
+              }
+            `
+            }}
+          />
           <Calendar
             mode="single"
             selected={date}
             onSelect={setDate}
-            className="rounded-md border"
+            className="rounded-md border w-full max-w-none"
             components={{ DayContent: CustomDayContent }}
             modifiers={{ today: new Date() }}
             modifiersStyles={{
               today: {
                 color: "rgb(255,69,0)",
-                fontWeight: "bold"
+                fontWeight: "bold",
+                backgroundColor: "#f3f4f6"
               }
             }}
           />
@@ -526,8 +653,47 @@ export default function TemperatureManagementClient() {
 
         {/* データリスト */}
         <div className="bg-white rounded-lg border border-border overflow-x-auto">
+          {/* フィルターコントロール */}
+          <div className="p-4 border-b border-border bg-secondary/20 flex justify-between items-center">
+            <h3 className="text-lg font-medium">温度記録一覧</h3>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeAutoRecords}
+                  onChange={(e) => setIncludeAutoRecords(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <span className="relative inline-flex items-center h-5 w-9 rounded-full bg-gray-200 peer-checked:bg-blue-500 transition-colors">
+                  <span className="inline-block w-4 h-4 transform translate-x-0.5 bg-white rounded-full transition-transform peer-checked:translate-x-4.5"></span>
+                </span>
+                <span className="ml-2 text-sm text-gray-700">
+                  自動記録データを含める
+                </span>
+              </label>
+            </div>
+          </div>
+          
           {loading ? (
-            <p className="p-4">Loading...</p>
+            <div className="p-8 text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto"></div>
+              <p className="mt-4 text-gray-500">データを読み込み中...</p>
+            </div>
+          ) : records.length === 0 ? (
+            <div className="p-8 text-center text-gray-500">
+              <Calendar className="h-16 w-16 text-gray-300 mx-auto mb-2" />
+              <p>{includeAutoRecords ? 'データがありません' : '手動記録データがありません'}</p>
+              {!includeAutoRecords && (
+                <p className="mt-2 text-sm">
+                  <button 
+                    onClick={() => setIncludeAutoRecords(true)}
+                    className="text-blue-500 hover:underline"
+                  >
+                    自動記録データを含める
+                  </button> と表示されるかもしれません
+                </p>
+              )}
+            </div>
           ) : (
             <table className="min-w-full">
               <thead>
@@ -538,24 +704,21 @@ export default function TemperatureManagementClient() {
                   {temperatureItems.map((item) => (
                     <th
                       key={item.id}
-                      className="px-4 py-3 text-left text-sm font-medium text-foreground"
+                      className="px-4 py-3 text-center text-sm font-medium text-foreground"
                     >
                       {item.display_name || item.item_name}
                     </th>
                   ))}
-                  <th className="px-4 py-3 text-right text-sm font-medium text-foreground">
-                    Actions
+                  <th className="px-4 py-3 text-center text-sm font-medium text-foreground">
+                    Action
                   </th>
                 </tr>
               </thead>
-              <tbody className="text-sm text-gray-900">
+              <tbody className="divide-y divide-border">
                 {records.map((record) => (
-                  <tr
-                    key={record.id}
-                    className="border-b border-border last:border-0 hover:bg-secondary/30 transition-colors"
-                  >
+                  <tr key={record.id} className="hover:bg-secondary/30">
                     <td className="px-4 py-3">
-                      {new Date(record.record_date).toLocaleDateString()}
+                      {new Date(record.record_date).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })}
                       {record.is_auto_recorded && (
                         <span className="ml-2 px-1.5 py-0.5 text-xs bg-blue-100 text-blue-800 rounded">自動</span>
                       )}
@@ -564,42 +727,43 @@ export default function TemperatureManagementClient() {
                       const detail = record.temperature_record_details.find(
                         (d) => d.temperature_item_id === item.id
                       );
-                      const rawVal = detail ? detail.value : item.default_value;
-                      const isBoolItem = item.item_name === "seika_samplecheck";
+                      const rawVal = detail?.value;
                       const isSensorData = detail?.data_source === 'sensor';
+                      const isCheckItem = item.item_name === "seika_samplecheck";
                       
-                      if (isBoolItem) {
-                        return (
-                          <td key={item.id} className="px-4 py-3 text-center">
-                            {rawVal === 1 ? (
-                              <Check className="h-5 w-5 mx-auto text-green-600" />
+                      return (
+                        <td
+                          key={`${record.id}-${item.id}`}
+                          className="px-4 py-3 text-center"
+                        >
+                          {rawVal !== undefined && rawVal !== null ? (
+                            isCheckItem ? (
+                              rawVal === 1 ? (
+                                <Check className="h-5 w-5 mx-auto text-green-600" />
+                              ) : (
+                                <X className="h-5 w-5 mx-auto text-red-600" />
+                              )
                             ) : (
-                              <X className="h-5 w-5 mx-auto text-red-600" />
-                            )}
-                          </td>
-                        );
-                      } else {
-                        return (
-                          <td key={item.id} className="px-4 py-3 text-center">
-                            <span className={isSensorData ? "text-blue-600 font-medium" : ""}>
-                              {rawVal}℃
-                            </span>
-                            {isSensorData && (
-                              <span className="ml-1 text-xs text-blue-500">●</span>
-                            )}
-                          </td>
-                        );
-                      }
+                              <span className={isSensorData ? "text-blue-600 font-medium" : ""}>
+                                {rawVal}℃
+                              </span>
+                            )
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                          {isSensorData && !isCheckItem && (
+                            <span className="ml-1 text-xs text-blue-500">●</span>
+                          )}
+                        </td>
+                      );
                     })}
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button className="px-3 py-1.5 text-gray-600 hover:bg-secondary rounded transition-colors">
-                          Edit
-                        </button>
-                        <button className="px-3 py-1.5 text-red-600 hover:bg-red-50 rounded transition-colors">
-                          Delete
-                        </button>
-                      </div>
+                    <td className="px-4 py-3 text-center">
+                      <Link
+                        href={`/temperature/record/${record.id}?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`}
+                        className="text-sm text-blue-500 hover:text-blue-700"
+                      >
+                        表示
+                      </Link>
                     </td>
                   </tr>
                 ))}
