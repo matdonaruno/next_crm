@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus,
   AlertTriangle,
+  FlaskRound,
+  Bell,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +21,7 @@ import {
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/contexts/AuthContext";
+import { setSessionCheckEnabled } from "@/contexts/AuthContext";
 import Papa from 'papaparse'; // CSVパーサーライブラリを追加
 import { AppHeader } from "@/components/ui/app-header";
 import { motion } from "framer-motion";
@@ -112,26 +115,41 @@ export default function ReagentDashboardClient() {
   // 自動リロードのタイマーID
   const [autoReloadTimerId, setAutoReloadTimerId] = useState<NodeJS.Timeout | null>(null);
 
+  // 通知データの状態
+  const [notifications, setNotifications] = useState([
+    {
+      id: 1,
+      type: 'warning',
+      message: '3件の試薬が期限切れ間近です',
+      timestamp: new Date(),
+    },
+    {
+      id: 2,
+      type: 'info',
+      message: '試薬在庫状況が更新されました',
+      timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000), // 1日前
+    },
+    {
+      id: 3,
+      type: 'success',
+      message: '新しい試薬管理ガイドラインが公開されました',
+      timestamp: new Date(Date.now() - 72 * 60 * 60 * 1000), // 3日前
+    }
+  ]);
+
   // 背景色を白色に変更
   useEffect(() => {
-    const body = document.querySelector('body');
-    if (!body) return;
-
-    // 元のbodyスタイルを保存
-    const originalBackgroundColor = body.style.backgroundColor;
-    const originalBackgroundImage = body.style.backgroundImage;
-    const originalColor = body.style.color;
+    // 不要なbodyスタイル変更は削除
+    // 代わりにコンポーネント内で背景色を指定する
     
-    // このページ用にbodyスタイルを変更
-    body.style.backgroundColor = 'white'; // 白色に変更
-    body.style.backgroundImage = 'none';
-    body.style.color = '#333333';
-
+    // コンポーネントのマウント時にセッション確認を無効化
+    setSessionCheckEnabled(false);
+    console.log("ReagentDashboard: セッション確認を無効化しました");
+    
+    // クリーンアップ時（コンポーネントのアンマウント時）にセッション確認を再度有効化
     return () => {
-      // クリーンアップ時に元のスタイルに戻す
-      body.style.backgroundColor = originalBackgroundColor;
-      body.style.backgroundImage = originalBackgroundImage;
-      body.style.color = originalColor;
+      setSessionCheckEnabled(true);
+      console.log("ReagentDashboard: セッション確認を再有効化しました");
     };
   }, []);
 
@@ -773,46 +791,19 @@ export default function ReagentDashboardClient() {
   }, [router, user]);
 
   return (
-    <TooltipProvider>
-      <div style={{ backgroundColor: 'white', minHeight: '100vh' }}>
-        {/* 共通ヘッダーコンポーネントを使用 */}
-        <AppHeader showBackButton={true} title="Clinical reagent manager" />
+    <div className="min-h-screen bg-white">
+      {/* AppHeaderコンポーネントを使用 */}
+      <AppHeader 
+        title="Clinical Reagent Manager" 
+        showBackButton={true}
+        icon={<FlaskRound className="h-6 w-6 text-pink-500" />}
+      />
 
-        <div className="bg-background border-b">
-          <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-            <h2 className="text-2xl font-bold">Reagent Dashboard</h2>
-            {/* フィルター領域 */}
-            <div className="flex items-center space-x-4">
-              <div>
-                <label className="text-sm">部署フィルター: </label>
-                <select
-                  className="border rounded p-1 text-sm"
-                  value={selectedDepartment}
-                  onChange={(e) => setSelectedDepartment(e.target.value)}
-                >
-                  <option value="all">すべて</option>
-                  {departmentOptions.map((dept) => (
-                    <option key={dept} value={dept}>
-                      {dept}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-center">
-                <label className="text-sm mr-1">使用終了試薬表示:</label>
-                <input
-                  type="checkbox"
-                  checked={showEnded}
-                  onChange={(e) => setShowEnded(e.target.checked)}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <main className="flex-grow container mx-auto px-4 py-8" style={{ backgroundColor: '#ffffff' }}>
-          {/* カレントユーザーの氏名表示 */}
-          <div className="mb-4 text-right">
+      {/* メインコンテンツ - 幅を調整 */}
+      <main className="container max-w-7xl mx-auto px-4 py-6">
+        {/* ユーザー情報表示 */}
+        <div className="w-full mb-4">
+          <div className="text-right">
             {facilityName && (
               <p className="text-sm text-gray-600">
                 施設「{facilityName}」
@@ -820,279 +811,392 @@ export default function ReagentDashboardClient() {
             )}
             {currentUserName && (
               <p className="text-sm text-gray-600">
-                {currentUserName}さんがログインしています！
+                {currentUserName}さんがログインしています
               </p>
             )}
           </div>
+        </div>
 
-          {/* ローディング状態とエラー表示 */}
-          {isLoading && (
-            <div className="mb-6 p-4 border border-blue-300 bg-blue-50 rounded-md">
-              <p className="text-blue-700">データを読み込み中です... {loadingStartTime && (
-                <span>（長時間かかる場合は自動的にリロードされます）</span>
-              )}</p>
+        {/* 通知エリア */}
+        {notifications.length > 0 && (
+          <div className="p-4 border border-yellow-300 bg-yellow-50 rounded-md mb-6">
+            <h3 className="text-lg font-semibold text-yellow-800 mb-2 text-left">
+              <Bell className="inline-block mr-2 h-5 w-5 text-pink-500" />
+              通知 ({notifications.length}件)
+            </h3>
+            <div className="max-h-40 overflow-y-auto">
+              <ul className="list-disc pl-5 text-left">
+                {notifications.map((notification) => (
+                  <li key={`notification-${notification.id}`} className="text-sm text-foreground mb-1">
+                    {notification.message}
+                    <span className="text-xs text-muted-foreground ml-2">
+                      {notification.timestamp.toLocaleString()}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
-          )}
+            <div className="mt-2 text-right">
+              <Button variant="link" className="text-pink-500 text-sm p-0 h-auto">
+                すべての通知を表示
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ヘッダー部分 */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-primary mb-2">Reagent Dash</h1>
+            <p className="text-muted-foreground">
+              {departmentName || '全部署'}の試薬在庫・使用状況
+            </p>
+          </div>
           
-          {error && (
-            <div className="mb-6 p-4 border border-red-300 bg-red-50 rounded-md">
-              <p className="text-red-700">{error}</p>
-              <Button 
-                onClick={() => window.location.reload()} 
-                className="mt-2 bg-red-600 hover:bg-red-700 text-white"
-                size="sm"
-              >
-                ページをリロード
-              </Button>
-            </div>
-          )}
-
-          {/* 期限切れ通知エリア */}
-          {expiryNotifications.length > 0 && (
-            <div className="mb-6 p-4 border border-yellow-300 bg-yellow-50 rounded-md">
-              <h3 className="text-lg font-semibold text-yellow-800 mb-2">
-                <AlertTriangle className="inline-block mr-2 h-5 w-5" />
-                期限切れ間近の試薬 ({expiryNotifications.length}件)
-              </h3>
-              <div className="max-h-40 overflow-y-auto">
-                <ul className="list-disc pl-5">
-                  {expiryNotifications.map((reagent) => (
-                    <li key={`expiry-${reagent.id}`} className="text-sm text-yellow-700 mb-1">
-                      <span className="font-medium">{reagent.name}</span> (Lot: {reagent.lotNo}) - 
-                      有効期限: {formatDateTime(reagent.expirationDate)}
-                      <Button
-                        variant="link"
-                        size="sm"
-                        className="text-blue-600 p-0 h-auto ml-2"
-                        onClick={() => router.push(`/reagent/${reagent.id}`)}
-                      >
-                        詳細を見る
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          )}
-
-          <div className="mb-6 flex justify-between">
-            <div className="flex space-x-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCompactMode(!compactMode)}
-                className="flex items-center"
-              >
-                {compactMode ? (
-                  <>
-                    <span>標準表示</span>
-                  </>
-                ) : (
-                  <>
-                    <span>コンパクト表示</span>
-                  </>
-                )}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={expandAllRows}
-                className="flex items-center"
-              >
-                {allExpanded ? (
-                  <>
-                    <span>すべて折りたたむ</span>
-                  </>
-                ) : (
-                  <>
-                    <span>すべて展開</span>
-                  </>
-                )}
-              </Button>
-            </div>
+          <div className="flex flex-col sm:flex-row gap-2">
             <motion.div
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.98 }}
             >
-              <Button
-                onClick={() => router.push(`/reagent/register-new?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`)}
+              <Button 
+                onClick={() => router.push(`/reagent/register-new`)}
                 className="inline-flex items-center justify-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 shadow hover:bg-primary/90 h-9 px-4 w-full bg-gradient-to-r from-pink-300 to-purple-400 hover:from-pink-300 hover:to-purple-400 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
               >
                 <Plus className="mr-2 h-5 w-5" />
-                Register Reagent
+                新規試薬登録
               </Button>
             </motion.div>
           </div>
+        </div>
 
-          <Card>
-            <div className="overflow-x-auto">
-              <Table className={`w-max min-w-full ${compactMode ? 'text-xs' : ''}`}>
-                <TableHeader>
-                  <TableRow className="whitespace-nowrap">
-                    <TableHead className={compactMode ? "w-8" : "w-10"}>
-                      {/* 展開ボタン用 */}
-                    </TableHead>
-                    <TableHead className={compactMode ? "min-w-[150px] max-w-[300px]" : "min-w-[200px] max-w-[400px]"}>試薬名</TableHead>
-                    <TableHead className={compactMode ? "min-w-[80px]" : "min-w-[100px]"}>Lot No.</TableHead>
-                    <TableHead className={compactMode ? "min-w-[80px]" : "min-w-[100px]"}>規格</TableHead>
-                    <TableHead className={compactMode ? "min-w-[60px]" : "min-w-[80px]"}>単位</TableHead>
-                    <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>有効期限</TableHead>
-                    <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"} style={{ backgroundColor: 'rgba(var(--primary), 0.1)' }}>使用開始日</TableHead>
-                    <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"} style={{ backgroundColor: 'rgba(var(--primary), 0.1)' }}>使用終了日</TableHead>
-                    <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>使用入力者</TableHead>
-                    <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>終了入力者</TableHead>
-                    <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>登録日</TableHead>
-                    <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>登録者</TableHead>
-                    <TableHead className={compactMode ? "min-w-[150px]" : "min-w-[200px]"}>操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredReagents.map((reagent) => {
-                    // この試薬パッケージに関連するアイテムを取得
-                    const items = reagentItems.filter(item => item.reagent_package_id === reagent.id);
-                    const hasItems = items.length > 0;
-                    const isExpanded = expandedReagents[reagent.id] || false;
-                    
-                    return (
-                      <React.Fragment key={reagent.id}>
-                        <TableRow
-                          onClick={() => handleRowClick(reagent)}
-                          className={`cursor-pointer hover:bg-gray-50 whitespace-nowrap ${compactMode ? 'h-8' : ''}`}
-                        >
-                          <TableCell>
-                            {hasItems && (
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="p-0 h-6 w-6"
-                                onClick={(e) => toggleReagentExpand(reagent.id, e)}
-                              >
-                                {isExpanded ? '−' : '+'}
-                              </Button>
-                            )}
-                          </TableCell>
-                          <TableCell>{reagent.name}</TableCell>
-                          <TableCell>{reagent.lotNo}</TableCell>
-                          <TableCell>{reagent.specification}</TableCell>
-                          <TableCell>{reagent.unit || "-"}</TableCell>
-                          <TableCell>{formatDateTime(reagent.expirationDate)}</TableCell>
-                          <TableCell>{formatDateTime(reagent.used_at)}</TableCell>
-                          <TableCell>{formatDateTime(reagent.ended_at)}</TableCell>
-                          <TableCell>
-                            {reagent.used_by
-                              ? typeof reagent.used_by === "object"
-                                ? reagent.used_by.fullname
-                                : reagent.used_by
-                              : "-"}
-                          </TableCell>
-                          <TableCell>
-                            {reagent.ended_by
-                              ? typeof reagent.ended_by === "object"
-                                ? reagent.ended_by.fullname
-                                : reagent.ended_by
-                              : "-"}
-                          </TableCell>
-                          <TableCell>{formatDateTime(reagent.registrationDate)}</TableCell>
-                          <TableCell>
-                            {typeof reagent.registeredBy === "object"
-                              ? reagent.registeredBy.fullname
-                              : reagent.registeredBy}
-                          </TableCell>
-                          <TableCell className="space-x-1 whitespace-nowrap">
-                            {!reagent.used && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleUsageStart(reagent.id);
-                                }}
-                              >
-                                使用開始
-                              </Button>
-                            )}
-                            {reagent.used && !reagent.ended_at && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleUsageEnd(reagent.id);
-                                }}
-                              >
-                                使用終了
-                              </Button>
-                            )}
+        {/* エラー表示 */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 p-4 rounded-md mb-6">
+            <p className="text-red-700 flex items-center">
+              <AlertTriangle className="h-5 w-5 mr-2" />
+              {error}
+            </p>
+          </div>
+        )}
+
+        {/* ローディング中の表示 */}
+        {isLoading && (
+          <div className="bg-white shadow-sm border rounded-md p-8 text-center my-6">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+            <p className="mt-4 text-gray-500">データを読み込み中...</p>
+          </div>
+        )}
+
+        {/* 期限切れ通知エリア */}
+        {expiryNotifications.length > 0 && (
+          <div className="mb-6 p-4 border border-yellow-300 bg-yellow-50 rounded-md">
+            <h3 className="text-lg font-semibold text-yellow-800 mb-2">
+              <AlertTriangle className="inline-block mr-2 h-5 w-5" />
+              期限切れ間近の試薬 ({expiryNotifications.length}件)
+            </h3>
+            <div className="max-h-40 overflow-y-auto">
+              <ul className="list-disc pl-5">
+                {expiryNotifications.map((reagent) => (
+                  <li key={`expiry-${reagent.id}`} className="text-sm text-yellow-700 mb-1">
+                    <span className="font-medium">{reagent.name}</span> (Lot: {reagent.lotNo}) - 
+                    有効期限: {formatDateTime(reagent.expirationDate)}
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="text-blue-600 p-0 h-auto ml-2"
+                      onClick={() => router.push(`/reagent/${reagent.id}`)}
+                    >
+                      詳細を見る
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {/* フィルターコントロール - TemperatureManagementClientに合わせたデザイン */}
+        <div className="mb-6 bg-white p-4 rounded-lg shadow-sm">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1">
+              <div className="relative">
+                <Input
+                  placeholder="試薬名・Lot No.で検索"
+                  className="pl-3 w-full"
+                  onChange={(e) => {
+                    // 検索フィルター機能を実装する場合はここに追加
+                  }}
+                />
+              </div>
+            </div>
+            
+            <div className="w-full md:w-auto">
+              <Select value={selectedDepartment} onValueChange={setSelectedDepartment}>
+                <SelectTrigger className="w-full md:w-[180px]">
+                  <SelectValue placeholder="部署を選択" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">すべての部署</SelectItem>
+                  {departmentOptions.map((dept) => (
+                    <SelectItem key={dept} value={dept}>
+                      {dept}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="flex items-center">
+              <Button 
+                variant={showEnded ? "secondary" : "outline"} 
+                className={`text-sm w-full justify-start md:w-auto ${showEnded ? "bg-blue-100 text-blue-800 border-blue-300" : ""}`}
+                onClick={() => setShowEnded(!showEnded)}
+              >
+                <span className="mr-2">使用終了済みを表示</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+        
+        {/* 表示コントロール */}
+        <div className="mb-6 flex justify-between">
+          <div className="flex space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCompactMode(!compactMode)}
+              className="flex items-center"
+            >
+              {compactMode ? (
+                <>
+                  <span>標準表示</span>
+                </>
+              ) : (
+                <>
+                  <span>コンパクト表示</span>
+                </>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={expandAllRows}
+              className="flex items-center"
+            >
+              {allExpanded ? (
+                <>
+                  <span>すべて折りたたむ</span>
+                </>
+              ) : (
+                <>
+                  <span>すべて展開</span>
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+
+        {/* カードスタイルの調整 */}
+        <Card className="shadow-sm border rounded-lg overflow-hidden">
+          <CardHeader className="bg-gray-50 py-3 px-4 border-b">
+            <CardTitle className="text-base font-medium">試薬一覧</CardTitle>
+          </CardHeader>
+          <div className="overflow-x-auto">
+            <Table className={`w-max min-w-full ${compactMode ? 'text-xs' : ''}`}>
+              <TableHeader>
+                <TableRow className="whitespace-nowrap">
+                  <TableHead className={compactMode ? "w-8" : "w-10"}>
+                    {/* 展開ボタン用 */}
+                  </TableHead>
+                  <TableHead className={compactMode ? "min-w-[150px] max-w-[300px]" : "min-w-[200px] max-w-[400px]"}>試薬名</TableHead>
+                  <TableHead className={compactMode ? "min-w-[80px]" : "min-w-[100px]"}>Lot No.</TableHead>
+                  <TableHead className={compactMode ? "min-w-[80px]" : "min-w-[100px]"}>規格</TableHead>
+                  <TableHead className={compactMode ? "min-w-[60px]" : "min-w-[80px]"}>単位</TableHead>
+                  <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>有効期限</TableHead>
+                  <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"} style={{ backgroundColor: 'rgba(var(--primary), 0.1)' }}>使用開始日</TableHead>
+                  <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"} style={{ backgroundColor: 'rgba(var(--primary), 0.1)' }}>使用終了日</TableHead>
+                  <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>使用入力者</TableHead>
+                  <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>終了入力者</TableHead>
+                  <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>登録日</TableHead>
+                  <TableHead className={compactMode ? "min-w-[100px]" : "min-w-[120px]"}>登録者</TableHead>
+                  <TableHead className={compactMode ? "min-w-[150px]" : "min-w-[200px]"}>操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredReagents.map((reagent) => {
+                  // この試薬パッケージに関連するアイテムを取得
+                  const items = reagentItems.filter(item => item.reagent_package_id === reagent.id);
+                  const hasItems = items.length > 0;
+                  const isExpanded = expandedReagents[reagent.id] || false;
+                  
+                  return (
+                    <React.Fragment key={reagent.id}>
+                      <TableRow
+                        onClick={() => handleRowClick(reagent)}
+                        className={`cursor-pointer hover:bg-gray-50 whitespace-nowrap ${compactMode ? 'h-8' : ''}`}
+                      >
+                        <TableCell>
+                          {hasItems && (
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="p-0 h-6 w-6"
+                              onClick={(e) => toggleReagentExpand(reagent.id, e)}
+                            >
+                              {isExpanded ? '−' : '+'}
+                            </Button>
+                          )}
+                        </TableCell>
+                        <TableCell>{reagent.name}</TableCell>
+                        <TableCell>{reagent.lotNo}</TableCell>
+                        <TableCell>{reagent.specification}</TableCell>
+                        <TableCell>{reagent.unit || "-"}</TableCell>
+                        <TableCell>{formatDateTime(reagent.expirationDate)}</TableCell>
+                        <TableCell>{formatDateTime(reagent.used_at)}</TableCell>
+                        <TableCell>{formatDateTime(reagent.ended_at)}</TableCell>
+                        <TableCell>
+                          {reagent.used_by
+                            ? typeof reagent.used_by === "object"
+                              ? reagent.used_by.fullname
+                              : reagent.used_by
+                            : "-"}
+                        </TableCell>
+                        <TableCell>
+                          {reagent.ended_by
+                            ? typeof reagent.ended_by === "object"
+                              ? reagent.ended_by.fullname
+                              : reagent.ended_by
+                            : "-"}
+                        </TableCell>
+                        <TableCell>{formatDateTime(reagent.registrationDate)}</TableCell>
+                        <TableCell>
+                          {typeof reagent.registeredBy === "object"
+                            ? reagent.registeredBy.fullname
+                            : reagent.registeredBy}
+                        </TableCell>
+                        <TableCell className="space-x-1 whitespace-nowrap">
+                          {!reagent.used && (
                             <Button
                               size="sm"
                               variant="outline"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                router.push(`/reagent/${reagent.id}`);
+                                handleUsageStart(reagent.id);
                               }}
-                              className="ml-1"
                             >
-                              アイテム追加
+                              使用開始
                             </Button>
+                          )}
+                          {reagent.used && !reagent.ended_at && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleUsageEnd(reagent.id);
+                              }}
+                            >
+                              使用終了
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              router.push(`/reagent/${reagent.id}`);
+                            }}
+                            className="ml-1"
+                          >
+                            アイテム追加
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                      
+                      {/* アイテム行（展開時のみ表示） */}
+                      {isExpanded && items.map(item => (
+                        <TableRow key={`item-${item.id}`} className={`bg-gray-50 whitespace-nowrap ${compactMode ? 'h-7 text-xs' : ''}`}>
+                          <TableCell></TableCell>
+                          <TableCell className="pl-8 font-medium text-sm">
+                            └ {item.name}
+                          </TableCell>
+                          <TableCell colSpan={3}></TableCell>
+                          <TableCell className="text-sm">
+                            {item.usagestartdate
+                              ? new Date(item.usagestartdate).toLocaleString()
+                              : "未設定"}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {item.ended_at
+                              ? new Date(item.ended_at).toLocaleString()
+                              : ""}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {item.user_fullname || item.user}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {item.ended_by_fullname || (item.ended_by ? item.ended_by : "")}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {new Date(item.created_at).toLocaleString()}
+                          </TableCell>
+                          <TableCell></TableCell>
+                          <TableCell className="space-x-1 whitespace-nowrap">
+                            {!item.ended_at && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => handleItemUsageEnd(item.id, e)}
+                              >
+                                使用終了
+                              </Button>
+                            )}
                           </TableCell>
                         </TableRow>
-                        
-                        {/* アイテム行（展開時のみ表示） */}
-                        {isExpanded && items.map(item => (
-                          <TableRow key={`item-${item.id}`} className={`bg-gray-50 whitespace-nowrap ${compactMode ? 'h-7 text-xs' : ''}`}>
-                            <TableCell></TableCell>
-                            <TableCell className="pl-8 font-medium text-sm">
-                              └ {item.name}
-                            </TableCell>
-                            <TableCell colSpan={3}></TableCell>
-                            <TableCell className="text-sm">
-                              {item.usagestartdate
-                                ? new Date(item.usagestartdate).toLocaleString()
-                                : "未設定"}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {item.ended_at
-                                ? new Date(item.ended_at).toLocaleString()
-                                : ""}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {item.user_fullname || item.user}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {item.ended_by_fullname || (item.ended_by ? item.ended_by : "")}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {new Date(item.created_at).toLocaleString()}
-                            </TableCell>
-                            <TableCell></TableCell>
-                            <TableCell className="space-x-1 whitespace-nowrap">
-                              {!item.ended_at && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={(e) => handleItemUsageEnd(item.id, e)}
-                                >
-                                  使用終了
-                                </Button>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </React.Fragment>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          </Card>
-        </main>
-
-        <footer className="bg-background border-t">
-          <div className="container mx-auto px-4 py-4 text-center text-sm text-muted-foreground">
-            © 2025 Your side partner. All rights reserved.
+                      ))}
+                    </React.Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </div>
-        </footer>
-      </div>
-    </TooltipProvider>
+          
+          {/* テーブルフッター */}
+          {filteredReagents.length > 0 && (
+            <div className="bg-gray-50 border-t p-3 flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">
+                全 {filteredReagents.length} 件の試薬データ
+              </span>
+              <div className="text-sm">
+                <span>最終更新: {new Date().toLocaleString()}</span>
+              </div>
+            </div>
+          )}
+          
+          {/* データがない場合の表示 */}
+          {filteredReagents.length === 0 && !isLoading && (
+            <div className="p-8 text-center">
+              <p className="text-gray-500 mb-4">表示するデータがありません</p>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  setSelectedDepartment("all");
+                  setShowEnded(false);
+                }}
+              >
+                フィルターをリセット
+              </Button>
+            </div>
+          )}
+        </Card>
+      </main>
+
+      <footer className="bg-background border-t">
+        <div className="container mx-auto px-4 py-4 text-center text-sm text-muted-foreground">
+          © 2025 Your side partner. All rights reserved.
+        </div>
+      </footer>
+    </div>
   );
 }

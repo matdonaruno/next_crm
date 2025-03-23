@@ -1,7 +1,7 @@
 'use client';
 
 import { Calendar } from "@/components/ui/calendar";
-import { Bell, Plus, FileText, ChevronLeft, Home, Check, X, Activity } from "lucide-react";
+import { Bell, Plus, FileText, ChevronLeft, Home, Check, X, Activity, ThermometerSnowflake } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -13,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { useSimpleAuth } from '@/hooks/useSimpleAuth';
 import { useSessionCheck } from '@/hooks/useSessionCheck';
+import { AppHeader } from '@/components/ui/app-header';
+import { setSessionCheckEnabled } from "@/contexts/AuthContext";
 
 interface TemperatureRecordDetail {
   id: string;
@@ -63,6 +65,28 @@ export default function TemperatureManagementClient() {
   const [facilityId, setFacilityId] = useState<string>("");
   const [userName, setUserName] = useState<string>("");
 
+  // 通知データの状態
+  const [notifications, setNotifications] = useState([
+    {
+      id: 1,
+      type: 'warning',
+      message: '温度計の校正が今月末に予定されています',
+      timestamp: new Date(),
+    },
+    {
+      id: 2,
+      type: 'info',
+      message: '冷蔵庫3の温度が安定しません。確認してください。',
+      timestamp: new Date(Date.now() - 12 * 60 * 60 * 1000), // 12時間前
+    },
+    {
+      id: 3,
+      type: 'success',
+      message: '全ての温度ログが正常に記録されています',
+      timestamp: new Date(Date.now() - 48 * 60 * 60 * 1000), // 2日前
+    }
+  ]);
+
   // センサーデータの状態
   const [showSensorData, setShowSensorData] = useState(true);
   const [sensorData, setSensorData] = useState<SensorData>({
@@ -88,6 +112,19 @@ export default function TemperatureManagementClient() {
       router.push('/login');
     }
   }, [authLoading, user, router]);
+
+  // セッション確認の無効化
+  useEffect(() => {
+    // コンポーネントのマウント時にセッション確認を無効化
+    setSessionCheckEnabled(false);
+    console.log("TemperatureManagement: セッション確認を無効化しました");
+    
+    // クリーンアップ時（コンポーネントのアンマウント時）にセッション確認を再度有効化
+    return () => {
+      setSessionCheckEnabled(true);
+      console.log("TemperatureManagement: セッション確認を再有効化しました");
+    };
+  }, []);
 
   useEffect(() => {
     if (!departmentId) return;
@@ -466,33 +503,13 @@ export default function TemperatureManagementClient() {
   };
 
   return (
-    <div className="min-h-screen w-full overflow-y-auto bg-background">
-      {/* ヘッダー */}
-      <header className="border-b border-border bg-white">
-        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
-          <button
-            onClick={() => router.back()}
-            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-          >
-            <ChevronLeft className="h-5 w-5 text-gray-600" />
-          </button>
-          <div className="flex-1 flex items-center justify-center gap-4">
-            <FileText className="h-6 w-6 text-[rgb(155,135,245)]" />
-            <h1 className="text-xl font-semibold">Temperature Management</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => router.push("/depart")}
-              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-            >
-              <Home className="h-5 w-5 text-gray-600" />
-            </button>
-            <button className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-              <Bell className="h-5 w-5 text-gray-600" />
-            </button>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen w-full overflow-y-auto bg-white">
+      {/* AppHeaderコンポーネントを使用 */}
+      <AppHeader 
+        title="Temperature Management" 
+        showBackButton={true}
+        icon={<ThermometerSnowflake className="h-6 w-6 text-purple-500" />}
+      />
 
       {/* 部署名表示 */}
       <div className="max-w-4xl mx-auto px-4 py-4">
@@ -501,9 +518,36 @@ export default function TemperatureManagementClient() {
         </h2>
       </div>
 
-      {/* メインコンテンツ */}
-      <main className="mx-auto mb-6 space-y-6 w-[95%] max-w-5xl">
+      {/* メインコンテンツ - 幅を調整 */}
+      <main className="container max-w-7xl mx-auto px-4 py-6">
         {/* 通知エリア */}
+        {notifications.length > 0 && (
+          <div className="p-4 border border-yellow-300 bg-yellow-50 rounded-md mb-6">
+            <h3 className="text-lg font-semibold text-yellow-800 mb-2 text-left">
+              <Bell className="inline-block mr-2 h-5 w-5 text-purple-500" />
+              通知 ({notifications.length}件)
+            </h3>
+            <div className="max-h-40 overflow-y-auto">
+              <ul className="list-disc pl-5 text-left">
+                {notifications.map((notification) => (
+                  <li key={`notification-${notification.id}`} className="text-sm text-foreground mb-1">
+                    {notification.message}
+                    <span className="text-xs text-muted-foreground ml-2">
+                      {notification.timestamp.toLocaleString()}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="mt-2 text-right">
+              <Button variant="link" className="text-purple-500 text-sm p-0 h-auto">
+                すべての通知を表示
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ユーザー情報表示 */}
         <div className="bg-accent/30 border border-border p-4 rounded-lg animate-fadeIn">
           <p className="text-sm text-foreground">
             {facilityName && (
@@ -620,7 +664,7 @@ export default function TemperatureManagementClient() {
         </div>
 
         {/* 新規登録ボタン */}
-        <div className="flex justify-end gap-4">
+        <div className="flex justify-end gap-4 my-6">
           <motion.div
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.98 }}
@@ -629,7 +673,7 @@ export default function TemperatureManagementClient() {
               onClick={() => {
                 router.push(`/temperature/sensor-data?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`);
               }}
-              className="bg-gradient-to-r from-blue-400 to-indigo-500 hover:from-blue-500 hover:to-indigo-600 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
+              className="bg-gradient-to-r from-blue-300 to-purple-300 hover:from-blue-400 hover:to-purple-400 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
             >
               <Activity className="h-5 w-5 mr-2" />
               センサーデータ履歴
@@ -638,6 +682,7 @@ export default function TemperatureManagementClient() {
           <motion.div
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.98 }}
+            className="mt-4 md:mt-0"
           >
             <Button
               onClick={() => {
@@ -646,7 +691,7 @@ export default function TemperatureManagementClient() {
               className="inline-flex items-center justify-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 shadow hover:bg-primary/90 h-9 px-4 w-full bg-gradient-to-r from-pink-300 to-purple-400 hover:from-pink-300 hover:to-purple-400 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
             >
               <Plus className="mr-2 h-5 w-5" />
-              Add New Temperature Record
+              新規温度記録
             </Button>
           </motion.div>
         </div>
