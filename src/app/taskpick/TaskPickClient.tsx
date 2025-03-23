@@ -36,7 +36,7 @@ const menuItems = [
     title: 'Equipment Maintenance',
     description: 'Track and log maintenance tasks',
     icon: Wrench,
-    path: '/equipment',
+    path: '/equipment_dash',
     color: 'bg-dashboard-purple',
     tooltip: '機器メンテナンス管理'
   },
@@ -133,7 +133,7 @@ export default function TaskPickClient() {
           color: white !important;
         }
       `}</style>
-      <div className="min-h-screen w-full flex flex-col bg-gradient-to-b from-[#fde3f1] to-[#e9ddfc]">
+      <div className="min-h-screen w-full flex flex-col bg-gradient-to-b from-[#fffafd] to-[#faf8fe]">
         {/* 共通ヘッダーコンポーネントを使用 */}
         <AppHeader showBackButton={true} />
 
