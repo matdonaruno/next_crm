@@ -1,10 +1,18 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { User, Home, LogOut, ArrowLeft } from 'lucide-react';
+import { User, Home, LogOut, ArrowLeft, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
-import { ReactNode } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
+import { createClient } from '@/utils/supabase/client';
+
+// 通知コンポーネントを動的にインポート（サーバーサイドレンダリングを無効化）
+const UserNotifications = dynamic(() => import('@/components/UserNotifications'), {
+  ssr: false,
+  loading: () => <div className="w-8 h-8"></div>,
+});
 
 interface AppHeaderProps {
   showBackButton?: boolean;
@@ -20,6 +28,29 @@ const tooltipTextStyle = { color: 'white' };
 
 export function AppHeader({ showBackButton = true, title, onBackClick, icon }: AppHeaderProps) {
   const router = useRouter();
+  const supabase = createClient();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // ユーザーの権限を確認
+  useEffect(() => {
+    async function checkUserRole() {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+        
+        if (profile && (profile.role === 'superuser' || profile.role === 'facility_admin')) {
+          setIsAdmin(true);
+        }
+      }
+    }
+    
+    checkUserRole();
+  }, [supabase]);
 
   // 前の画面に戻る関数
   const handleGoBack = () => {
@@ -57,6 +88,25 @@ export function AppHeader({ showBackButton = true, title, onBackClick, icon }: A
         
         {/* 右側のアイコン群 - 右詰めに配置 */}
         <div className="flex items-center space-x-1">
+          {/* 通知アイコン */}
+          <UserNotifications />
+          
+          {/* ユーザー管理アイコン（管理者のみ表示） */}
+          {isAdmin && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={() => router.push("/admin/user-management")}>
+                    <Users className="h-6 w-6" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
+                  <p style={tooltipTextStyle}>ユーザー管理</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          
           {/* ユーザー設定アイコン */}
           <TooltipProvider>
             <Tooltip>
