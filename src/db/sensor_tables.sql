@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS sensor_devices (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   device_name TEXT NOT NULL,
   ip_address TEXT,
-  mac_address TEXT,
+  device_id TEXT, -- MACアドレス由来のデバイス識別子
   facility_id UUID REFERENCES facilities(id),
   department_id UUID REFERENCES departments(id),
   location TEXT,
@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS sensor_logs (
   sensor_device_id UUID REFERENCES sensor_devices(id),
   raw_data JSONB,
   recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  ip_address TEXT
+  ip_address TEXT,
+  device_id TEXT -- MACアドレス由来のデバイス識別子
 );
 
 -- 既存のテーブルにカラムを追加
@@ -40,6 +41,8 @@ ALTER TABLE temperature_record_details ADD COLUMN IF NOT EXISTS data_source TEXT
 -- センサーデータソース用のインデックス
 CREATE INDEX IF NOT EXISTS idx_sensor_logs_recorded_at ON sensor_logs(recorded_at);
 CREATE INDEX IF NOT EXISTS idx_sensor_devices_ip ON sensor_devices(ip_address);
+CREATE INDEX IF NOT EXISTS idx_sensor_devices_device_id ON sensor_devices(device_id);
+CREATE INDEX IF NOT EXISTS idx_sensor_logs_device_id ON sensor_logs(device_id);
 CREATE INDEX IF NOT EXISTS idx_sensor_mappings_device ON sensor_mappings(sensor_device_id);
 
 -- テーブルに対する権限設定

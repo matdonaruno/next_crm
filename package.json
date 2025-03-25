@@ -2,13 +2,17 @@
   "name": "next_clinical_reagent_manager",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "postbuild": "next-pwa",
     "start": "next start",
+    "start:standalone": "node startup.js",
     "lint": "next lint",
     "generate-pwa-icons": "node scripts/convert-svg-to-png.js",
-    "setup-pwa": "bash scripts/generate-pwa-assets.sh"
+    "setup-pwa": "bash scripts/generate-pwa-assets.sh",
+    "vercel-build": "next build"
   },
   "dependencies": {
     "@radix-ui/react-dropdown-menu": "^2.1.6",
@@ -33,6 +37,7 @@
     "date-fns": "3.6.0",
     "dynamsoft-camera-enhancer": "^4.1.1",
     "dynamsoft-javascript-barcode": "^9.6.42",
+    "express": "^4.19.2",
     "framer-motion": "^12.4.7",
     "js-cookie": "^3.0.5",
     "lucide-react": "0.475.0",

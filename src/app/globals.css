@@ -89,3 +89,55 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+/* PWA フルスクリーンモードのサポート */
+html.standalone,
+html.fullscreen-mode {
+  height: 100vh;
+  /* iOS Safe Areas サポート - 新しいiOSバージョン用 */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+body {
+  overscroll-behavior-y: none; /* バウンス効果を防止 */
+}
+
+/* フルスクリーンアプリモード時の設定 */
+@media (display-mode: fullscreen) {
+  body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+  }
+}
+
+/* スタンドアロンアプリモード時の設定 */
+@media (display-mode: standalone) {
+  body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+  }
+}
+
+/* iOS用の安全領域カバー - ノッチやホームインジケーターなど */
+@supports (padding: max(0px)) {
+  body {
+    padding-left: max(0px, env(safe-area-inset-left));
+    padding-right: max(0px, env(safe-area-inset-right));
+    padding-top: max(0px, env(safe-area-inset-top));
+    padding-bottom: max(0px, env(safe-area-inset-bottom));
+  }
+}
+
+/* iOSのPWAでのスクロールを優しくする */
+html.standalone, 
+html.fullscreen-mode {
+  -webkit-overflow-scrolling: touch;
+}
