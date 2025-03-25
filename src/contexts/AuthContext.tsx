@@ -21,6 +21,7 @@ interface UserProfile {
   id: string;
   fullname: string | null;
   facility_id: string | null;
+  role?: string | null;
 }
 
 interface AuthContextType {
@@ -43,8 +44,8 @@ const INACTIVITY_TIMEOUT = 30 * 60 * 1000;
 // セッション確認間隔（ミリ秒）- 5分に設定（元々は短い間隔だった可能性がある）
 const SESSION_CHECK_INTERVAL = 5 * 60 * 1000;
 
-// セッション確認の有効化フラグ - 特定のページでは false に設定することで確認を無効化できる
-let SESSION_CHECK_ENABLED = true;
+// セッション確認の有効化フラグ - デフォルトでは無効化（必要なページでのみ有効化する）
+let SESSION_CHECK_ENABLED = false;
 
 // データ取得タイムアウト（ミリ秒）- 15秒
 const DATA_FETCH_TIMEOUT = 15000;
@@ -77,15 +78,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 手動リロード - 状態をリセットしてからリロード
   const manualReload = () => {
     if (typeof window !== 'undefined') {
+      // キャッシュをクリア
+      clearAllAuthStorage();
+      console.log("AuthContext: 手動リロードを実行、キャッシュをクリア");
+      
       // 現在のURLを取得
       const currentUrl = window.location.href;
       
-      // ログインページへのリダイレクトならストレージをクリア
-      if (currentUrl.includes('/login')) {
-        clearAllAuthStorage();
-      }
+      // ステートをリセット
+      setUser(null);
+      setProfile(null);
+      setLastActivity(Date.now());
       
-      window.location.reload();
+      // 5msの遅延を設けてブラウザがステートの変更を処理するのを待つ
+      setTimeout(() => {
+        window.location.href = currentUrl;
+      }, 5);
     }
   };
 
@@ -141,58 +149,99 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   };
 
-  // プロファイル情報を取得する関数（キャッシュ対応）
-  const fetchProfileWithRetry = async (userId: string, maxRetries = MAX_RETRY_COUNT): Promise<{ data: UserProfile | null, error: any | null }> => {
-    // キャッシュされたプロファイルを確認
-    const cachedProfile = getCachedProfile();
-    if (cachedProfile) {
-      console.log("AuthContext: キャッシュされたプロファイルを使用");
-      return { data: cachedProfile, error: null };
-    }
+  // プロファイルキャッシュをクリア
+  const clearProfileCache = () => {
+    if (typeof window === 'undefined') return;
+    console.log("AuthContext: プロフィールキャッシュをクリア");
+    localStorage.removeItem(PROFILE_CACHE_KEY);
+  };
 
-    console.log(`AuthContext: プロファイル情報取得開始 (最大${maxRetries}回試行)`);
-    let retryAttempt = 0;
-    
-    while (retryAttempt < maxRetries) {
-      try {
-        if (retryAttempt > 0) {
-          setLoadingMessage(`プロファイル情報を再取得中... (${retryAttempt}/${maxRetries})`);
-        }
-        
-        console.log(`AuthContext: プロファイル取得試行 ${retryAttempt + 1}/${maxRetries}`);
-        
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('id, fullname, facility_id')
-          .eq('id', userId)
-          .single();
-          
-        if (data) {
-          console.log("AuthContext: プロファイル取得成功:", data);
-          // プロファイルをキャッシュ
-          setCachedProfile(data);
-          return { data, error: null };
-        }
-        
-        console.log("AuthContext: プロファイル取得失敗:", error);
-        
-        if (retryAttempt < maxRetries - 1) {
-          await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL));
-        }
-        
-        retryAttempt++;
-      } catch (e) {
-        console.error("AuthContext: プロファイル取得中に例外発生:", e);
-        
-        if (retryAttempt < maxRetries - 1) {
-          await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL));
-        }
-        
-        retryAttempt++;
+  // プロファイル情報を取得する関数（キャッシュ対応）
+  const fetchProfileWithRetry = async (userId: string, maxRetries = MAX_RETRY_COUNT, skipCache = false): Promise<{ data: UserProfile | null, error: any | null }> => {
+    // キャッシュをスキップするかチェック
+    if (skipCache) {
+      console.log("AuthContext: キャッシュをスキップしてプロフィールを取得");
+      clearProfileCache();
+    } else {
+      // キャッシュされたプロファイルを確認
+      const cachedProfile = getCachedProfile();
+      if (cachedProfile) {
+        console.log("AuthContext: キャッシュされたプロファイルを使用");
+        return { data: cachedProfile, error: null };
       }
     }
+
+    // リクエストが複数回実行されるのを防ぐためのフラグ
+    let isRequestCompleted = false;
     
-    return { data: null, error: new Error("プロファイル情報の取得に失敗しました") };
+    try {
+      console.log(`AuthContext: プロファイル情報取得開始 (最大${maxRetries}回試行)`);
+      let retryAttempt = 0;
+    
+      // タイムアウト処理
+      const timeoutPromise = new Promise<{ data: UserProfile | null, error: any | null }>((resolve) => {
+        setTimeout(() => {
+          if (!isRequestCompleted) {
+            console.log("AuthContext: プロファイル取得タイムアウト");
+            resolve({ data: null, error: new Error("タイムアウト") });
+          }
+        }, DATA_FETCH_TIMEOUT);
+      });
+      
+      // 実際のリクエスト処理
+      const fetchPromise = (async () => {
+        while (retryAttempt < maxRetries && !isRequestCompleted) {
+          try {
+            if (retryAttempt > 0) {
+              setLoadingMessage(`プロファイル情報を再取得中... (${retryAttempt}/${maxRetries})`);
+            }
+            
+            console.log(`AuthContext: プロファイル取得試行 ${retryAttempt + 1}/${maxRetries}`);
+            
+            const { data, error } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', userId)
+              .single();
+              
+            if (data) {
+              console.log("AuthContext: プロファイル取得成功:", data);
+              // プロファイルをキャッシュ
+              setCachedProfile(data);
+              isRequestCompleted = true;
+              return { data, error: null };
+            }
+            
+            console.log("AuthContext: プロファイル取得失敗:", error);
+            
+            if (retryAttempt < maxRetries - 1) {
+              await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL));
+            }
+            
+            retryAttempt++;
+          } catch (e) {
+            console.error("AuthContext: プロファイル取得中に例外発生:", e);
+            
+            if (retryAttempt < maxRetries - 1) {
+              await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL));
+            }
+            
+            retryAttempt++;
+          }
+        }
+        
+        isRequestCompleted = true;
+        return { data: null, error: new Error("プロファイル情報の取得に失敗しました") };
+      })();
+      
+      // タイムアウトとリクエストのどちらか早い方を待つ
+      const result = await Promise.race([timeoutPromise, fetchPromise]);
+      isRequestCompleted = true;
+      return result;
+    } catch (e) {
+      console.error("AuthContext: プロファイル取得処理で例外発生:", e);
+      return { data: null, error: e };
+    }
   };
 
   // ユーザーアクティビティを追跡
@@ -235,7 +284,148 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [user, lastActivity]);
 
-  // 定期的なセッション確認
+  // 初期化時とauth状態変更時にユーザー情報を取得
+  useEffect(() => {
+    console.log("AuthContext: 初期化処理を開始");
+    setLoadingState('authenticating');
+    setLoadingMessage('認証状態を確認中...');
+    
+    // セッション管理を一元化した初期化処理
+    const initializeAuth = async () => {
+      console.log("AuthContext: 認証初期化を開始");
+      setLoading(true);
+
+      try {
+        // まずキャッシュされたセッションをチェック
+        const cachedSession = getCachedSession();
+        if (cachedSession) {
+          console.log("AuthContext: キャッシュされたセッションを使用");
+          setUser(cachedSession.user);
+          
+          // キャッシュからプロファイルを取得
+          const cachedProfile = getCachedProfile();
+          if (cachedProfile) {
+            console.log("AuthContext: キャッシュされたプロファイルを使用");
+            setProfile(cachedProfile);
+            setLoading(false);
+            setLoadingState('idle');
+            setLoadingMessage('');
+            return;
+          }
+          
+          // プロファイルをキャッシュから取得できない場合は取得処理を実行
+          setLoadingState('loading-profile');
+          setLoadingMessage('プロファイル情報を読み込み中...');
+          
+          // プロファイル情報を取得（タイムアウトはfetchProfileWithRetry内で処理）
+          const { data: profileData, error: profileError } = await fetchProfileWithRetry(cachedSession.user.id, MAX_RETRY_COUNT, false);
+          
+          if (profileData) {
+            setProfile(profileData);
+            setLoadingState('idle');
+            setLoadingMessage('');
+          } else {
+            console.error("AuthContext: プロファイル取得エラー:", profileError?.message);
+            setProfile(null);
+            setLoadingState('error');
+            setLoadingMessage('プロファイル情報の取得に失敗しました。手動で再読み込みしてください。');
+          }
+          
+          setLoading(false);
+          return;
+        }
+
+        // キャッシュにセッションがない場合はサーバーから取得
+        const { data, error } = await supabase.auth.getSession();
+        
+        console.log("AuthContext: セッション初期化結果", { 
+          hasSession: !!data.session, 
+          userId: data.session?.user?.id || "なし",
+          error: error?.message || "なし",
+          timestamp: new Date().toISOString()
+        });
+
+        if (error) {
+          console.error("AuthContext: セッション初期化エラー:", error.message);
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
+          setLoadingState('error');
+          setLoadingMessage('セッションの取得に失敗しました');
+          return;
+        }
+
+        if (data.session?.user) {
+          console.log("AuthContext: セッション初期化成功、ユーザーID:", data.session.user.id);
+          setUser(data.session.user);
+          setCachedSession(data.session);
+          
+          setLoadingState('loading-profile');
+          setLoadingMessage('プロファイル情報を読み込み中...');
+          
+          // プロファイル情報を取得（タイムアウトはfetchProfileWithRetry内で処理）
+          const { data: profileData, error: profileError } = await fetchProfileWithRetry(data.session.user.id, MAX_RETRY_COUNT, true);
+
+          if (profileData) {
+            setProfile(profileData);
+            setLoadingState('idle');
+            setLoadingMessage('');
+          } else {
+            console.error("AuthContext: プロファイル取得エラー:", profileError?.message);
+            setProfile(null);
+            setLoadingState('error');
+            setLoadingMessage('プロファイル情報の取得に失敗しました。手動で再読み込みしてください。');
+          }
+        } else {
+          console.log("AuthContext: アクティブなセッションなし");
+          setUser(null);
+          setProfile(null);
+          setLoadingState('idle');
+          setLoadingMessage('');
+        }
+      } catch (error) {
+        console.error("AuthContext: 初期化エラー:", error);
+        setUser(null);
+        setProfile(null);
+        setLoadingState('error');
+        setLoadingMessage('予期せぬエラーが発生しました');
+      } finally {
+        console.log("AuthContext: 初期化完了");
+        setLoading(false);
+      }
+    };
+
+    initializeAuth();
+
+    // 認証状態の変更をリッスンする関数を定義
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("AuthContext: 認証状態変更イベント:", event);
+      
+      // ユーザー状態を更新
+      if (session?.user) {
+        setUser(session.user);
+        setCachedSession(session);
+      } else {
+        setUser(null);
+        setProfile(null);
+      }
+      
+      // ログイン時のみプロファイル情報を取得
+      if (event === 'SIGNED_IN' && session?.user) {
+        setLoadingState('loading-profile');
+        setLoadingMessage('プロファイル情報を読み込み中...');
+        
+        fetchUserAndProfile(session.user.id);
+      }
+    });
+
+    // クリーンアップ関数
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  // 定期的なセッション確認の設定
   useEffect(() => {
     if (!user) return;
     if (!SESSION_CHECK_ENABLED) {
@@ -243,24 +433,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    console.log("AuthContext: 定期的なセッション確認を開始");
+    // セッション確認が有効な場合のみログ出力
+    console.log("AuthContext: 定期的なセッション確認を開始（" + SESSION_CHECK_INTERVAL/60000 + "分間隔）");
     
     const sessionCheckInterval = setInterval(async () => {
+      // セッション確認をスキップする条件
+      if (!SESSION_CHECK_ENABLED) {
+        return;
+      }
+
       try {
         // キャッシュされたセッションを確認
         const cachedSession = getCachedSession();
         if (cachedSession) {
-          console.log("AuthContext: キャッシュされたセッションを使用");
+          // キャッシュがある場合は詳細ログは出力しない
           return;
         }
-
-        // セッション確認をスキップする条件
-        if (!SESSION_CHECK_ENABLED) {
-          console.log("AuthContext: セッション確認はスキップされました");
-          return;
+        
+        // デバッグモードが有効な場合のみ詳細ログを出力（本番環境では出力しない）
+        if (process.env.NODE_ENV === 'development') {
+          console.log("AuthContext: セッションの有効性を確認中...");
         }
-
-        console.log("AuthContext: セッションの有効性を確認中...");
+        
         const { data, error } = await supabase.auth.getSession();
         
         if (error || !data.session) {
@@ -284,7 +478,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user, router]);
 
   // ユーザー情報とプロファイル情報を取得
-  const fetchUserAndProfile = async () => {
+  const fetchUserAndProfile = async (userId: string) => {
     try {
       console.log("fetchUserAndProfile: ユーザー情報とプロファイル情報の取得を開始");
       setLoadingState('authenticating');
@@ -335,143 +529,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false); // 常にロード完了時にloadingをfalseに設定
     }
   };
-
-  // 初期化時とauth状態変更時にユーザー情報を取得
-  useEffect(() => {
-    console.log("AuthContext: 初期化処理を開始");
-    setLoadingState('authenticating');
-    setLoadingMessage('認証状態を確認中...');
-    
-    // セッション管理を一元化した初期化処理
-    const initializeAuth = async () => {
-      console.log("AuthContext: 認証初期化を開始");
-      setLoading(true);
-
-      try {
-        // タイムアウトなしでセッション取得
-        const { data, error } = await supabase.auth.getSession();
-        
-        console.log("AuthContext: セッション初期化結果", { 
-          hasSession: !!data.session, 
-          userId: data.session?.user?.id || "なし",
-          error: error?.message || "なし",
-          timestamp: new Date().toISOString()
-        });
-
-        if (error) {
-          console.error("AuthContext: セッション初期化エラー:", error.message);
-          setUser(null);
-          setProfile(null);
-          setLoading(false);
-          setLoadingState('error');
-          setLoadingMessage('セッションの取得に失敗しました');
-          return;
-        }
-
-        if (data.session?.user) {
-          console.log("AuthContext: セッション初期化成功、ユーザーID:", data.session.user.id);
-          setUser(data.session.user);
-          setLoadingState('loading-profile');
-          setLoadingMessage('プロファイル情報を読み込み中...');
-          
-          // タイムアウトを設定
-          const fetchTimeout = setTimeout(() => {
-            handleProfileTimeout();
-          }, DATA_FETCH_TIMEOUT);
-          
-          // プロファイル情報を取得（再試行ロジック使用）
-          const { data: profileData, error: profileError } = await fetchProfileWithRetry(data.session.user.id);
-
-          // タイムアウトをクリア
-          clearTimeout(fetchTimeout);
-
-          if (!profileData) {
-            console.error("AuthContext: プロファイル取得エラー:", profileError?.message);
-            setProfile(null);
-            setLoadingState('error');
-            setLoadingMessage('プロファイル情報の取得に失敗しました。手動で再読み込みしてください。');
-          } else {
-            console.log("AuthContext: プロファイル取得成功:", profileData);
-            setProfile(profileData);
-            setLoadingState('idle');
-            setLoadingMessage('');
-          }
-        } else {
-          console.log("AuthContext: 有効なセッションなし");
-          setUser(null);
-          setProfile(null);
-          setLoadingState('idle');
-          setLoadingMessage('');
-        }
-      } catch (e) {
-        console.error("AuthContext: 認証初期化中に例外発生:", e);
-        setUser(null);
-        setProfile(null);
-        setLoadingState('error');
-        setLoadingMessage('認証処理中にエラーが発生しました');
-      } finally {
-        setLoading(false);
-        console.log("AuthContext: 認証初期化完了");
-      }
-    };
-    
-    // 初期化処理を実行
-    initializeAuth();
-    
-    // 認証状態変更のリスナー
-    console.log("AuthContext: 認証状態変更リスナーを設定");
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log("AuthContext: 認証状態変更イベント:", event, "セッション:", session?.user?.id || 'なし');
-        
-        if (session?.user) {
-          console.log("AuthContext: 認証状態変更 - ユーザーあり:", session.user.id);
-          setUser(session.user);
-          setLoadingState('loading-profile');
-          setLoadingMessage('プロファイル情報を読み込み中...');
-          
-          // タイムアウトを設定
-          const fetchTimeout = setTimeout(() => {
-            handleProfileTimeout();
-          }, DATA_FETCH_TIMEOUT);
-          
-          // プロファイル情報を取得（再試行ロジック使用）
-          const { data: profileData, error: profileError } = await fetchProfileWithRetry(session.user.id);
-          
-          // タイムアウトをクリア
-          clearTimeout(fetchTimeout);
-          
-          if (!profileData) {
-            console.error('AuthContext: 状態変更後のプロファイル取得失敗:', profileError);
-            setProfile(null);
-            setLoadingState('error');
-            setLoadingMessage('プロファイル情報の取得に失敗しました。手動で再読み込みしてください。');
-          } else {
-            console.log("AuthContext: 状態変更後のプロファイル取得成功:", profileData);
-            setProfile(profileData);
-            setLoadingState('idle');
-            setLoadingMessage('');
-          }
-          
-          // 明示的にローディング状態を解除
-          console.log("AuthContext: 認証状態変更処理完了 - loading=false に設定");
-          setLoading(false);
-        } else {
-          console.log("AuthContext: 認証状態変更 - ユーザーなし");
-          setUser(null);
-          setProfile(null);
-          setLoading(false);
-          setLoadingState('idle');
-          setLoadingMessage('');
-        }
-      }
-    );
-
-    return () => {
-      console.log("AuthContext: クリーンアップ - リスナー解除");
-      subscription.unsubscribe();
-    };
-  }, []);
 
   // ログイン処理
   const signIn = async (email: string, password: string) => {
@@ -540,8 +597,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setLoading(false);
         }, DATA_FETCH_TIMEOUT);
         
-        // プロファイル情報を取得（再試行ロジック使用）
-        const { data: profileData, error: profileError } = await fetchProfileWithRetry(data.user.id, 5); // ログイン時は最大5回試行
+        // プロファイル情報を取得（再試行ロジック使用、キャッシュをスキップ）
+        const { data: profileData, error: profileError } = await fetchProfileWithRetry(data.user.id, MAX_RETRY_COUNT, true);
         
         // タイムアウトをクリア
         clearTimeout(profileTimeout);
@@ -628,7 +685,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq('id', user.id);
 
       if (!error) {
-        setProfile(prev => prev ? { ...prev, ...data } : null);
+        // プロフィール状態を更新
+        const newProfile = profile ? { ...profile, ...data } : null;
+        setProfile(newProfile);
+        
+        // キャッシュも更新
+        if (newProfile) {
+          console.log("AuthContext: プロフィール更新後、キャッシュも更新");
+          setCachedProfile(newProfile);
+        }
+        
         setLoadingState('idle');
         setLoadingMessage('');
       } else {

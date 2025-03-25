@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景 - 白 -->
+  <rect width="180" height="180" rx="45" fill="white" />
+  
+  <!-- フラスコのベース -->
+  <path d="M90 40C83 40 77 46 77 53V76C77 76 77 88 62 106C47 124 51 145 90 145C129 145 133 124 118 106C103 88 103 76 103 76V53C103 46 97 40 90 40Z" fill="white" stroke="black" stroke-width="6"/>
+  
+  <!-- フラスコの首 -->
+  <path d="M83 50H97V73H83V50Z" fill="white" stroke="black" stroke-width="3"/>
+  
+  <!-- フラスコのふた -->
+  <rect x="81" y="40" width="18" height="10" rx="3" fill="black"/>
+  
+  <!-- 液体 - ピンク -->
+  <path d="M90 83C83 83 79 90 79 93V100C79 100 79 110 60 130C41 150 49 140 90 140C131 140 139 150 120 130C101 110 101 100 101 100V93C101 90 97 83 90 83Z" fill="#fcd1e8"/>
+  
+  <!-- 小さなハート -->
+  <path d="M98 96C102 92 108 92 112 96C116 100 116 106 112 110L90 132L68 110C64 106 64 100 68 96C72 92 78 92 82 96L90 104L98 96Z" fill="#ff6b95"/>
+  
+  <!-- グラデーション定義 -->
+  <defs>
+    <linearGradient id="paint0_linear" x1="0" y1="0" x2="180" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fcd1e8"/>
+      <stop offset="1" stop-color="#8167a9"/>
+    </linearGradient>
+  </defs>
+</svg>

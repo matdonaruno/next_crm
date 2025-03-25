@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="2732" height="2732" viewBox="0 0 2732 2732" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景 - 白 -->
+  <rect width="2732" height="2732" fill="white" />
+  
+  <!-- アプリアイコン - 中央に配置 -->
+  <g transform="translate(1116, 1016)">
+    <!-- フラスコのベース -->
+    <path d="M250 0C216 0 188 28 188 62V202C188 202 188 262 113 350C38 438 58 544 250 544C442 544 462 438 387 350C312 262 312 202 312 202V62C312 28 284 0 250 0Z" fill="white" stroke="black" stroke-width="24"/>
+    
+    <!-- フラスコの首 -->
+    <path d="M216 40H284V180H216V40Z" fill="white" stroke="black" stroke-width="12"/>
+    
+    <!-- フラスコのふた -->
+    <rect x="208" y="0" width="84" height="40" rx="8" fill="black"/>
+    
+    <!-- 液体 - ピンク -->
+    <path d="M250 230C216 230 200 260 200 270V310C200 310 200 350 138 420C76 490 102 520 250 520C398 520 424 490 362 420C300 350 300 310 300 310V270C300 260 284 230 250 230Z" fill="#fcd1e8"/>
+    
+    <!-- ハート -->
+    <path d="M280 300C300 280 330 280 350 300C370 320 370 350 350 370L250 470L150 370C130 350 130 320 150 300C170 280 200 280 220 300L250 330L280 300Z" fill="#ff6b95"/>
+  </g>
+  
+  <!-- アプリ名 -->
+  <text x="1366" y="1750" text-anchor="middle" font-family="'Montserrat', sans-serif" font-size="120" font-weight="700" fill="black">Labo Logbook</text>
+</svg> 

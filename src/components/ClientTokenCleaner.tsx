@@ -11,6 +11,7 @@ export function ClientTokenCleaner() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const isLoginPage = pathname === '/login' || pathname === '/direct-login';
+  const isRootPage = pathname === '/';
   const redirectedRef = useRef(false);
   const lastPathRef = useRef(pathname);
   const [redirecting, setRedirecting] = useState(false);
@@ -18,7 +19,7 @@ export function ClientTokenCleaner() {
   // セッション管理の改善
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      console.log("ClientTokenCleaner: 初期化", { isLoginPage, loading });
+      console.log("ClientTokenCleaner: 初期化", { isLoginPage, isRootPage, loading });
       
       // ローディング中やリダイレクト中は処理をスキップ
       if (loading || redirecting) {
@@ -58,8 +59,8 @@ export function ClientTokenCleaner() {
         return;
       }
       
-      // 未ログインなら保護ページからログインページへリダイレクト
-      if (!user && !isLoginPage && !redirectedRef.current) {
+      // 未ログインなら保護ページからログインページへリダイレクト（ルートページは除外）
+      if (!user && !isLoginPage && !isRootPage && !redirectedRef.current) {
         console.log("ClientTokenCleaner: 未ログインユーザーをログインページへリダイレクト");
         redirectedRef.current = true;
         setRedirecting(true);
@@ -136,7 +137,7 @@ export function ClientTokenCleaner() {
       // 初期化時にセッションを確認
       checkSession();
     }
-  }, [isLoginPage, loading, user, router, redirecting]);
+  }, [isLoginPage, isRootPage, loading, user, router, redirecting]);
   
   // パスが変わったらリダイレクトフラグをリセット
   useEffect(() => {

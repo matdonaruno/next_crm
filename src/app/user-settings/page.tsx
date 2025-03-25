@@ -195,7 +195,11 @@ export default function UserSettings() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-pink-50 to-purple-50">
-      <AppHeader showBackButton={true} title="ユーザー設定" />
+      <AppHeader 
+        showBackButton={true} 
+        title="Your Profile" 
+        icon={<UserRound className="h-6 w-6 text-pink-400" />}
+      />
       
       <div className="container mx-auto px-4 py-6">
         <Card className="max-w-md mx-auto mt-8 border-pink-200 shadow-md">

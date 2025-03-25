@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppHeader } from '@/components/ui/app-header';
 import { cacheDepartments, getCachedDepartments } from '@/lib/departmentCache';
+import { setSessionCheckEnabled } from '@/contexts/AuthContext';
 
 interface Department {
     id: string;
@@ -24,6 +25,11 @@ export default function Home() {
   const [currentUserName, setCurrentUserName] = useState("");
   const [facilityName, setFacilityName] = useState("");
   const menuIconRef = useRef<HTMLDivElement>(null);
+  
+  // セッション確認を無効化
+  useEffect(() => {
+    setSessionCheckEnabled(false);
+  }, []);
   
   // 認証とプロファイルチェックe
   useEffect(() => {

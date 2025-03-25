@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import Cookies from 'js-cookie';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSessionCheck } from '@/hooks/useSessionCheck';
+import { setSessionCheckEnabled } from '@/contexts/AuthContext';
 
 const AuthForm = () => {
   const router = useRouter();
@@ -22,6 +23,15 @@ const AuthForm = () => {
   const [authLoading, setAuthLoading] = useState(false);
   const [error, setError] = useState("");
   const [redirecting, setRedirecting] = useState(false);
+
+  // ログインページでのみセッション確認を有効化
+  useEffect(() => {
+    setSessionCheckEnabled(true);
+    return () => {
+      // ページから離れる際に無効化
+      setSessionCheckEnabled(false);
+    };
+  }, []);
 
   // ページロード時に既存のセッションをクリア
   useEffect(() => {
@@ -100,9 +110,6 @@ const AuthForm = () => {
       }, 1000);
     }
   }, [redirecting, user]);
-
-  // ログインページでは完全なセッション確認を有効にする
-  useSessionCheck(true, []);
 
   const handleAuth = async () => {
     setError("");

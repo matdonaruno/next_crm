@@ -2,6 +2,58 @@
 
 臨床検査試薬管理システム
 
+## PWA対応について
+
+このアプリはPWA（Progressive Web App）として実装されており、モバイルデバイスやiPadでホーム画面に追加して利用できます。
+
+### iPad/iOS向けの最適化
+
+iPadやiOS端末で最適に動作するために、以下の対応を行っています：
+
+1. **Apple固有のメタタグ**：
+   - `apple-mobile-web-app-capable`
+   - `apple-mobile-web-app-status-bar-style`
+   - `apple-touch-icon`（各種サイズ）
+
+2. **スプラッシュスクリーン**：
+   - 各iPadモデル用のスプラッシュスクリーンを用意
+   - 縦向き・横向き両方に対応
+
+3. **マニフェストファイル**：
+   - PWA用のマニフェストファイルが `/public/manifest.json` に配置されています
+   - 各種アイコンとアプリ情報が含まれています
+
+### PWAアイコンの生成
+
+開発者向け：アイコンを変更する場合は以下の手順でPWAアセットを生成できます：
+
+1. SVGファイルを用意：
+   - `/public/icons/app-icon.svg` - 標準アイコン
+   - `/public/icons/apple-touch-icon.svg` - Appleデバイス用アイコン
+   - `/public/icons/splash-template.svg` - スプラッシュスクリーン
+
+2. 変換スクリプトを実行：
+   ```bash
+   # セットアップスクリプトを実行
+   npm run setup-pwa
+   
+   # ImageMagickがインストールされていれば、アイコン生成
+   npm run generate-pwa-icons
+   ```
+
+3. 生成されたアイコンは `/public/icons/` ディレクトリに保存されます
+
+### ホーム画面への追加方法
+
+1. **iPadの場合**：
+   - Safariでアプリを開く
+   - 共有ボタンをタップ
+   - 「ホーム画面に追加」を選択
+
+2. **Androidの場合**：
+   - Chromeでアプリを開く
+   - メニューから「ホーム画面に追加」を選択
+
 ## ダミーJANコードの採番手法
 
 システム内で使用されるダミーJANコードは以下の方法で生成されています：

@@ -1,100 +1,39 @@
 // src/app/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabaseClient';
 
 export default function Home() {
-  const router = useRouter();
   const { user, loading } = useAuth();
-  const [isRedirecting, setIsRedirecting] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     const checkAuthAndRedirect = async () => {
-      console.log("Home: 認証状態チェック", { 
-        userId: user?.id || 'なし', 
-        loading, 
-        isRedirecting,
-        timestamp: new Date().toISOString()
-      });
+      console.log('Auth state:', { user, loading });
       
-      // すでにリダイレクト中なら処理しない
-      if (isRedirecting) {
-        console.log("Home: すでにリダイレクト中のため処理をスキップ");
-        return;
+      if (!loading && user) {
+        console.log('User is authenticated, redirecting to /depart');
+        router.push('/depart');
       }
-      
-      // ロード中は何もしない（UXを改善するためにローディング表示は表示する）
-      if (loading) {
-        console.log("Home: 認証情報ロード中のため処理を延期");
-        return;
-      }
-      
-      // ユーザーが認証済みの場合、departページに直接リダイレクト
-      if (user) {
-        console.log("Home: 認証済みユーザーを検出、departページへリダイレクト", user.id);
-        setIsRedirecting(true);
-        
-        // 明示的にリダイレクト処理を実行
-        try {
-          console.log("Home: リダイレクト処理を実行開始 (/depart)");
-          router.push('/depart');
-          console.log("Home: リダイレクト処理を実行完了 (/depart)");
-        } catch (e) {
-          console.error("Home: リダイレクト中にエラー発生:", e);
-          setIsRedirecting(false); // エラー時はリダイレクトフラグをリセット
-        }
-        return;
-      }
-      
-      // 認証されていない場合はここでセッションを確認する必要はない
-      // ユーザーはログインページに留まる
-      console.log("Home: 認証されていないユーザー、ログインページを表示");
     };
-    
-    // 初回マウント時に一度だけ実行
+
     checkAuthAndRedirect();
+  }, [user, loading, router]);
 
-    // 5秒後に認証状態確認を再試行（万が一の対策）
-    const timeoutId = setTimeout(() => {
-      if (loading) {
-        console.log("Home: 認証状態が5秒以上ロード中の状態です。リセットします。");
-        // 万が一の場合の対応策
-        window.location.reload();
-      }
-    }, 5000);
-
-    return () => {
-      clearTimeout(timeoutId);
-    };
-  }, [user, loading, router, isRedirecting]);
-
-  // ロード中は適切なローディング表示を行う
-  if (loading || isRedirecting) {
+  if (loading) {
     return (
       <div className="w-full min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="text-2xl font-bold mb-4">Labo Logbook</div>
           <div className="text-gray-600">読み込み中...</div>
-          {loading && (
-            <div className="mt-2 text-xs text-gray-500">
-              認証情報を確認しています...
-            </div>
-          )}
-          {isRedirecting && (
-            <div className="mt-2 text-xs text-gray-500">
-              リダイレクト中...
-            </div>
-          )}
         </div>
       </div>
     );
   }
 
-  // 未認証の場合のみホームページを表示
   return (
     <div className="header w-full min-h-screen relative">
       {/* ヘッダー内ロゴ部分 */}
@@ -140,7 +79,7 @@ export default function Home() {
       </div>
       {/* フッターコンテンツ */}
       <div className="content flex">
-        <p>© 2024 Labo Logbook</p>
+        <p>© 2025 Labo Logbook</p>
       </div>
     </div>
   );

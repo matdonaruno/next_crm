@@ -103,8 +103,8 @@ export default function TemperatureManagementClient() {
   // シンプルな認証フックを使用
   const { user, loading: authLoading } = useSimpleAuth();
   
-  // このページではセッション確認を必要最小限にする
-  useSessionCheck(true, []);
+  // このページではセッション確認を無効化
+  useSessionCheck(false, []);
   
   // ユーザーがログインしていない場合はログインページにリダイレクト
   useEffect(() => {
@@ -112,19 +112,6 @@ export default function TemperatureManagementClient() {
       router.push('/login');
     }
   }, [authLoading, user, router]);
-
-  // セッション確認の無効化
-  useEffect(() => {
-    // コンポーネントのマウント時にセッション確認を無効化
-    setSessionCheckEnabled(false);
-    console.log("TemperatureManagement: セッション確認を無効化しました");
-    
-    // クリーンアップ時（コンポーネントのアンマウント時）にセッション確認を再度有効化
-    return () => {
-      setSessionCheckEnabled(true);
-      console.log("TemperatureManagement: セッション確認を再有効化しました");
-    };
-  }, []);
 
   useEffect(() => {
     if (!departmentId) return;

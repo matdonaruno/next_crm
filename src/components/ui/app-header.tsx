@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { ReactNode, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { createClient } from '@/utils/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 
 // 通知コンポーネントを動的にインポート（サーバーサイドレンダリングを無効化）
 const UserNotifications = dynamic(() => import('@/components/UserNotifications'), {
@@ -28,29 +28,27 @@ const tooltipTextStyle = { color: 'white' };
 
 export function AppHeader({ showBackButton = true, title, onBackClick, icon }: AppHeaderProps) {
   const router = useRouter();
-  const supabase = createClient();
+  const { user, profile, loading, signOut } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
 
   // ユーザーの権限を確認
   useEffect(() => {
-    async function checkUserRole() {
-      const { data: { user } } = await supabase.auth.getUser();
+    if (!loading && profile) {
+      console.log('ユーザープロフィール (詳細):', JSON.stringify(profile, null, 2));
+      console.log('プロフィールのキー:', Object.keys(profile));
+      console.log('ユーザーロール:', profile.role);
       
-      if (user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single();
-        
-        if (profile && (profile.role === 'superuser' || profile.role === 'facility_admin')) {
-          setIsAdmin(true);
-        }
+      if (profile.role === 'superuser' || profile.role === 'facility_admin') {
+        setIsAdmin(true);
+        console.log('管理者権限を確認しました。isAdmin:', true);
+      } else {
+        setIsAdmin(false);
+        console.log('一般ユーザー権限を確認しました。isAdmin:', false, 'ロール値:', profile.role);
       }
+    } else {
+      console.log('ロード中またはプロフィールがありません:', { loading, profile });
     }
-    
-    checkUserRole();
-  }, [supabase]);
+  }, [profile, loading]);
 
   // 前の画面に戻る関数
   const handleGoBack = () => {
@@ -139,7 +137,7 @@ export function AppHeader({ showBackButton = true, title, onBackClick, icon }: A
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={() => router.push("/login")}>
+                <Button variant="ghost" size="icon" onClick={signOut}>
                   <LogOut className="h-5 w-5" />
                 </Button>
               </TooltipTrigger>

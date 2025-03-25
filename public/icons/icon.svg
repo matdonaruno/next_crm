@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景 - グラデーション -->
+  <rect width="1024" height="1024" rx="224" fill="url(#paint0_linear)" />
+  
+  <!-- フラスコのベース -->
+  <path d="M512 240C478 240 450 268 450 302V442C450 442 450 502 375 590C300 678 320 784 512 784C704 784 724 678 649 590C574 502 574 442 574 442V302C574 268 546 240 512 240Z" fill="white" stroke="#8167a9" stroke-width="24"/>
+  
+  <!-- フラスコの首 -->
+  <path d="M478 280H546V420H478V280Z" fill="white" stroke="#8167a9" stroke-width="12"/>
+  
+  <!-- フラスコのふた -->
+  <rect x="470" y="240" width="84" height="40" rx="8" fill="#8167a9"/>
+  
+  <!-- 液体 - ピンク -->
+  <path d="M512 470C478 470 462 500 462 510V550C462 550 462 590 400 660C338 730 364 760 512 760C660 760 686 730 624 660C562 590 562 550 562 550V510C562 500 546 470 512 470Z" fill="#fcd1e8"/>
+  
+  <!-- バブル1 -->
+  <circle cx="480" cy="620" r="15" fill="white" fill-opacity="0.8"/>
+  
+  <!-- バブル2 -->
+  <circle cx="530" cy="580" r="10" fill="white" fill-opacity="0.8"/>
+  
+  <!-- バブル3 -->
+  <circle cx="510" cy="640" r="20" fill="white" fill-opacity="0.8"/>
+  
+  <!-- バブル4 -->
+  <circle cx="545" cy="610" r="8" fill="white" fill-opacity="0.8"/>
+
+  <!-- 愛心マーク -->
+  <path d="M550 544C560 534 575 534 585 544C595 554 595 569 585 579L512 652L439 579C429 569 429 554 439 544C449 534 464 534 474 544L512 582L550 544Z" fill="#ff6b95"/>
+  
+  <!-- グラデーション定義 -->
+  <defs>
+    <linearGradient id="paint0_linear" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fcd1e8"/>
+      <stop offset="1" stop-color="#dccbf8"/>
+    </linearGradient>
+  </defs>
+</svg> 

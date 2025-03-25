@@ -13,10 +13,10 @@ export function useSessionCheck(enabled: boolean = true, dependencies: any[] = [
     console.log(`セッション確認を${enabled ? '有効化' : '無効化'}します`);
     setSessionCheckEnabled(enabled);
     
-    // クリーンアップ時に元の状態に戻す
+    // クリーンアップ時に無効化
     return () => {
-      console.log('セッション確認の状態をリセットします');
-      setSessionCheckEnabled(true); // デフォルトは有効に戻す
+      console.log('セッション確認を無効化します（クリーンアップ）');
+      setSessionCheckEnabled(false); // コンポーネントがアンマウントされた時点で無効化
     };
   }, dependencies);
 } 

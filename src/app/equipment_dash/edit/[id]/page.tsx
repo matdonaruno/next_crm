@@ -44,7 +44,7 @@ export default function EditEquipmentPage() {
   
   // 認証と設定
   const { user } = useAuth();
-  useSessionCheck(true, []);
+  useSessionCheck(false, []);
   
   // 状態管理（未使用の変数にはアンダースコアを付けて警告を抑制）
   const [_equipment, setEquipment] = useState<Equipment | null>(null);

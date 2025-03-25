@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -18,7 +18,7 @@ interface Notification {
 }
 
 export default function UserNotifications() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
@@ -26,6 +26,8 @@ export default function UserNotifications() {
 
   // 通知を取得
   useEffect(() => {
+    let mounted = true;
+
     async function fetchNotifications() {
       const { data, error } = await supabase
         .from('user_notifications')
@@ -38,9 +40,11 @@ export default function UserNotifications() {
         return;
       }
 
-      setNotifications(data || []);
-      setUnreadCount(data?.filter(n => !n.is_read).length || 0);
-      setLoading(false);
+      if (mounted) {
+        setNotifications(data || []);
+        setUnreadCount(data?.filter(n => !n.is_read).length || 0);
+        setLoading(false);
+      }
     }
 
     fetchNotifications();
@@ -56,15 +60,18 @@ export default function UserNotifications() {
           table: 'user_notifications',
         },
         () => {
-          fetchNotifications();
+          if (mounted) {
+            fetchNotifications();
+          }
         }
       )
       .subscribe();
 
     return () => {
+      mounted = false;
       supabase.removeChannel(channel);
     };
-  }, [supabase]);
+  }, []); // supabaseを依存配列から削除
 
   // 通知を既読にする
   const markAsRead = async (notificationId: string) => {

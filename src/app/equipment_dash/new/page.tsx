@@ -31,7 +31,7 @@ function EquipmentPageContent() {
   
   // 認証と設定
   const { user } = useAuth();
-  useSessionCheck(true, []);
+  useSessionCheck(false, []);
   
   // 状態管理
   const [equipmentName, setEquipmentName] = useState('');

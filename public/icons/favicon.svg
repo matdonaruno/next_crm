@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景 - 白 -->
+  <rect width="64" height="64" rx="8" fill="white" />
+  
+  <!-- フラスコのベース -->
+  <path d="M32 15C30 15 28 17 28 19V27C28 27 28 31 24 37C20 43 21 49 32 49C43 49 44 43 40 37C36 31 36 27 36 27V19C36 17 34 15 32 15Z" fill="white" stroke="black" stroke-width="2.5"/>
+  
+  <!-- フラスコの首 -->
+  <path d="M30 17H34V27H30V17Z" fill="white" stroke="black" stroke-width="1.5"/>
+  
+  <!-- フラスコのふた -->
+  <rect x="29" y="15" width="6" height="3" rx="1" fill="black"/>
+  
+  <!-- 液体 - ピンク -->
+  <path d="M32 29C30 29 29 31 29 32V34C29 34 29 37 25 41C21 45 23 47 32 47C41 47 43 45 39 41C35 37 35 34 35 34V32C35 31 34 29 32 29Z" fill="#fcd1e8"/>
+  
+  <!-- 小さなハート -->
+  <path d="M34 34C35 33 37 33 38 34C39 35 39 37 38 38L32 44L26 38C25 37 25 35 26 34C27 33 29 33 30 34L32 36L34 34Z" fill="#ff6b95"/>
+</svg> 

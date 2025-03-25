@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/utils/supabase/client';
+import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -22,7 +22,6 @@ const ROLE_OPTIONS = [
 ];
 
 export default function UserManagement() {
-  const supabase = createClient();
   const router = useRouter();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
@@ -78,7 +77,7 @@ export default function UserManagement() {
     }
     
     checkUserRole();
-  }, [supabase, router, toast]);
+  }, [router, toast]);
   
   // 現在のユーザーの施設情報を取得
   useEffect(() => {
@@ -98,7 +97,7 @@ export default function UserManagement() {
     }
     
     fetchCurrentUserFacility();
-  }, [supabase]);
+  }, []);
   
   // 部門の取得
   useEffect(() => {
@@ -109,13 +108,13 @@ export default function UserManagement() {
           .from('departments')
           .select('*')
           .eq('facility_id', currentUserFacilityId);
-          
+        
         setDepartments(departmentsData || []);
       }
     }
     
     fetchDepartments();
-  }, [supabase, currentUserFacilityId]);
+  }, [currentUserFacilityId]);
   
   // 招待リストと既存ユーザーの取得
   useEffect(() => {
@@ -123,53 +122,19 @@ export default function UserManagement() {
       setLoading(true);
       
       try {
-        // 招待リストの取得
+        // 招待リストの取得（クエリを簡素化）
         const { data: invitationsData, error: invitationsError } = await supabase
           .from('user_invitations')
           .select(`
             *,
-            facilities(name),
-            invited_by_profiles:profiles!user_invitations_invited_by_fkey(full_name, username)
+            facilities(name)
           `)
           .order('created_at', { ascending: false });
         
         if (invitationsError) {
           console.error('招待リスト取得エラー:', invitationsError);
         } else {
-          // 招待データに部門情報を追加
-          if (invitationsData && invitationsData.length > 0) {
-            // 部門IDを持つ招待だけフィルタリング
-            const invitationsWithDeptIds = invitationsData.filter(inv => inv.department_id);
-            
-            if (invitationsWithDeptIds.length > 0) {
-              // 部門情報を別途取得
-              const { data: departmentsData } = await supabase
-                .from('departments')
-                .select('id, name')
-                .in('id', invitationsWithDeptIds.map(inv => inv.department_id));
-              
-              // 招待データに部門情報をマージ
-              const enrichedInvitations = invitationsData.map(invitation => {
-                if (invitation.department_id && departmentsData) {
-                  const department = departmentsData.find(dept => dept.id === invitation.department_id);
-                  return {
-                    ...invitation,
-                    departments: department || null
-                  };
-                }
-                return {
-                  ...invitation,
-                  departments: null
-                };
-              });
-              
-              setInvitations(enrichedInvitations);
-            } else {
-              setInvitations(invitationsData);
-            }
-          } else {
-            setInvitations([]);
-          }
+          setInvitations(invitationsData || []);
         }
         
         // 既存ユーザーリストの取得
@@ -184,40 +149,7 @@ export default function UserManagement() {
         if (usersError) {
           console.error('ユーザーリスト取得エラー:', usersError);
         } else {
-          // ユーザーデータに部門情報を追加
-          if (usersData && usersData.length > 0) {
-            // 部門IDを持つユーザーだけフィルタリング
-            const usersWithDeptIds = usersData.filter(user => user.department_id);
-            
-            if (usersWithDeptIds.length > 0) {
-              // 部門情報を別途取得
-              const { data: departmentsData } = await supabase
-                .from('departments')
-                .select('id, name')
-                .in('id', usersWithDeptIds.map(user => user.department_id));
-              
-              // ユーザーデータに部門情報をマージ
-              const enrichedUsers = usersData.map(user => {
-                if (user.department_id && departmentsData) {
-                  const department = departmentsData.find(dept => dept.id === user.department_id);
-                  return {
-                    ...user,
-                    departments: department || null
-                  };
-                }
-                return {
-                  ...user,
-                  departments: null
-                };
-              });
-              
-              setUsers(enrichedUsers);
-            } else {
-              setUsers(usersData);
-            }
-          } else {
-            setUsers([]);
-          }
+          setUsers(usersData || []);
         }
       } catch (error) {
         console.error('データ取得エラー:', error);
@@ -227,7 +159,7 @@ export default function UserManagement() {
     }
     
     fetchInvitationsAndUsers();
-  }, [supabase, activeTab]);
+  }, [activeTab]);
   
   // 新規ユーザー招待
   const handleInvite = async (e: React.FormEvent) => {
@@ -255,7 +187,7 @@ export default function UserManagement() {
           email,
           role,
           facilityId: currentUserFacilityId,
-          departmentId: departmentId || null
+          departmentId: null // 部門IDはnullに設定
         }),
       });
       
@@ -274,16 +206,13 @@ export default function UserManagement() {
       // フォームをリセット
       setEmail('');
       setRole('regular_user');
-      setDepartmentId('');
       
       // 招待リストを更新
       const { data: invitationsData } = await supabase
         .from('user_invitations')
         .select(`
           *,
-          facilities(name),
-          departments(name),
-          invited_by_profiles:profiles!user_invitations_invited_by_fkey(full_name, username)
+          facilities(name)
         `)
         .order('created_at', { ascending: false });
       
@@ -413,39 +342,57 @@ export default function UserManagement() {
   };
   
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-gradient-to-b from-pink-50 to-purple-50">
       <AppHeader 
         showBackButton={true}
         title="ユーザー管理"
-        icon={<Users className="h-6 w-6 text-primary" />}
+        icon={<Users className="h-6 w-6 text-pink-400" />}
       />
       
       {isCheckingAuth ? (
         <div className="flex justify-center items-center h-screen">
-          <p>認証確認中...</p>
+          <LoadingUI />
         </div>
       ) : isAuthorized ? (
-        <div className="container mx-auto p-4">
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="mb-4">
-              <TabsTrigger value="invite">ユーザー招待</TabsTrigger>
-              <TabsTrigger value="invitations">招待リスト</TabsTrigger>
-              <TabsTrigger value="users">ユーザーリスト</TabsTrigger>
+        <div className="container max-w-5xl mx-auto px-4 py-6">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="mb-6 grid w-full grid-cols-3 bg-pink-100 p-1">
+              <TabsTrigger 
+                value="invite" 
+                className="data-[state=active]:bg-white data-[state=active]:text-pink-800"
+              >
+                ユーザー招待
+              </TabsTrigger>
+              <TabsTrigger 
+                value="invitations" 
+                className="data-[state=active]:bg-white data-[state=active]:text-pink-800"
+              >
+                招待リスト
+              </TabsTrigger>
+              <TabsTrigger 
+                value="users" 
+                className="data-[state=active]:bg-white data-[state=active]:text-pink-800"
+              >
+                ユーザーリスト
+              </TabsTrigger>
             </TabsList>
             
             {/* 招待フォーム */}
             <TabsContent value="invite">
-              <Card>
-                <CardHeader>
-                  <CardTitle>新規ユーザー招待</CardTitle>
+              <Card className="border-pink-200 shadow-md">
+                <CardHeader className="bg-gradient-to-r from-pink-100 to-purple-100 rounded-t-lg">
+                  <CardTitle className="flex items-center gap-2 text-pink-800">
+                    <Users className="h-5 w-5" />
+                    新規ユーザー招待
+                  </CardTitle>
                   <CardDescription>
                     新しいユーザーを招待します。招待メールが送信されます。
                   </CardDescription>
                 </CardHeader>
                 <form onSubmit={handleInvite}>
-                  <CardContent className="space-y-4">
+                  <CardContent className="pt-6 space-y-4">
                     <div className="space-y-2">
-                      <Label htmlFor="email">メールアドレス</Label>
+                      <Label htmlFor="email" className="text-pink-800">メールアドレス</Label>
                       <Input 
                         id="email" 
                         type="email" 
@@ -453,14 +400,15 @@ export default function UserManagement() {
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
+                        className="border-pink-200 focus:border-pink-500 focus:ring-pink-500"
                       />
                     </div>
                     
                     <div className="space-y-2">
-                      <Label htmlFor="role">ロール</Label>
+                      <Label htmlFor="role" className="text-pink-800">ロール</Label>
                       <select
                         id="role"
-                        className="w-full p-2 border rounded"
+                        className="w-full p-2 border rounded bg-white border-pink-200 focus:border-pink-500 focus:ring-pink-500"
                         value={role}
                         onChange={(e) => setRole(e.target.value)}
                         required
@@ -472,26 +420,13 @@ export default function UserManagement() {
                         ))}
                       </select>
                     </div>
-                    
-                    <div className="space-y-2">
-                      <Label htmlFor="department">部門（任意）</Label>
-                      <select
-                        id="department"
-                        className="w-full p-2 border rounded"
-                        value={departmentId}
-                        onChange={(e) => setDepartmentId(e.target.value)}
-                      >
-                        <option value="">部門を選択してください</option>
-                        {departments.map((department) => (
-                          <option key={department.id} value={department.id}>
-                            {department.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
                   </CardContent>
-                  <CardFooter>
-                    <Button type="submit" disabled={loading}>
+                  <CardFooter className="bg-pink-50">
+                    <Button
+                      type="submit"
+                      disabled={loading}
+                      className="bg-pink-600 hover:bg-pink-700"
+                    >
                       {loading ? '処理中...' : '招待を送信'}
                     </Button>
                   </CardFooter>
@@ -501,39 +436,44 @@ export default function UserManagement() {
             
             {/* 招待リスト */}
             <TabsContent value="invitations">
-              <Card>
-                <CardHeader>
-                  <CardTitle>招待リスト</CardTitle>
+              <Card className="border-pink-200 shadow-md">
+                <CardHeader className="bg-gradient-to-r from-pink-100 to-purple-100 rounded-t-lg">
+                  <CardTitle className="flex items-center gap-2 text-pink-800">
+                    <Users className="h-5 w-5" />
+                    招待リスト
+                  </CardTitle>
                   <CardDescription>
                     送信済みの招待一覧です。
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-6">
                   {loading ? (
-                    <p className="text-center">読み込み中...</p>
+                    <div className="flex justify-center items-center py-10">
+                      <LoadingUI />
+                    </div>
                   ) : invitations.length === 0 ? (
-                    <p className="text-center">招待はありません</p>
+                    <div className="text-center py-10 text-gray-500">
+                      招待はありません
+                    </div>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full">
                         <thead>
-                          <tr className="border-b">
-                            <th className="p-2 text-left">メールアドレス</th>
-                            <th className="p-2 text-left">ロール</th>
-                            <th className="p-2 text-left">施設</th>
-                            <th className="p-2 text-left">部門</th>
-                            <th className="p-2 text-left">有効期限</th>
-                            <th className="p-2 text-left">状態</th>
-                            <th className="p-2 text-left">操作</th>
+                          <tr className="border-b border-pink-200 bg-pink-50">
+                            <th className="p-2 text-left text-pink-800">メールアドレス</th>
+                            <th className="p-2 text-left text-pink-800">ロール</th>
+                            <th className="p-2 text-left text-pink-800">施設</th>
+                            <th className="p-2 text-left text-pink-800">有効期限</th>
+                            <th className="p-2 text-left text-pink-800">状態</th>
+                            <th className="p-2 text-left text-pink-800">操作</th>
                           </tr>
                         </thead>
                         <tbody>
                           {invitations.map((invitation) => (
-                            <tr key={invitation.id} className="border-b hover:bg-gray-50">
+                            <tr key={invitation.id} className="border-b border-pink-100 hover:bg-pink-50">
                               <td className="p-2">{invitation.email}</td>
                               <td className="p-2">{getRoleName(invitation.role)}</td>
                               <td className="p-2">{invitation.facilities?.name}</td>
-                              <td className="p-2">{invitation.departments?.name || '-'}</td>
                               <td className="p-2">{formatExpiryDate(invitation.expires_at)}</td>
                               <td className="p-2">
                                 {invitation.is_used ? (
@@ -550,6 +490,7 @@ export default function UserManagement() {
                                     variant="destructive" 
                                     size="sm" 
                                     onClick={() => handleCancelInvitation(invitation.id)}
+                                    className="bg-pink-600 hover:bg-pink-700"
                                   >
                                     取消
                                   </Button>
@@ -567,42 +508,48 @@ export default function UserManagement() {
             
             {/* ユーザーリスト */}
             <TabsContent value="users">
-              <Card>
-                <CardHeader>
-                  <CardTitle>ユーザーリスト</CardTitle>
+              <Card className="border-pink-200 shadow-md">
+                <CardHeader className="bg-gradient-to-r from-pink-100 to-purple-100 rounded-t-lg">
+                  <CardTitle className="flex items-center gap-2 text-pink-800">
+                    <Users className="h-5 w-5" />
+                    ユーザーリスト
+                  </CardTitle>
                   <CardDescription>
                     登録済みのユーザー一覧です。
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-6">
                   {loading ? (
-                    <p className="text-center">読み込み中...</p>
+                    <div className="flex justify-center items-center py-10">
+                      <LoadingUI />
+                    </div>
                   ) : users.length === 0 ? (
-                    <p className="text-center">ユーザーはいません</p>
+                    <div className="text-center py-10 text-gray-500">
+                      ユーザーはいません
+                    </div>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full">
                         <thead>
-                          <tr className="border-b">
-                            <th className="p-2 text-left">名前</th>
-                            <th className="p-2 text-left">メールアドレス</th>
-                            <th className="p-2 text-left">ロール</th>
-                            <th className="p-2 text-left">施設</th>
-                            <th className="p-2 text-left">部門</th>
-                            <th className="p-2 text-left">状態</th>
-                            <th className="p-2 text-left">操作</th>
+                          <tr className="border-b border-pink-200 bg-pink-50">
+                            <th className="p-2 text-left text-pink-800">名前</th>
+                            <th className="p-2 text-left text-pink-800">メールアドレス</th>
+                            <th className="p-2 text-left text-pink-800">ロール</th>
+                            <th className="p-2 text-left text-pink-800">施設</th>
+                            <th className="p-2 text-left text-pink-800">状態</th>
+                            <th className="p-2 text-left text-pink-800">操作</th>
                           </tr>
                         </thead>
                         <tbody>
                           {users.map((user) => (
-                            <tr key={user.id} className="border-b hover:bg-gray-50">
+                            <tr key={user.id} className="border-b border-pink-100 hover:bg-pink-50">
                               <td className="p-2">{user.full_name || '-'}</td>
                               <td className="p-2">{user.email}</td>
                               <td className="p-2">
                                 <select
                                   value={user.role}
                                   onChange={(e) => handleChangeUserRole(user.id, e.target.value)}
-                                  className="p-1 border rounded"
+                                  className="p-1 border border-pink-200 rounded focus:border-pink-500 focus:ring-pink-500"
                                   disabled={loading}
                                 >
                                   {ROLE_OPTIONS.map((option) => (
@@ -613,7 +560,6 @@ export default function UserManagement() {
                                 </select>
                               </td>
                               <td className="p-2">{user.facilities?.name}</td>
-                              <td className="p-2">{user.departments?.name || '-'}</td>
                               <td className="p-2">
                                 {user.is_active ? (
                                   <span className="text-green-600">有効</span>
@@ -627,6 +573,7 @@ export default function UserManagement() {
                                   size="sm" 
                                   onClick={() => handleToggleUserActive(user.id, user.is_active)}
                                   disabled={loading}
+                                  className={user.is_active ? "bg-pink-600 hover:bg-pink-700" : "bg-pink-500 hover:bg-pink-600"}
                                 >
                                   {user.is_active ? '停止' : '有効化'}
                                 </Button>
@@ -644,15 +591,18 @@ export default function UserManagement() {
         </div>
       ) : (
         <div className="flex justify-center items-center h-screen">
-          <Card>
-            <CardHeader>
-              <CardTitle>アクセス権限がありません</CardTitle>
+          <Card className="border-pink-200 shadow-md max-w-md">
+            <CardHeader className="bg-gradient-to-r from-pink-100 to-purple-100 rounded-t-lg">
+              <CardTitle className="text-pink-800">アクセス権限がありません</CardTitle>
               <CardDescription>
                 このページにアクセスするには管理者権限が必要です。
               </CardDescription>
             </CardHeader>
-            <CardFooter>
-              <Button onClick={() => router.push('/depart')}>
+            <CardFooter className="bg-pink-50">
+              <Button 
+                onClick={() => router.push('/depart')}
+                className="bg-pink-600 hover:bg-pink-700"
+              >
                 ホームに戻る
               </Button>
             </CardFooter>
