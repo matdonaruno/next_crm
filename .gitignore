@@ -44,16 +44,25 @@ next-env.d.ts
 /src/esp8266/
 
 # PWA生成ファイル - アイコンとスプラッシュ画像
-/public/icons/*.png
-/public/icons/*.ico
-/public/icons/*.jpg
+# 以下のコメントアウトで全てのアイコンを含めるようにしました
+# /public/icons/*.png
+!/public/icons/favicon-16x16.png
+!/public/icons/favicon-32x32.png
+!/public/icons/icon-192x192.png
+!/public/icons/icon-512x512.png
+!/public/icons/apple-touch-icon.png
+# /public/icons/*.ico
+!/public/icons/favicon.ico
+# /public/icons/*.jpg
 /public/workbox-*.js
-/public/sw.js
+# /public/sw.js
 
 # ルートのアイコン
-/public/favicon.ico
-/src/app/icon.png
-/src/app/apple-icon.png
+# /public/favicon.ico
+!/public/favicon.ico
+# /src/app/icon.png
+# /src/app/apple-icon.png
+!/src/app/favicon.ico
 
 # 一時生成ディレクトリ
 /temp_icons/
