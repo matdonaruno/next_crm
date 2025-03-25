@@ -7,7 +7,7 @@
     }
   ],
   "installCommand": "npm install",
-  "buildCommand": "npm run build",
+  "buildCommand": "touch public/sw.js && next build",
   "devCommand": "npm run dev",
   "headers": [
     {
@@ -72,18 +72,18 @@
       ]
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "/manifest.json",
-      "dest": "/manifest.json"
+      "source": "/manifest.json",
+      "destination": "/manifest.json"
     },
     {
-      "src": "/sw.js",
-      "dest": "/sw.js"
+      "source": "/sw.js",
+      "destination": "/sw.js"
     },
     {
-      "src": "/favicon.ico",
-      "dest": "/favicon.ico"
+      "source": "/favicon.ico",
+      "destination": "/favicon.ico"
     }
   ]
 } 
