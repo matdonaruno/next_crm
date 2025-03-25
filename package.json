@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "postbuild": "next-pwa",
     "start": "next start",
     "start:standalone": "node startup.js",
     "lint": "next lint",
