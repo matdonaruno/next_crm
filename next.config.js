@@ -1,9 +1,7 @@
 /** @type {import('next').NextConfig} */
-import NextPWA from 'next-pwa';
-import path from 'path';
-import { fileURLToPath } from 'url';
+const NextPWA = require('next-pwa');
+const path = require('path');
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
 const isVercel = process.env.VERCEL === '1';
 const withPWA = NextPWA;
@@ -131,6 +129,8 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  // Vercel環境ではoutputモードを設定
+  ...(isVercel ? {} : { output: 'standalone' }),
   distDir: '.next',
   // ビルドエラーをデバッグ用に詳細表示
   onDemandEntries: {
@@ -141,4 +141,4 @@ const nextConfig = {
   },
 };
 
-export default withPWA(pwaConfig)(nextConfig);
+module.exports = withPWA(pwaConfig)(nextConfig);

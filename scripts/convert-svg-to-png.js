@@ -1,14 +1,9 @@
 // SVGをPNGに変換するNodeスクリプト
 // 使用方法: node scripts/convert-svg-to-png.js
 
-import fs from 'fs';
-import path from 'path';
-import { execSync } from 'child_process';
-import { fileURLToPath } from 'url';
-
-// __dirnameの代替を取得
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
 
 // 必要なツールがインストールされているか確認
 try {
