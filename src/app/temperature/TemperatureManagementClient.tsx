@@ -50,6 +50,9 @@ interface SensorData {
   lastUpdated: string | null;
 }
 
+// 期間選択のための型定義
+type DateRange = '1week' | '2weeks' | '1month' | '3months' | 'all';
+
 export default function TemperatureManagementClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -64,6 +67,8 @@ export default function TemperatureManagementClient() {
   const [facilityName, setFacilityName] = useState<string>("");
   const [facilityId, setFacilityId] = useState<string>("");
   const [userName, setUserName] = useState<string>("");
+  const [dateRange, setDateRange] = useState<DateRange>('2weeks');
+  const [includeAutoRecords, setIncludeAutoRecords] = useState<boolean>(false);
 
   // 通知データの状態
   const [notifications, setNotifications] = useState([
@@ -96,9 +101,6 @@ export default function TemperatureManagementClient() {
     bmpPres: null,
     lastUpdated: ""
   });
-
-  // 自動記録データの表示設定
-  const [includeAutoRecords, setIncludeAutoRecords] = useState<boolean>(false);
 
   // シンプルな認証フックを使用
   const { user, loading: authLoading } = useSimpleAuth();
@@ -223,7 +225,29 @@ export default function TemperatureManagementClient() {
       
       setLoading(true);
       try {
-        console.log("レコード取得開始:", { departmentId, facilityId: currentFacilityId, includeAutoRecords });
+        console.log("レコード取得開始:", { departmentId, facilityId: currentFacilityId, includeAutoRecords, dateRange });
+        
+        // 日付範囲の計算
+        const now = new Date();
+        let startDate = new Date();
+        
+        switch (dateRange) {
+          case '1week':
+            startDate.setDate(now.getDate() - 7);
+            break;
+          case '2weeks':
+            startDate.setDate(now.getDate() - 14);
+            break;
+          case '1month':
+            startDate.setMonth(now.getMonth() - 1);
+            break;
+          case '3months':
+            startDate.setMonth(now.getMonth() - 3);
+            break;
+          case 'all':
+            startDate = new Date(0); // すべての期間
+            break;
+        }
         
         // is_auto_recordedフィルターを追加
         let query = supabase
@@ -241,7 +265,9 @@ export default function TemperatureManagementClient() {
             facility_id
           `)
           .eq("department_id", departmentId)
-          .eq("facility_id", currentFacilityId);
+          .eq("facility_id", currentFacilityId)
+          .gte('record_date', startDate.toISOString())
+          .lte('record_date', now.toISOString());
         
         // 自動記録を含まない場合（デフォルト）
         if (!includeAutoRecords) {
@@ -259,11 +285,12 @@ export default function TemperatureManagementClient() {
         // 日付データの集合を作成
         const dates = new Set<string>();
         data?.forEach((record) => {
-          // レコードの日付をYYYY-MM-DD形式の文字列に変換
-          const recordDate = new Date(record.record_date);
-          const year = recordDate.getFullYear();
-          const month = String(recordDate.getMonth() + 1).padStart(2, '0');
-          const day = String(recordDate.getDate()).padStart(2, '0');
+          // UTCタイムスタンプをJSTに変換
+          const utcDate = new Date(record.record_date);
+          const jstDate = new Date(utcDate.getTime() + 9 * 60 * 60 * 1000);
+          const year = jstDate.getFullYear();
+          const month = String(jstDate.getMonth() + 1).padStart(2, '0');
+          const day = String(jstDate.getDate()).padStart(2, '0');
           const localDateStr = `${year}-${month}-${day}`;
           
           dates.add(localDateStr);
@@ -280,7 +307,7 @@ export default function TemperatureManagementClient() {
     };
 
     fetchItems();
-  }, [departmentId, includeAutoRecords]);
+  }, [departmentId, includeAutoRecords, dateRange]);
 
   // includeAutoRecordsが変更された場合に再取得
   useEffect(() => {
@@ -686,9 +713,22 @@ export default function TemperatureManagementClient() {
         {/* データリスト */}
         <div className="bg-white rounded-lg border border-border overflow-x-auto">
           {/* フィルターコントロール */}
-          <div className="p-4 border-b border-border bg-secondary/20 flex justify-between items-center">
+          <div className="p-4 border-b border-border bg-secondary/20 flex flex-wrap justify-between items-center gap-4">
             <h3 className="text-lg font-medium">温度記録一覧</h3>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-4 flex-wrap">
+              {/* 期間選択 */}
+              <select
+                value={dateRange}
+                onChange={(e) => setDateRange(e.target.value as DateRange)}
+                className="px-3 py-1 border border-gray-300 rounded-md text-sm"
+              >
+                <option value="1week">1週間</option>
+                <option value="2weeks">2週間</option>
+                <option value="1month">1ヶ月</option>
+                <option value="3months">3ヶ月</option>
+                <option value="all">すべて</option>
+              </select>
+              
               <label className="flex items-center cursor-pointer">
                 <input
                   type="checkbox"
@@ -750,7 +790,18 @@ export default function TemperatureManagementClient() {
                 {records.map((record) => (
                   <tr key={record.id} className="hover:bg-secondary/30">
                     <td className="px-4 py-3">
-                      {new Date(record.record_date).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+                      {(() => {
+                        // UTCタイムスタンプをJSTに変換
+                        const utcDate = new Date(record.record_date);
+                        const jstDate = new Date(utcDate.getTime() + 9 * 60 * 60 * 1000);
+                        return jstDate.toLocaleString('ja-JP', {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        });
+                      })()}
                       {record.is_auto_recorded && (
                         <span className="ml-2 px-1.5 py-0.5 text-xs bg-blue-100 text-blue-800 rounded">自動</span>
                       )}
