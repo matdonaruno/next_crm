@@ -3,21 +3,42 @@ import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
-// 招待メール送信関数（実際にはSupabase Emailを使用するか、別のメールサービスを設定する必要があります）
+// 招待メール送信関数（Supabaseのservice_roleを使用したメール送信）
 async function sendInvitationEmail(email: string, token: string, inviterName: string, role: string, facilityName: string) {
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
   const inviteUrl = `${baseUrl}/register?token=${token}`;
   
-  const supabase = createClient(cookies());
-  
-  // Supabaseのメール送信機能を使用する場合
   try {
-    // TODO: 実際のメール送信ロジックを実装
-    // ここでは仮にコンソールにログを出力しておく
-    console.log(`メール送信: ${email} に招待リンク ${inviteUrl} を送信`);
+    // Supabaseのservice_roleを使用してクライアントを作成
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseServiceRole = process.env.SUPABASE_SERVICE_ROLE;
     
-    return { success: true };
+    if (!supabaseUrl || !supabaseServiceRole) {
+      throw new Error('Supabase環境変数が設定されていません');
+    }
+    
+    const supabaseAdmin = createSupabaseClient(supabaseUrl, supabaseServiceRole);
+    
+    // Supabaseの招待メール送信機能を使用
+    const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+      redirectTo: inviteUrl,
+      data: {
+        invited_by: inviterName,
+        role: role,
+        facility_name: facilityName,
+        token: token // カスタムメタデータとしてトークンを保存
+      }
+    });
+    
+    if (error) {
+      console.error('Supabase招待メール送信エラー:', error);
+      return { success: false, error };
+    }
+    
+    console.log('招待メール送信成功:', data);
+    return { success: true, data };
   } catch (error) {
     console.error('招待メール送信エラー:', error);
     return { success: false, error };
