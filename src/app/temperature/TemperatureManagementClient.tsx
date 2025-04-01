@@ -1,14 +1,14 @@
 'use client';
 
 import { Calendar } from "@/components/ui/calendar";
-import { Bell, Plus, FileText, ChevronLeft, Home, Check, X, Activity, ThermometerSnowflake } from "lucide-react";
+import { Bell, Plus, FileText, ChevronLeft, Home, Check, X, Activity, ThermometerSnowflake, Battery, BatteryMedium, BatteryLow, BatteryWarning, BatteryFull } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { DayContentProps } from "react-day-picker";
 import { getCachedFacility, cacheFacility } from '@/lib/facilityCache';
 import { getCurrentUser } from '@/lib/userCache';
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { useSimpleAuth } from '@/hooks/useSimpleAuth';
@@ -47,11 +47,66 @@ interface SensorData {
   bmpTemp: number | null;
   ahtHum: number | null;
   bmpPres: number | null;
+  batteryVolt: number | null; // バッテリー電圧を追加
   lastUpdated: string | null;
+}
+
+// センサーデバイス情報を定義
+interface SensorDevice {
+  id: string;
+  device_name: string;  
+  device_id: string;
+  location: string;
+  department_id: string;
+  facility_id: string;
+  status: string;  // is_activeの代わりにstatusを使用
+}
+
+// デバイスのバッテリー情報
+interface DeviceBatteryInfo {
+  deviceId: string;
+  deviceName: string;
+  location: string;
+  batteryVolt: number | null;
+  lastUpdated: string | null;
+}
+
+// バッテリーレベルの列挙型
+enum BatteryLevel {
+  HIGH = 'high',
+  MIDDLE = 'middle',
+  LOW = 'low',
+  WARNING = 'warning',
+  UNKNOWN = 'unknown'
+}
+
+// 通知の型定義を拡張
+interface Notification {
+  id: number;
+  type: string;
+  message: string;
+  timestamp: Date;
+  priority?: 'low' | 'medium' | 'high';
 }
 
 // 期間選択のための型定義
 type DateRange = '1week' | '2weeks' | '1month' | '3months' | 'all';
+
+// バッテリーアイコンコンポーネント
+const BatteryIcon = ({ level }: { level: BatteryLevel }) => {
+  switch (level) {
+    case BatteryLevel.HIGH:
+      return <BatteryFull className="h-5 w-5 text-green-500" />;
+    case BatteryLevel.MIDDLE:
+      return <BatteryMedium className="h-5 w-5 text-lime-500" />;
+    case BatteryLevel.LOW:
+      return <BatteryLow className="h-5 w-5 text-amber-500" />;
+    case BatteryLevel.WARNING:
+      return <BatteryWarning className="h-5 w-5 text-rose-500" />;
+    default:
+      return <Battery className="h-5 w-5 text-gray-400" />;
+  }
+};
 
 export default function TemperatureManagementClient() {
   const router = useRouter();
@@ -71,24 +126,27 @@ export default function TemperatureManagementClient() {
   const [includeAutoRecords, setIncludeAutoRecords] = useState<boolean>(false);
 
   // 通知データの状態
-  const [notifications, setNotifications] = useState([
+  const [notifications, setNotifications] = useState<Notification[]>([
     {
       id: 1,
       type: 'warning',
       message: '温度計の校正が今月末に予定されています',
       timestamp: new Date(),
+      priority: 'medium'
     },
     {
       id: 2,
       type: 'info',
       message: '冷蔵庫3の温度が安定しません。確認してください。',
       timestamp: new Date(Date.now() - 12 * 60 * 60 * 1000), // 12時間前
+      priority: 'medium'
     },
     {
       id: 3,
       type: 'success',
       message: '全ての温度ログが正常に記録されています',
       timestamp: new Date(Date.now() - 48 * 60 * 60 * 1000), // 2日前
+      priority: 'low'
     }
   ]);
 
@@ -99,8 +157,15 @@ export default function TemperatureManagementClient() {
     bmpTemp: null,
     ahtHum: null,
     bmpPres: null,
+    batteryVolt: null, // バッテリー電圧の初期値を追加
     lastUpdated: ""
   });
+
+  // 複数デバイスのバッテリー情報
+  const [allDevices, setAllDevices] = useState<SensorDevice[]>([]);
+  const [deviceBatteryInfo, setDeviceBatteryInfo] = useState<DeviceBatteryInfo[]>([]);
+  const [showBatteryModal, setShowBatteryModal] = useState(false);
+  const [loadingDevices, setLoadingDevices] = useState(false);
 
   // シンプルな認証フックを使用
   const { user, loading: authLoading } = useSimpleAuth();
@@ -371,6 +436,52 @@ export default function TemperatureManagementClient() {
     }
   }, [facilityId, departmentId, includeAutoRecords]);
 
+  // バッテリーレベルを計算する関数
+  const getBatteryLevel = (voltage: number | null): BatteryLevel => {
+    if (voltage === null) return BatteryLevel.UNKNOWN;
+    
+    // 電圧値に基づいてレベルを判定（値は仮の閾値です。実際のデバイスに合わせて調整してください）
+    if (voltage > 3.6) return BatteryLevel.HIGH;
+    if (voltage > 3.3) return BatteryLevel.MIDDLE; 
+    if (voltage > 3.0) return BatteryLevel.LOW;
+    return BatteryLevel.WARNING;
+  };
+
+  // バッテリー電圧からパーセンテージに変換する関数
+  const getBatteryPercentage = (voltage: number | null): number => {
+    if (voltage === null) return 0;
+    
+    // ESP32/ESPモジュールの一般的なリチウムイオン電池の電圧範囲
+    // 最小電圧: 3.0V（0%）、最大電圧: 4.2V（100%）
+    const minVoltage = 3.0;
+    const maxVoltage = 4.2;
+    
+    // 電圧を0-100%の範囲に変換
+    let percentage = ((voltage - minVoltage) / (maxVoltage - minVoltage)) * 100;
+    
+    // 0-100%の範囲に制限
+    percentage = Math.max(0, Math.min(100, percentage));
+    
+    // 整数に丸める
+    return Math.round(percentage);
+  };
+
+  // バッテリーレベルに応じたメッセージを取得
+  const getBatteryMessage = (level: BatteryLevel): string => {
+    switch(level) {
+      case BatteryLevel.HIGH:
+        return 'バッテリー残量は十分です';
+      case BatteryLevel.MIDDLE:
+        return 'バッテリー残量は半分程度です';
+      case BatteryLevel.LOW:
+        return 'バッテリー残量が少なくなっています。交換を検討してください';
+      case BatteryLevel.WARNING:
+        return '⚠️ バッテリー残量が危険レベルです。すぐに交換または充電してください';
+      default:
+        return 'バッテリー情報を取得できません';
+    }
+  };
+
   // 最新のセンサーデータを取得する関数
   const fetchLatestSensorData = useCallback(async () => {
     if (!facilityId || !departmentId) {
@@ -439,19 +550,51 @@ export default function TemperatureManagementClient() {
       // センサーデータがあればフラグを立てる
       setShowSensorData(true);
       
-      // センサーデータを設定
+      // センサーデータを設定（バッテリー電圧を含む）
       setSensorData({
         ahtTemp: logData.raw_data.ahtTemp || null,
         bmpTemp: logData.raw_data.bmpTemp || null,
         ahtHum: logData.raw_data.ahtHum || null,
         bmpPres: logData.raw_data.bmpPres || null,
+        batteryVolt: logData.raw_data.batteryVolt || null, // バッテリー電圧を追加
         lastUpdated: logData.recorded_at
       });
+      
+      // バッテリーレベルを計算
+      if (logData.raw_data.batteryVolt !== undefined && logData.raw_data.batteryVolt !== null) {
+        const batteryLevel = getBatteryLevel(logData.raw_data.batteryVolt);
+        
+        // バッテリー警告レベルの場合は通知を追加
+        if (batteryLevel === BatteryLevel.LOW || batteryLevel === BatteryLevel.WARNING) {
+          // useRefを使わなくても、setNotificationsの関数形式を使用して安全に更新
+          setNotifications(prev => {
+            // 既存のバッテリー通知があるか確認
+            const existingBatteryNotification = prev.find(
+              n => n.type === 'battery' && n.message.includes('バッテリー')
+            );
+            
+            // すでに通知がある場合は、既存の通知を更新せずに現状を返す
+            if (existingBatteryNotification) {
+              return prev;
+            }
+            
+            // 新しい通知を追加
+            return [{
+              id: Date.now(),
+              type: 'battery',
+              message: getBatteryMessage(batteryLevel),
+              timestamp: new Date(),
+              priority: batteryLevel === BatteryLevel.WARNING ? 'high' : 'medium'
+            }, ...prev];
+          });
+        }
+      }
       
       console.log('センサーデータを設定しました:', {
         timestamp: logData.recorded_at,
         localTime: jstDate.toLocaleString(),
-        utcTime: new Date(logData.recorded_at).toUTCString()
+        utcTime: new Date(logData.recorded_at).toUTCString(),
+        batteryVolt: logData.raw_data.batteryVolt
       });
     } catch (error) {
       console.error('センサーデータ取得エラー:', error);
@@ -474,6 +617,112 @@ export default function TemperatureManagementClient() {
       clearInterval(interval);
     };
   }, [facilityId, departmentId, fetchLatestSensorData]);
+
+  // すべてのセンサーデバイスとそのバッテリー情報を取得する関数
+  const fetchAllDevicesBatteryInfo = useCallback(async () => {
+    if (!facilityId || !departmentId) {
+      console.log('必要なデータが不足しています:', { facilityId, departmentId });
+      return;
+    }
+    
+    setLoadingDevices(true);
+    
+    try {
+      console.log('すべてのセンサーデバイス情報を取得しています:', { facilityId, departmentId });
+      
+      // センサーデバイスを取得 - カラム名を修正
+      let devicesQuery = supabase
+        .from('sensor_devices')
+        .select('id, device_name, device_id, location, department_id, facility_id, status')
+        .eq('facility_id', facilityId);
+      
+      // デバッグ用に生のSQLクエリを表示
+      console.log('センサーデバイスクエリ:', devicesQuery);
+      
+      // 部署IDが指定されている場合は絞り込み
+      if (departmentId) {
+        devicesQuery = devicesQuery.eq('department_id', departmentId);
+        console.log('部署IDでフィルター後のクエリ:', devicesQuery);
+      }
+      
+      const { data: devicesData, error: devicesError } = await devicesQuery;
+      
+      if (devicesError) {
+        console.error('センサーデバイス取得エラー:', devicesError);
+        setLoadingDevices(false);
+        return;
+      }
+      
+      console.log('センサーデバイス取得結果:', { 
+        count: devicesData?.length || 0, 
+        data: devicesData,
+        facilityId,
+        departmentId 
+      });
+      
+      if (!devicesData || devicesData.length === 0) {
+        console.log('この部署のセンサーデバイスが見つかりません');
+        
+        // フィルターを緩めて、施設全体のデバイスを確認（デバッグ用）
+        console.log('施設全体のデバイスを確認中...');
+        const { data: allFacilityDevices, error: allDevicesError } = await supabase
+          .from('sensor_devices')
+          .select('id, device_name, device_id, location, department_id, facility_id, status');
+        
+        if (allDevicesError) {
+          console.error('施設全体のデバイス取得エラー:', allDevicesError);
+        } else {
+          console.log('施設全体のデバイス一覧:', allFacilityDevices);
+        }
+        
+        setLoadingDevices(false);
+        return;
+      }
+      
+      console.log(`${devicesData.length}件のセンサーデバイスを発見:`, devicesData);
+      setAllDevices(devicesData);
+      
+      // 各デバイスの最新バッテリー情報を取得
+      const batteryInfoPromises = devicesData.map(async (device) => {
+        // デバイスからの最新のセンサーログを取得
+        const { data: logData, error: logError } = await supabase
+          .from('sensor_logs')
+          .select('raw_data, recorded_at')
+          .eq('sensor_device_id', device.id)
+          .order('recorded_at', { ascending: false })
+          .limit(1)
+          .single();
+          
+        if (logError) {
+          console.log(`デバイス ${device.device_name} のセンサーログ取得エラー:`, logError);
+          return {
+            deviceId: device.id,
+            deviceName: device.device_name,
+            location: device.location || '未設定',
+            batteryVolt: null,
+            lastUpdated: null
+          };
+        }
+        
+        return {
+          deviceId: device.id,
+          deviceName: device.device_name,
+          location: device.location || '未設定',
+          batteryVolt: logData.raw_data.batteryVolt || null,
+          lastUpdated: logData.recorded_at
+        };
+      });
+      
+      const batteryInfoResults = await Promise.all(batteryInfoPromises);
+      setDeviceBatteryInfo(batteryInfoResults);
+      console.log('すべてのデバイスバッテリー情報を取得しました:', batteryInfoResults);
+      
+    } catch (error) {
+      console.error('デバイスバッテリー情報取得エラー:', error);
+    } finally {
+      setLoadingDevices(false);
+    }
+  }, [facilityId, departmentId]);
 
   const CustomDayContent = (props: DayContentProps) => {
     // カレンダーコンポーネントの日付を処理する
@@ -534,7 +783,7 @@ export default function TemperatureManagementClient() {
 
       {/* メインコンテンツ - 幅を調整 */}
       <main className="container max-w-7xl mx-auto px-4 py-6">
-        {/* 通知エリア */}
+        {/* 通知エリア - バッテリーの警告を優先表示 */}
         {notifications.length > 0 && (
           <div className="p-4 border border-yellow-300 bg-yellow-50 rounded-md mb-6">
             <h3 className="text-lg font-semibold text-yellow-800 mb-2 text-left">
@@ -544,7 +793,16 @@ export default function TemperatureManagementClient() {
             <div className="max-h-40 overflow-y-auto">
               <ul className="list-disc pl-5 text-left">
                 {notifications.map((notification) => (
-                  <li key={`notification-${notification.id}`} className="text-sm text-foreground mb-1">
+                  <li 
+                    key={`notification-${notification.id}`} 
+                    className={`text-sm mb-1 ${
+                      notification.type === 'battery' && notification.priority === 'high'
+                        ? 'text-red-600 font-medium'
+                        : notification.type === 'battery'
+                          ? 'text-amber-600'
+                          : 'text-foreground'
+                    }`}
+                  >
                     {notification.message}
                     <span className="text-xs text-muted-foreground ml-2">
                       {notification.timestamp.toLocaleString()}
@@ -579,10 +837,22 @@ export default function TemperatureManagementClient() {
 
         {/* リアルタイムセンサーデータ表示 */}
         {showSensorData && sensorData.lastUpdated && (
-          <div className="bg-white p-4 rounded-lg border border-border shadow-sm animate-fadeIn">
+          <div className="bg-white p-4 rounded-lg border border-border shadow-sm animate-fadeIn mt-6">
             <h3 className="text-sm font-medium mb-3 flex items-center">
               <Activity className="h-4 w-4 mr-2 text-purple-500" />
               リアルタイムセンサーデータ
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-2 text-xs h-7 px-2 py-0 border-purple-200 text-purple-600 hover:bg-purple-50"
+                onClick={() => {
+                  fetchAllDevicesBatteryInfo();
+                  setShowBatteryModal(true);
+                }}
+              >
+                <Battery className="h-3.5 w-3.5 mr-1" />
+                バッテリー一覧
+              </Button>
               <span className="ml-auto text-xs text-gray-500">
                 最終更新: {(() => {
                   // UTCタイムスタンプを取得
@@ -594,7 +864,7 @@ export default function TemperatureManagementClient() {
               </span>
             </h3>
             
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               {sensorData.ahtTemp !== null && (
                 <div className="bg-gradient-to-br from-red-50 to-orange-50 p-3 rounded-lg border border-red-100">
                   <div className="text-xs text-gray-500 mb-1">AHT20 温度</div>
@@ -620,6 +890,64 @@ export default function TemperatureManagementClient() {
                 <div className="bg-gradient-to-br from-indigo-50 to-violet-50 p-3 rounded-lg border border-indigo-100">
                   <div className="text-xs text-gray-500 mb-1">BMP280 気圧</div>
                   <div className="text-xl font-semibold text-indigo-600">{sensorData.bmpPres.toFixed(1)}hPa</div>
+                </div>
+              )}
+              
+              {/* バッテリー情報表示 */}
+              {sensorData.batteryVolt !== null && (
+                <div className={`bg-gradient-to-br p-3 rounded-lg border ${
+                  getBatteryLevel(sensorData.batteryVolt) === BatteryLevel.HIGH 
+                    ? 'from-green-50 to-emerald-50 border-green-100'
+                    : getBatteryLevel(sensorData.batteryVolt) === BatteryLevel.MIDDLE
+                      ? 'from-lime-50 to-green-50 border-lime-100'
+                      : getBatteryLevel(sensorData.batteryVolt) === BatteryLevel.LOW
+                        ? 'from-yellow-50 to-amber-50 border-yellow-100'
+                        : 'from-red-50 to-rose-50 border-red-100'
+                }`}>
+                  <div className="text-xs text-gray-500 mb-1">バッテリー残量</div>
+                  <div className={`text-xl font-semibold ${
+                    getBatteryLevel(sensorData.batteryVolt) === BatteryLevel.HIGH 
+                      ? 'text-green-600'
+                      : getBatteryLevel(sensorData.batteryVolt) === BatteryLevel.MIDDLE
+                        ? 'text-lime-600'
+                        : getBatteryLevel(sensorData.batteryVolt) === BatteryLevel.LOW
+                          ? 'text-amber-600'
+                          : 'text-rose-600'
+                  }`}>
+                    {getBatteryPercentage(sensorData.batteryVolt)}%
+                    
+                    {/* バッテリー残量のプログレスバー */}
+                    <div className="w-full h-2 bg-gray-200 rounded-full mt-2 overflow-hidden">
+                      <div 
+                        className={`h-full rounded-full ${
+                          getBatteryLevel(sensorData.batteryVolt) === BatteryLevel.HIGH 
+                            ? 'bg-green-500'
+                            : getBatteryLevel(sensorData.batteryVolt) === BatteryLevel.MIDDLE
+                              ? 'bg-lime-500'
+                              : getBatteryLevel(sensorData.batteryVolt) === BatteryLevel.LOW
+                                ? 'bg-amber-500'
+                                : 'bg-rose-500'
+                        }`}
+                        style={{ width: `${getBatteryPercentage(sensorData.batteryVolt)}%` }}
+                      ></div>
+                    </div>
+                    
+                    <div className="text-xs font-normal mt-2 flex items-center">
+                      <span className={`inline-block w-2 h-2 rounded-full mr-1 ${
+                        getBatteryLevel(sensorData.batteryVolt) === BatteryLevel.HIGH 
+                          ? 'bg-green-500'
+                          : getBatteryLevel(sensorData.batteryVolt) === BatteryLevel.MIDDLE
+                            ? 'bg-lime-500'
+                            : getBatteryLevel(sensorData.batteryVolt) === BatteryLevel.LOW
+                              ? 'bg-amber-500'
+                              : 'bg-rose-500'
+                      }`}></span>
+                      {getBatteryMessage(getBatteryLevel(sensorData.batteryVolt))}
+                      
+                      {/* 電圧情報も小さく表示 */}
+                      <span className="text-gray-500 ml-auto">{sensorData.batteryVolt.toFixed(2)}V</span>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -856,6 +1184,158 @@ export default function TemperatureManagementClient() {
         </div>
       </main>
       
+      {/* バッテリー情報モーダル */}
+      <AnimatePresence>
+        {showBatteryModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ duration: 0.2 }}
+              className="bg-white rounded-xl p-5 w-full max-w-2xl mx-4 shadow-xl"
+            >
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-semibold flex items-center">
+                  <Battery className="mr-2 h-5 w-5 text-purple-500" />
+                  センサーデバイスバッテリー状況
+                </h2>
+                <button
+                  onClick={() => setShowBatteryModal(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {loadingDevices ? (
+                <div className="py-8 text-center">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-500 mx-auto"></div>
+                  <p className="mt-4 text-gray-500">デバイス情報を読み込み中...</p>
+                </div>
+              ) : deviceBatteryInfo.length === 0 ? (
+                <div className="py-8 text-center text-gray-500">
+                  <Battery className="h-16 w-16 text-gray-300 mx-auto mb-2" />
+                  <p>センサーデバイスが見つかりません</p>
+                </div>
+              ) : (
+                <>
+                  <div className="overflow-auto max-h-96 -mx-5 px-5">
+                    <table className="min-w-full border-separate border-spacing-0">
+                      <thead className="bg-gray-50 sticky top-0">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                            デバイス名
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                            設置場所
+                          </th>
+                          <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                            バッテリー残量
+                          </th>
+                          <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                            最終更新
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {deviceBatteryInfo.map((device) => (
+                          <tr key={device.deviceId} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <div className="flex items-center">
+                                <BatteryIcon level={getBatteryLevel(device.batteryVolt)} />
+                                <span className="ml-2 font-medium">
+                                  {device.deviceName}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                              {device.location}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              {device.batteryVolt !== null ? (
+                                <div className="flex flex-col items-center">
+                                  <div className={`text-sm font-semibold ${
+                                    getBatteryLevel(device.batteryVolt) === BatteryLevel.HIGH 
+                                      ? 'text-green-600'
+                                      : getBatteryLevel(device.batteryVolt) === BatteryLevel.MIDDLE
+                                        ? 'text-lime-600'
+                                        : getBatteryLevel(device.batteryVolt) === BatteryLevel.LOW
+                                          ? 'text-amber-600'
+                                          : 'text-rose-600'
+                                  }`}>
+                                    {getBatteryPercentage(device.batteryVolt)}%
+                                  </div>
+                                  
+                                  {/* バッテリー残量プログレスバー */}
+                                  <div className="w-24 h-2 bg-gray-200 rounded-full mt-1 overflow-hidden">
+                                    <div 
+                                      className={`h-full rounded-full ${
+                                        getBatteryLevel(device.batteryVolt) === BatteryLevel.HIGH 
+                                          ? 'bg-green-500'
+                                          : getBatteryLevel(device.batteryVolt) === BatteryLevel.MIDDLE
+                                            ? 'bg-lime-500'
+                                            : getBatteryLevel(device.batteryVolt) === BatteryLevel.LOW
+                                              ? 'bg-amber-500'
+                                              : 'bg-rose-500'
+                                      }`}
+                                      style={{ width: `${getBatteryPercentage(device.batteryVolt)}%` }}
+                                    ></div>
+                                  </div>
+                                  
+                                  <span className="text-xs text-gray-500 mt-1">
+                                    {device.batteryVolt.toFixed(2)}V
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-gray-400 text-sm">データなし</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600 text-center">
+                              {device.lastUpdated ? (
+                                (() => {
+                                  const utcDate = new Date(device.lastUpdated);
+                                  const jstDate = new Date(utcDate.getTime() + 9 * 60 * 60 * 1000);
+                                  return jstDate.toLocaleString('ja-JP', {
+                                    year: 'numeric',
+                                    month: '2-digit',
+                                    day: '2-digit',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  });
+                                })()
+                              ) : (
+                                '未取得'
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  
+                  <div className="mt-4 flex justify-end">
+                    <Button
+                      onClick={fetchAllDevicesBatteryInfo}
+                      className="mr-2 bg-purple-100 hover:bg-purple-200 text-purple-800 border-none"
+                    >
+                      <Activity className="h-4 w-4 mr-1" />
+                      更新
+                    </Button>
+                    <Button
+                      onClick={() => setShowBatteryModal(false)}
+                      variant="outline"
+                    >
+                      閉じる
+                    </Button>
+                  </div>
+                </>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <style jsx global>{`
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(10px); }
