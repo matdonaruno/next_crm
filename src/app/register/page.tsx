@@ -124,13 +124,13 @@ function RegisterContent() {
   
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-teal-100 to-green-100">
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-stone-100 to-slate-200">
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           className="text-center"
         >
-          <p className="text-teal-600 font-medium">招待を確認中...</p>
+          <p className="text-slate-600 font-medium">招待を確認中...</p>
         </motion.div>
       </div>
     );
@@ -138,10 +138,10 @@ function RegisterContent() {
   
   if (success) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-teal-100 to-green-100">
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-stone-100 to-slate-200">
         <Card className="w-full max-w-md border-0 shadow-lg bg-white/90 backdrop-blur-sm rounded-2xl overflow-hidden">
           <CardHeader className="space-y-1 pb-2">
-            <CardTitle className="text-2xl font-bold bg-gradient-to-r from-teal-400 to-green-500 bg-clip-text text-transparent">
+            <CardTitle className="text-2xl font-bold bg-gradient-to-r from-slate-500 to-stone-600 bg-clip-text text-transparent">
               アカウント作成完了
             </CardTitle>
             <CardDescription className="text-gray-500">
@@ -154,9 +154,9 @@ function RegisterContent() {
               animate={{ scale: 1, opacity: 1 }}
               transition={{ duration: 0.5 }}
             >
-              <div className="rounded-full bg-green-100 p-3 inline-block mb-4">
+              <div className="rounded-full bg-stone-100 p-3 inline-block mb-4">
                 <svg
-                  className="h-8 w-8 text-green-500"
+                  className="h-8 w-8 text-stone-600"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -179,7 +179,7 @@ function RegisterContent() {
   }
   
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-teal-100 to-green-100">
+    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-stone-100 to-slate-200">
       {/* 背景の装飾パーティクル */}
       <div className="absolute top-0 left-0 w-full h-full opacity-20 pointer-events-none">
         {Array.from({ length: 20 }).map((_, i) => (
@@ -220,7 +220,7 @@ function RegisterContent() {
               animate={{ rotate: 360 }}
               transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
             >
-              <Sparkles className="h-12 w-12 text-teal-300 opacity-70" />
+              <Sparkles className="h-12 w-12 text-stone-300 opacity-70" />
             </motion.div>
           </div>
 
@@ -230,9 +230,9 @@ function RegisterContent() {
                 animate={{ scale: [1, 1.1, 1] }}
                 transition={{ duration: 2, repeat: Infinity }}
               >
-                <Cross className="h-6 w-6 text-teal-400" />
+                <Cross className="h-6 w-6 text-slate-500" />
               </motion.div>
-              <CardTitle className="text-2xl font-bold bg-gradient-to-r from-teal-400 to-green-500 bg-clip-text text-transparent">
+              <CardTitle className="text-2xl font-bold bg-gradient-to-r from-slate-500 to-stone-600 bg-clip-text text-transparent">
                 サインアップ
               </CardTitle>
             </div>
@@ -258,30 +258,30 @@ function RegisterContent() {
                   メールアドレス
                 </Label>
                 <div className="relative">
-                  <Mail className="absolute left-3 top-3 h-4 w-4 text-teal-400" />
+                  <Mail className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
                   <Input
                     id="email"
                     type="email"
                     value={email}
                     disabled
-                    className="pl-10 border-teal-200 focus:border-green-400 focus:ring-green-300 rounded-xl bg-gray-50"
+                    className="pl-10 border-stone-200 focus:border-slate-400 focus:ring-slate-300 rounded-xl bg-gray-50"
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="fullName" className="text-gray-700 font-medium">
-                  氏名
+                  姓名
                 </Label>
                 <div className="relative">
-                  <User className="absolute left-3 top-3 h-4 w-4 text-teal-400" />
+                  <User className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
                   <Input
                     id="fullName"
                     type="text"
                     placeholder="山田 太郎"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
-                    className="pl-10 border-teal-200 focus:border-green-400 focus:ring-green-300 rounded-xl"
+                    className="pl-10 border-stone-200 focus:border-slate-400 focus:ring-slate-300 rounded-xl"
                   />
                 </div>
               </div>
@@ -291,14 +291,14 @@ function RegisterContent() {
                   パスワード
                 </Label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-3 h-4 w-4 text-teal-400" />
+                  <Lock className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
                   <Input
                     id="password"
                     type="password"
                     placeholder="••••••••"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10 border-teal-200 focus:border-green-400 focus:ring-green-300 rounded-xl"
+                    className="pl-10 border-stone-200 focus:border-slate-400 focus:ring-slate-300 rounded-xl"
                     required
                   />
                 </div>
@@ -310,14 +310,14 @@ function RegisterContent() {
                   パスワード（確認用）
                 </Label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-3 h-4 w-4 text-teal-400" />
+                  <Lock className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
                   <Input
                     id="confirmPassword"
                     type="password"
                     placeholder="••••••••"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="pl-10 border-teal-200 focus:border-green-400 focus:ring-green-300 rounded-xl"
+                    className="pl-10 border-stone-200 focus:border-slate-400 focus:ring-slate-300 rounded-xl"
                     required
                   />
                 </div>
@@ -331,7 +331,7 @@ function RegisterContent() {
               >
                 <Button 
                   type="submit"
-                  className="w-full bg-gradient-to-r from-teal-400 to-green-500 hover:from-teal-500 hover:to-green-600 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
+                  className="w-full bg-gradient-to-r from-slate-500 to-stone-600 hover:from-slate-600 hover:to-stone-700 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
                   disabled={registering || !password || !confirmPassword}
                 >
                   {registering ? "処理中..." : "アカウント作成"}
@@ -342,9 +342,9 @@ function RegisterContent() {
               <p className="text-sm text-center text-gray-600">
                 既にアカウントをお持ちですか？ 
                 <motion.span
-                  whileHover={{ color: "#14b8a6" }} // teal-500
+                  whileHover={{ color: "#52525b" }} // zinc-600
                   onClick={() => router.push('/login')}
-                  className="text-teal-500 font-medium cursor-pointer transition-colors duration-300 ml-1"
+                  className="text-stone-500 font-medium cursor-pointer transition-colors duration-300 ml-1"
                 >
                   ログイン
                 </motion.span>
@@ -361,8 +361,8 @@ function RegisterContent() {
 export default function RegisterPage() {
   return (
     <Suspense fallback={
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-teal-100 to-green-100">
-        <p className="text-teal-600 font-medium">読み込み中...</p>
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-stone-100 to-slate-200">
+        <p className="text-slate-600 font-medium">読み込み中...</p>
       </div>
     }>
       <RegisterContent />
