@@ -27,7 +27,13 @@ function RegisterContent() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  
+  // フルネームを取得
+  const getFullName = () => {
+    return `${lastName} ${firstName}`.trim();
+  };
   
   // トークンの検証
   useEffect(() => {
@@ -86,6 +92,12 @@ function RegisterContent() {
       return;
     }
     
+    // 姓名の検証
+    if (!lastName && !firstName) {
+      setError('姓または名を入力してください。');
+      return;
+    }
+    
     setError(null);
     setRegistering(true);
     
@@ -98,7 +110,7 @@ function RegisterContent() {
         body: JSON.stringify({
           token,
           password,
-          fullName
+          fullName: getFullName()
         }),
       });
       
@@ -270,17 +282,34 @@ function RegisterContent() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="fullName" className="text-gray-700 font-medium">
-                  姓名
+                <Label htmlFor="lastName" className="text-gray-700 font-medium">
+                  姓
                 </Label>
                 <div className="relative">
                   <User className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
                   <Input
-                    id="fullName"
+                    id="lastName"
                     type="text"
-                    placeholder="山田 太郎"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="山田"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    className="pl-10 border-stone-200 focus:border-slate-400 focus:ring-slate-300 rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="firstName" className="text-gray-700 font-medium">
+                  名
+                </Label>
+                <div className="relative">
+                  <User className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
+                  <Input
+                    id="firstName"
+                    type="text"
+                    placeholder="太郎"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
                     className="pl-10 border-stone-200 focus:border-slate-400 focus:ring-slate-300 rounded-xl"
                   />
                 </div>
@@ -332,7 +361,7 @@ function RegisterContent() {
                 <Button 
                   type="submit"
                   className="w-full bg-gradient-to-r from-slate-500 to-stone-600 hover:from-slate-600 hover:to-stone-700 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
-                  disabled={registering || !password || !confirmPassword}
+                  disabled={registering || !password || !confirmPassword || (!lastName && !firstName)}
                 >
                   {registering ? "処理中..." : "アカウント作成"}
                   {!registering && <ArrowRight className="ml-2 h-5 w-5" />}
