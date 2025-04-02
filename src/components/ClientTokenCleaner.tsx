@@ -11,7 +11,9 @@ export function ClientTokenCleaner() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const isLoginPage = pathname === '/login' || pathname === '/direct-login';
+  const isRegisterPage = pathname === '/register' || pathname?.startsWith('/register?') || false;
   const isRootPage = pathname === '/';
+  const isPublicPage = isLoginPage || isRootPage || isRegisterPage; // 公開ページ（認証不要）
   const redirectedRef = useRef(false);
   const lastPathRef = useRef(pathname);
   const [redirecting, setRedirecting] = useState(false);
@@ -19,7 +21,14 @@ export function ClientTokenCleaner() {
   // セッション管理の改善
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      console.log("ClientTokenCleaner: 初期化", { isLoginPage, isRootPage, loading });
+      console.log("ClientTokenCleaner: 初期化", { 
+        isLoginPage, 
+        isRootPage, 
+        isRegisterPage, 
+        isPublicPage, 
+        loading,
+        path: pathname
+      });
       
       // ローディング中やリダイレクト中は処理をスキップ
       if (loading || redirecting) {
@@ -59,8 +68,14 @@ export function ClientTokenCleaner() {
         return;
       }
       
-      // 未ログインなら保護ページからログインページへリダイレクト（ルートページは除外）
-      if (!user && !isLoginPage && !isRootPage && !redirectedRef.current) {
+      // 登録ページでは認証チェックをスキップする（招待ユーザー向け）
+      if (isRegisterPage) {
+        console.log("ClientTokenCleaner: 登録ページのため、認証チェックをスキップします");
+        return;
+      }
+      
+      // 未ログインなら保護ページからログインページへリダイレクト（公開ページは除外）
+      if (!user && !isPublicPage && !redirectedRef.current) {
         console.log("ClientTokenCleaner: 未ログインユーザーをログインページへリダイレクト");
         redirectedRef.current = true;
         setRedirecting(true);
@@ -137,7 +152,7 @@ export function ClientTokenCleaner() {
       // 初期化時にセッションを確認
       checkSession();
     }
-  }, [isLoginPage, isRootPage, loading, user, router, redirecting]);
+  }, [isLoginPage, isRootPage, isRegisterPage, isPublicPage, loading, user, router, redirecting, pathname]);
   
   // パスが変わったらリダイレクトフラグをリセット
   useEffect(() => {

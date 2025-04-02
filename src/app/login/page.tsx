@@ -17,7 +17,6 @@ import { setSessionCheckEnabled } from '@/contexts/AuthContext';
 const AuthForm = () => {
   const router = useRouter();
   const { signIn, user, loading } = useAuth();
-  const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
@@ -116,39 +115,24 @@ const AuthForm = () => {
     setAuthLoading(true);
 
     try {
-      if (isSignUp) {
-        // サインアップ処理
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
+      // サインイン処理
+      console.log("LoginPage: サインイン処理開始", { email });
+      setRedirecting(true); // サインイン開始時にリダイレクト状態にする
+      
+      const { error } = await signIn(email, password);
 
-        if (error) {
-          setError(error.message);
-        } else {
-          // サインアップ成功
-          setError("確認メールを送信しました。メールを確認してアカウントを有効化してください。");
-        }
+      if (error) {
+        console.error("LoginPage: サインインエラー", error);
+        setError(error.message);
+        setRedirecting(false); // エラー時はリダイレクト状態を解除
       } else {
-        // サインイン処理
-        console.log("LoginPage: サインイン処理開始", { email });
-        setRedirecting(true); // サインイン開始時にリダイレクト状態にする
-        
-        const { error } = await signIn(email, password);
-
-        if (error) {
-          console.error("LoginPage: サインインエラー", error);
-          setError(error.message);
-          setRedirecting(false); // エラー時はリダイレクト状態を解除
-        } else {
-          console.log("LoginPage: サインイン成功、リダイレクト準備中");
-          // 成功時はリダイレクト状態を維持
-          // ただし、明示的にリダイレクトも実行
-          setTimeout(() => {
-            console.log("LoginPage: サインイン成功後、明示的にリダイレクト実行");
-            window.location.href = '/depart';
-          }, 1000);
-        }
+        console.log("LoginPage: サインイン成功、リダイレクト準備中");
+        // 成功時はリダイレクト状態を維持
+        // ただし、明示的にリダイレクトも実行
+        setTimeout(() => {
+          console.log("LoginPage: サインイン成功後、明示的にリダイレクト実行");
+          window.location.href = '/depart';
+        }, 1000);
       }
     } catch (error: any) {
       console.error("LoginPage: 認証処理中に例外発生", error);
@@ -207,7 +191,7 @@ const AuthForm = () => {
 
       <AnimatePresence mode="wait">
         <motion.div
-          key={isSignUp ? "signup" : "login"}
+          key="login"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -20 }}
@@ -233,11 +217,11 @@ const AuthForm = () => {
                   <Cross className="h-6 w-6 text-pink-400" />
                 </motion.div>
                 <CardTitle className="text-2xl font-bold bg-gradient-to-r from-pink-400 to-purple-500 bg-clip-text text-transparent">
-                  {isSignUp ? "新規登録" : "ログイン"}
+                  ログイン
                 </CardTitle>
               </div>
               <CardDescription className="text-gray-500">
-                {isSignUp ? "アカウントを作成してサービスを利用開始" : "既存のアカウントでログイン"}
+                アカウント情報でログイン
               </CardDescription>
             </CardHeader>
 
@@ -303,24 +287,10 @@ const AuthForm = () => {
                     className="w-full bg-gradient-to-r from-pink-400 to-purple-500 hover:from-pink-500 hover:to-purple-600 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
                     disabled={authLoading || !email || !password}
                   >
-                    {authLoading ? "処理中..." : isSignUp ? "新規登録" : "ログイン"}
+                    {authLoading ? "処理中..." : "ログイン"}
                     {!authLoading && <ArrowRight className="ml-2 h-5 w-5" />}
                   </Button>
                 </motion.div>
-
-                <p className="text-sm text-center text-gray-600">
-                  {isSignUp ? "既にアカウントをお持ちですか？ " : "アカウントをお持ちでないですか？ "}
-                  <motion.span
-                    whileHover={{ color: "#ec4899" }} // pink-500
-                    onClick={() => {
-                      setIsSignUp(!isSignUp);
-                      setError("");
-                    }}
-                    className="text-purple-500 font-medium cursor-pointer transition-colors duration-300"
-                  >
-                    {isSignUp ? "ログイン" : "新規登録"}
-                  </motion.span>
-                </p>
               </CardFooter>
             </form>
           </Card>
@@ -330,4 +300,6 @@ const AuthForm = () => {
   );
 };
 
-export default AuthForm;
+export default function LoginPage() {
+  return <AuthForm />;
+}
