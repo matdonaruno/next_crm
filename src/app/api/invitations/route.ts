@@ -24,33 +24,47 @@ async function sendInvitationEmail(email: string, token: string, inviterName: st
     
     debugLog('環境変数チェック', { 
       hasSupabaseUrl: !!supabaseUrl,
-      hasServiceRole: !!supabaseServiceRole
+      hasServiceRole: !!supabaseServiceRole,
+      supabaseUrlLength: supabaseUrl?.length || 0,
+      serviceRoleLength: supabaseServiceRole?.length || 0
     });
     
     if (!supabaseUrl || !supabaseServiceRole) {
       throw new Error('Supabase環境変数が設定されていません');
     }
     
-    const supabaseAdmin = createSupabaseClient(supabaseUrl, supabaseServiceRole);
-    
-    // Supabaseの招待メール送信機能を使用
-    const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-      redirectTo: inviteUrl,
-      data: {
-        invited_by: inviterName,
-        role: role,
-        facility_name: facilityName,
-        token: token
+    // supabaseAdminクライアントをtry/catchブロックで作成
+    try {
+      const supabaseAdmin = createSupabaseClient(supabaseUrl, supabaseServiceRole);
+      
+      // Supabaseの招待メール送信機能を使用
+      const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+        redirectTo: inviteUrl,
+        data: {
+          invited_by: inviterName,
+          role: role,
+          facility_name: facilityName,
+          token: token
+        }
+      });
+      
+      if (error) {
+        debugLog('Supabase招待メール送信エラー:', error);
+        return { success: false, error };
       }
-    });
-    
-    if (error) {
-      debugLog('Supabase招待メール送信エラー:', error);
-      return { success: false, error };
+      
+      debugLog('招待メール送信成功:', data);
+      return { success: true, data };
+    } catch (adminClientError) {
+      debugLog('Supabase管理者クライアント作成または使用エラー:', adminClientError);
+      return { 
+        success: false, 
+        error: {
+          message: 'Supabase管理者クライアントでエラーが発生しました',
+          originalError: adminClientError instanceof Error ? adminClientError.message : String(adminClientError)
+        }
+      };
     }
-    
-    debugLog('招待メール送信成功:', data);
-    return { success: true, data };
   } catch (error) {
     debugLog('招待メール送信エラー:', error);
     return { success: false, error };
@@ -61,6 +75,19 @@ async function sendInvitationEmail(email: string, token: string, inviterName: st
 export async function POST(request: NextRequest) {
   try {
     debugLog('招待API呼び出し開始');
+    
+    // リクエストボディを先に取得
+    let requestBody;
+    try {
+      requestBody = await request.json();
+      debugLog('リクエストボディ:', requestBody);
+    } catch (parseError) {
+      debugLog('リクエストボディのパースに失敗:', parseError);
+      return NextResponse.json({ 
+        error: 'リクエストボディの解析に失敗しました', 
+        details: parseError instanceof Error ? parseError.message : String(parseError) 
+      }, { status: 400 });
+    }
     
     const supabase = createRouteHandlerClient({ cookies });
     const { data: { session } } = await supabase.auth.getSession();
@@ -87,7 +114,10 @@ export async function POST(request: NextRequest) {
     });
     
     if (profileError || !inviterProfile) {
-      return NextResponse.json({ error: 'プロフィール情報の取得に失敗しました' }, { status: 500 });
+      return NextResponse.json({ 
+        error: 'プロフィール情報の取得に失敗しました', 
+        details: profileError?.message || '不明なエラー' 
+      }, { status: 500 });
     }
     
     // 招待者が管理者権限を持っているか確認
@@ -95,7 +125,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'ユーザー招待権限がありません' }, { status: 403 });
     }
     
-    const { email, role, facilityId, departmentId } = await request.json();
+    const { email, role, facilityId, departmentId } = requestBody;
     debugLog('リクエストデータ:', { email, role, facilityId, departmentId });
     
     if (!email || !role || !facilityId) {
@@ -139,7 +169,10 @@ export async function POST(request: NextRequest) {
       if (invitationError.code === '23505') { // unique violation
         return NextResponse.json({ error: 'このメールアドレスには既に招待を送信済みです' }, { status: 400 });
       }
-      return NextResponse.json({ error: '招待の作成に失敗しました', details: invitationError }, { status: 500 });
+      return NextResponse.json({ 
+        error: '招待の作成に失敗しました', 
+        details: typeof invitationError === 'object' ? JSON.stringify(invitationError) : String(invitationError)
+      }, { status: 500 });
     }
     
     // 施設名を取得
@@ -165,7 +198,12 @@ export async function POST(request: NextRequest) {
     if (!emailResult.success) {
       // メール送信に失敗した場合は招待レコードを削除
       await supabase.from('user_invitations').delete().eq('id', invitation.id);
-      return NextResponse.json({ error: '招待メールの送信に失敗しました' }, { status: 500 });
+      return NextResponse.json({ 
+        error: '招待メールの送信に失敗しました', 
+        details: emailResult.error instanceof Error 
+          ? emailResult.error.message 
+          : (emailResult.error?.message || JSON.stringify(emailResult.error))
+      }, { status: 500 });
     }
     
     // アクティビティログを記録
@@ -180,6 +218,7 @@ export async function POST(request: NextRequest) {
     
     if (activityError) {
       debugLog('アクティビティログ記録エラー:', activityError);
+      // アクティビティログの記録失敗はユーザーに表示しない（招待自体は成功）
     }
     
     return NextResponse.json({ success: true, invitation });

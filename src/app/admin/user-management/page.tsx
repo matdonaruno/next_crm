@@ -176,6 +176,7 @@ export default function UserManagement() {
     
     try {
       setLoading(true);
+      console.log('招待リクエストを送信: ', { email, role, facilityId: currentUserFacilityId });
       
       // APIを呼び出して招待処理
       const response = await fetch('/api/invitations', {
@@ -192,9 +193,10 @@ export default function UserManagement() {
       });
       
       const result = await response.json();
+      console.log('招待APIレスポンス:', { status: response.status, statusText: response.statusText, data: result });
       
       if (!response.ok) {
-        throw new Error(result.error || '招待処理中にエラーが発生しました');
+        throw new Error(result.error || result.details || '招待処理中にエラーが発生しました');
       }
       
       // 成功メッセージ
@@ -219,6 +221,7 @@ export default function UserManagement() {
       setInvitations(invitationsData || []);
       
     } catch (error: any) {
+      console.error('招待エラーの詳細:', error);
       toast({
         title: '招待エラー',
         description: error.message,
