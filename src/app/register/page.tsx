@@ -29,7 +29,6 @@ function RegisterContent() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [userId, setUserId] = useState('');
   
   // フルネームを取得
   const getFullName = () => {
@@ -59,7 +58,6 @@ function RegisterContent() {
         
         setInvitation(data.invitation);
         setEmail(data.invitation.email || '');
-        setUserId(data.invitation.user_id || '');
         setValidating(false);
         setLoading(false);
       } catch (error) {
@@ -113,7 +111,6 @@ function RegisterContent() {
           token,
           password,
           fullName: getFullName(),
-          userId
         }),
       });
       
@@ -157,7 +154,7 @@ function RegisterContent() {
         <Card className="w-full max-w-md border-0 shadow-lg bg-white/90 backdrop-blur-sm rounded-2xl overflow-hidden">
           <CardHeader className="space-y-1 pb-2">
             <CardTitle className="text-2xl font-bold bg-gradient-to-r from-slate-500 to-stone-600 bg-clip-text text-transparent">
-              アカウント設定完了
+              アカウント作成完了
             </CardTitle>
             <CardDescription className="text-gray-500">
               ログインページに自動的にリダイレクトします...
@@ -252,7 +249,7 @@ function RegisterContent() {
               </CardTitle>
             </div>
             <CardDescription className="text-gray-500">
-              {invitation ? `${invitation.email}のアカウント設定` : '招待からアカウントを設定'}
+              {invitation ? `${invitation.email}で新規アカウントを作成` : '招待からアカウントを作成'}
             </CardDescription>
           </CardHeader>
 
@@ -366,7 +363,7 @@ function RegisterContent() {
                   className="w-full bg-gradient-to-r from-slate-500 to-stone-600 hover:from-slate-600 hover:to-stone-700 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
                   disabled={registering || !password || !confirmPassword || (!lastName && !firstName)}
                 >
-                  {registering ? "処理中..." : "アカウント設定"}
+                  {registering ? "処理中..." : "アカウント作成"}
                   {!registering && <ArrowRight className="ml-2 h-5 w-5" />}
                 </Button>
               </motion.div>

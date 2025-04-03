@@ -16,6 +16,7 @@ import { useEffect as useEffectOnce } from 'react';
 
 // ロールの選択肢
 const ROLE_OPTIONS = [
+  { value: 'superuser', label: 'スーパーユーザー' },
   { value: 'facility_admin', label: '施設管理者' },
   { value: 'approver', label: '承認者' },
   { value: 'regular_user', label: '一般ユーザー' }
@@ -416,11 +417,13 @@ export default function UserManagement() {
                         onChange={(e) => setRole(e.target.value)}
                         required
                       >
-                        {ROLE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
+                        {ROLE_OPTIONS
+                          .filter(option => currentUserRole === 'superuser' || option.value !== 'superuser')
+                          .map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                       </select>
                     </div>
                   </CardContent>
@@ -555,11 +558,13 @@ export default function UserManagement() {
                                   className="p-1 border border-pink-200 rounded focus:border-pink-500 focus:ring-pink-500"
                                   disabled={loading}
                                 >
-                                  {ROLE_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                      {option.label}
-                                    </option>
-                                  ))}
+                                  {ROLE_OPTIONS
+                                    .filter(option => currentUserRole === 'superuser' || option.value !== 'superuser')
+                                    .map((option) => (
+                                      <option key={option.value} value={option.value}>
+                                        {option.label}
+                                      </option>
+                                    ))}
                                 </select>
                               </td>
                               <td className="p-2">{user.facilities?.name}</td>
