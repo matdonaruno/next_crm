@@ -15,7 +15,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 function RegisterContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const token = searchParams?.get('token');
+  // URLからトークンを取得し、フラグメント識別子を削除
+  const rawToken = searchParams?.get('token');
+  const token = rawToken ? rawToken.split('#')[0] : null;
+  
+  console.log('現在のセッション状態:', { rawToken, cleanedToken: token });
   
   const [loading, setLoading] = useState(true);
   const [validating, setValidating] = useState(true);
@@ -34,6 +38,17 @@ function RegisterContent() {
   const getFullName = () => {
     return `${lastName} ${firstName}`.trim();
   };
+  
+  // URLフラグメントを削除する処理
+  useEffect(() => {
+    // URLにフラグメントが含まれている場合、クリーンなURLに置き換える
+    if (window.location.hash && window.location.search.includes('token=')) {
+      const cleanUrl = window.location.pathname + window.location.search.split('#')[0];
+      // 履歴を書き換えずにURLを更新
+      window.history.replaceState({}, '', cleanUrl);
+      console.log('URLからフラグメントを削除しました:', cleanUrl);
+    }
+  }, []);
   
   // トークンの検証
   useEffect(() => {

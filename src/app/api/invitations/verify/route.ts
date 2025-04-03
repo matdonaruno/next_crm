@@ -59,6 +59,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'トークンとパスワードは必須です' }, { status: 400 });
     }
     
+    console.log('受信したトークン:', token);
+    
     // トークンの有効性を確認
     const { data: invitation, error: invitationError } = await supabase
       .from('user_invitations')
@@ -69,30 +71,87 @@ export async function POST(request: NextRequest) {
       .single();
     
     if (invitationError || !invitation) {
+      console.error('招待検証エラー:', invitationError);
       return NextResponse.json({ 
-        error: '無効な招待トークンです。期限切れか、既に使用済みの可能性があります。' 
+        error: '無効な招待トークンです。期限切れか、既に使用済みの可能性があります。', 
+        details: invitationError
       }, { status: 400 });
     }
     
-    // 新規ユーザー登録
-    const { data: authData, error: signUpError } = await supabase.auth.signUp({
-      email: invitation.email,
-      password,
-      options: {
-        data: {
-          full_name: fullName || invitation.email.split('@')[0],
+    // 既存のユーザーを確認（メールアドレスで検索）
+    let existingUser = null;
+    try {
+      const { data, error } = await supabase.auth.admin.listUsers();
+      if (!error && data && data.users) {
+        existingUser = data.users.find(user => user.email === invitation.email);
+      }
+      if (existingUser) {
+        console.log('既存ユーザーを発見:', existingUser.id);
+      }
+    } catch (error) {
+      console.error('ユーザー検索エラー:', error);
+    }
+    
+    let userId;
+    
+    if (existingUser) {
+      // 既存ユーザーの場合はパスワードを更新
+      console.log('既存ユーザーを更新:', existingUser.id);
+      const { error: updateError } = await supabase.auth.admin.updateUserById(
+        existingUser.id,
+        { password }
+      );
+      
+      if (updateError) {
+        console.error('パスワード更新エラー:', updateError);
+        return NextResponse.json({ 
+          error: 'パスワードの更新に失敗しました', 
+          details: updateError 
+        }, { status: 500 });
+      }
+      
+      userId = existingUser.id;
+      
+      // プロフィール情報を更新
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          full_name: fullName,
           role: invitation.role,
           facility_id: invitation.facility_id,
-          department_id: invitation.department_id
-        }
+          department_id: invitation.department_id,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', userId);
+      
+      if (profileError) {
+        console.error('プロフィール更新エラー:', profileError);
+        // プロフィール更新に失敗してもユーザー登録自体は成功とする
       }
-    });
-    
-    if (signUpError || !authData.user) {
-      return NextResponse.json({ 
-        error: 'ユーザー登録に失敗しました', 
-        details: signUpError 
-      }, { status: 500 });
+    } else {
+      // 新規ユーザー登録
+      const { data: authData, error: signUpError } = await supabase.auth.signUp({
+        email: invitation.email,
+        password,
+        options: {
+          data: {
+            full_name: fullName || invitation.email.split('@')[0],
+            role: invitation.role,
+            facility_id: invitation.facility_id,
+            department_id: invitation.department_id
+          }
+        }
+      });
+      
+      if (signUpError || !authData.user) {
+        console.error('ユーザー登録エラー:', signUpError);
+        return NextResponse.json({ 
+          error: 'ユーザー登録に失敗しました', 
+          details: signUpError 
+        }, { status: 500 });
+      }
+      
+      userId = authData.user.id;
     }
     
     // 招待を使用済みにマーク
@@ -107,14 +166,15 @@ export async function POST(request: NextRequest) {
     // アクティビティログを記録
     try {
       await supabase.from('user_activity_logs').insert({
-        user_id: authData.user.id,
+        user_id: userId,
         action_type: 'user_registration_completed',
         action_details: { 
           invitation_id: invitation.id,
           email: invitation.email,
-          role: invitation.role
+          role: invitation.role,
+          is_existing_user: !!existingUser
         },
-        performed_by: authData.user.id
+        performed_by: userId
       });
     } catch (logError) {
       console.error('アクティビティログ記録エラー:', logError);
@@ -129,7 +189,7 @@ export async function POST(request: NextRequest) {
         message: `${fullName || invitation.email}さんが招待を受け入れ、アカウントを作成しました。`,
         notification_type: 'user_registration',
         related_data: {
-          user_id: authData.user.id,
+          user_id: userId,
           email: invitation.email
         }
       });
