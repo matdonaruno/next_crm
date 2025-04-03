@@ -197,6 +197,23 @@ export default function UserManagement() {
       console.log('招待APIレスポンス:', { status: response.status, statusText: response.statusText, data: result });
       
       if (!response.ok) {
+        // 既存の招待が見つかった場合は特別なエラーメッセージを表示
+        if (result.canDelete && result.invitation) {
+          const invitation = result.invitation;
+          const errorMessage = result.error + " 削除しますか？";
+          
+          // 招待削除の確認を表示
+          if (confirm(errorMessage)) {
+            await handleCancelInvitation(invitation.id, true);
+            // 削除後に再度招待処理を試みる
+            if (confirm("招待を削除しました。もう一度招待を送信しますか？")) {
+              // 再帰的に招待処理を呼び出し
+              handleInvite(e);
+              return;
+            }
+          }
+        }
+        
         throw new Error(result.error || result.details || '招待処理中にエラーが発生しました');
       }
       
@@ -234,8 +251,12 @@ export default function UserManagement() {
   };
   
   // 招待取り消し
-  const handleCancelInvitation = async (invitationId: string) => {
+  const handleCancelInvitation = async (invitationId: string, skipConfirmation = false) => {
     try {
+      if (!skipConfirmation && !confirm('本当にこの招待を取り消しますか？')) {
+        return;
+      }
+      
       setLoading(true);
       
       // 招待を削除
@@ -253,8 +274,8 @@ export default function UserManagement() {
         title: '招待取り消し完了',
         description: '招待を取り消しました。',
       });
-      
     } catch (error: any) {
+      console.error('招待取り消しエラー:', error);
       toast({
         title: '招待取り消しエラー',
         description: error.message,
@@ -412,7 +433,7 @@ export default function UserManagement() {
                       <Label htmlFor="role" className="text-pink-800">ロール</Label>
                       <select
                         id="role"
-                        className="w-full p-2 border rounded bg-white border-pink-200 focus:border-pink-500 focus:ring-pink-500"
+                        className="w-full p-2 border rounded bg-white border-pink-200 focus:border-pink-500 focus:ring-pink-500 text-sm"
                         value={role}
                         onChange={(e) => setRole(e.target.value)}
                         required
@@ -555,7 +576,7 @@ export default function UserManagement() {
                                 <select
                                   value={user.role}
                                   onChange={(e) => handleChangeUserRole(user.id, e.target.value)}
-                                  className="p-1 border border-pink-200 rounded focus:border-pink-500 focus:ring-pink-500"
+                                  className="p-1 border border-pink-200 rounded focus:border-pink-500 focus:ring-pink-500 text-sm w-full"
                                   disabled={loading}
                                 >
                                   {ROLE_OPTIONS

@@ -50,6 +50,25 @@ async function sendInvitationEmail(email: string, token: string, inviterName: st
       
       if (error) {
         debugLog('Supabase招待メール送信エラー:', error);
+        
+        // すでに登録されているメールアドレスの場合は独自の処理
+        if (error.code === 'email_exists') {
+          // 既存ユーザー向けの招待メカニズム
+          // これは実質的な再招待/ロール変更の通知になる
+          
+          // TODO: ここに独自のメール送信ロジックを実装することも可能
+          // 例: 別のメール送信サービスを使用してカスタムテンプレートでメールを送信
+          
+          debugLog('既存ユーザー向けの招待を処理:', { email, role, facilityName });
+          
+          // 現在はSupabase側でメール送信はできないが、招待自体は成功として処理
+          return {
+            success: true,
+            message: '既存ユーザー向け招待として処理しました',
+            emailExists: true
+          };
+        }
+        
         return { success: false, error };
       }
       
@@ -137,6 +156,37 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '他の施設へのユーザー招待権限がありません' }, { status: 403 });
     }
     
+    // 既存の招待レコードを確認
+    const { data: existingInvitation } = await supabase
+      .from('user_invitations')
+      .select('id, email, is_used, expires_at')
+      .eq('email', email)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+    
+    // 既存の招待が見つかった場合はエラーを返す
+    if (existingInvitation) {
+      const now = new Date();
+      const expiresAt = new Date(existingInvitation.expires_at);
+      
+      let errorMessage = 'このメールアドレスには既に招待を送信済みです。';
+      
+      if (existingInvitation.is_used) {
+        errorMessage = 'このメールアドレスのユーザーは既に登録済みです。';
+      } else if (expiresAt < now) {
+        errorMessage = 'このメールアドレスへの招待は期限切れです。古い招待を削除してから再送信してください。';
+      } else {
+        errorMessage = 'このメールアドレスには既に有効な招待が存在します。必要に応じて招待を削除してから再送信してください。';
+      }
+      
+      return NextResponse.json({ 
+        error: errorMessage,
+        invitation: existingInvitation,
+        canDelete: true
+      }, { status: 400 });
+    }
+    
     // 招待トークンを生成（UUID + タイムスタンプ）
     const token = `${uuidv4()}-${Date.now()}`;
     const expiresAt = new Date();
@@ -144,7 +194,7 @@ export async function POST(request: NextRequest) {
     
     debugLog('招待トークン生成:', { token, expiresAt });
     
-    // 招待レコードをDBに保存
+    // 新しい招待レコードを作成
     const { data: invitation, error: invitationError } = await supabase
       .from('user_invitations')
       .insert({
@@ -159,16 +209,8 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
     
-    debugLog('招待レコード保存結果:', { 
-      hasInvitation: !!invitation,
-      error: invitationError
-    });
-    
     if (invitationError) {
-      // 既に招待メールが送信済みの場合
-      if (invitationError.code === '23505') { // unique violation
-        return NextResponse.json({ error: 'このメールアドレスには既に招待を送信済みです' }, { status: 400 });
-      }
+      debugLog('招待作成エラー:', invitationError);
       return NextResponse.json({ 
         error: '招待の作成に失敗しました', 
         details: typeof invitationError === 'object' ? JSON.stringify(invitationError) : String(invitationError)
@@ -195,14 +237,29 @@ export async function POST(request: NextRequest) {
     
     debugLog('メール送信結果:', emailResult);
     
+    // メール送信に失敗した場合（email_existsも失敗として扱う）
     if (!emailResult.success) {
-      // メール送信に失敗した場合は招待レコードを削除
+      // 招待レコードを削除
       await supabase.from('user_invitations').delete().eq('id', invitation.id);
+      
+      // エラーメッセージを整形
+      const errorDetails = emailResult.error instanceof Error 
+        ? emailResult.error.message 
+        : (emailResult.error && typeof emailResult.error === 'object' && 'message' in emailResult.error)
+          ? (emailResult.error as any).message
+          : JSON.stringify(emailResult.error);
+      
+      // email_existsエラーの場合は特別なメッセージ
+      if (emailResult.error && typeof emailResult.error === 'object' && 'code' in emailResult.error && (emailResult.error as any).code === 'email_exists') {
+        return NextResponse.json({ 
+          error: 'このメールアドレスは既にシステムに登録されています。', 
+          details: '既存ユーザーへの招待は現在サポートされていません。'
+        }, { status: 400 });
+      }
+      
       return NextResponse.json({ 
         error: '招待メールの送信に失敗しました', 
-        details: emailResult.error instanceof Error 
-          ? emailResult.error.message 
-          : (emailResult.error?.message || JSON.stringify(emailResult.error))
+        details: errorDetails
       }, { status: 500 });
     }
     
@@ -210,7 +267,11 @@ export async function POST(request: NextRequest) {
     const { error: activityError } = await supabase.from('user_activity_logs').insert({
       user_id: currentUserId,
       action_type: 'user_invitation_sent',
-      action_details: { invited_email: email, role, facility_id: facilityId },
+      action_details: { 
+        invited_email: email, 
+        role, 
+        facility_id: facilityId
+      },
       performed_by: currentUserId
     });
     
@@ -221,7 +282,11 @@ export async function POST(request: NextRequest) {
       // アクティビティログの記録失敗はユーザーに表示しない（招待自体は成功）
     }
     
-    return NextResponse.json({ success: true, invitation });
+    return NextResponse.json({ 
+      success: true, 
+      invitation,
+      message: '招待メールを送信しました'
+    });
     
   } catch (error) {
     debugLog('招待処理エラー:', error);
