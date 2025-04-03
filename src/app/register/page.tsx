@@ -17,9 +17,15 @@ function RegisterContent() {
   const searchParams = useSearchParams();
   // URLからトークンを取得し、フラグメント識別子を削除
   const rawToken = searchParams?.get('token');
-  const token = rawToken ? rawToken.split('#')[0] : null;
+  // より強固なトークン処理 - クエリパラメータと#以降を適切に処理
+  const token = rawToken ? rawToken.split('#')[0].split('?')[0].trim() : null;
   
-  console.log('現在のセッション状態:', { rawToken, cleanedToken: token });
+  console.log('現在のセッション状態:', { 
+    rawToken, 
+    cleanedToken: token, 
+    fullUrl: typeof window !== 'undefined' ? window.location.href : null,
+    hasHash: typeof window !== 'undefined' && !!window.location.hash
+  });
   
   const [loading, setLoading] = useState(true);
   const [validating, setValidating] = useState(true);
@@ -42,7 +48,7 @@ function RegisterContent() {
   // URLフラグメントを削除する処理
   useEffect(() => {
     // URLにフラグメントが含まれている場合、クリーンなURLに置き換える
-    if (window.location.hash && window.location.search.includes('token=')) {
+    if (typeof window !== 'undefined' && window.location.hash && window.location.search.includes('token=')) {
       const cleanUrl = window.location.pathname + window.location.search.split('#')[0];
       // 履歴を書き換えずにURLを更新
       window.history.replaceState({}, '', cleanUrl);
@@ -61,11 +67,15 @@ function RegisterContent() {
       }
       
       try {
-        const response = await fetch(`/api/invitations/verify?token=${token}`);
+        console.log('トークン検証APIを呼び出し:', token, '長さ:', token.length);
+        const response = await fetch(`/api/invitations/verify?token=${encodeURIComponent(token)}`);
         const data = await response.json();
         
+        console.log('トークン検証結果:', data);
+        
         if (!response.ok || !data.valid) {
-          setError(data.error || '無効な招待トークンです。');
+          const errorMsg = data.error || '無効な招待トークンです。';
+          setError(`${errorMsg} トークン検証APIからの詳細: ${JSON.stringify(data)}`);
           setValidating(false);
           setLoading(false);
           return;
@@ -77,7 +87,7 @@ function RegisterContent() {
         setLoading(false);
       } catch (error) {
         console.error('トークン検証エラー:', error);
-        setError('招待トークンの検証中にエラーが発生しました。');
+        setError(`招待トークンの検証中にエラーが発生しました。詳細: ${error instanceof Error ? error.message : String(error)}`);
         setValidating(false);
         setLoading(false);
       }
@@ -117,6 +127,13 @@ function RegisterContent() {
     setRegistering(true);
     
     try {
+      console.log('アカウント登録APIを呼び出し:', {
+        hasToken: !!token,
+        tokenLength: token?.length,
+        hasPassword: !!password,
+        hasFullName: !!getFullName()
+      });
+      
       const response = await fetch('/api/invitations/verify', {
         method: 'POST',
         headers: {
@@ -130,12 +147,13 @@ function RegisterContent() {
       });
       
       const data = await response.json();
+      console.log('登録API応答:', data);
       
       if (!response.ok) {
         throw new Error(data.error || 'アカウント作成中にエラーが発生しました。');
       }
       
-      setSuccess('アカウントが正常に作成されました。ログインしてアプリを利用できます。');
+      setSuccess(data.message || 'アカウントが正常に作成されました。ログインしてアプリを利用できます。');
       
       // 3秒後にログインページにリダイレクト
       setTimeout(() => {
@@ -143,6 +161,7 @@ function RegisterContent() {
       }, 3000);
       
     } catch (error: any) {
+      console.error('登録エラーの詳細:', error);
       setError(error.message);
     } finally {
       setRegistering(false);
