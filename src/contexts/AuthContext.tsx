@@ -21,6 +21,8 @@ interface UserProfile {
   id: string;
   fullname: string | null;
   facility_id: string | null;
+  department_id?: string | null;
+  email?: string | null;
   role?: string | null;
 }
 
@@ -213,6 +215,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
             
             console.log("AuthContext: プロファイル取得失敗:", error);
+            
+            // プロファイルが存在しない場合は作成を試みる
+            if (error && error.code === 'PGRST116') {
+              console.log("AuthContext: プロファイルが存在しません。新規作成を試みます");
+              
+              // ユーザー情報を取得
+              const { data: userData, error: userError } = await supabase.auth.getUser();
+              if (userError || !userData.user) {
+                console.error("AuthContext: ユーザー情報取得エラー:", userError);
+                continue;
+              }
+              
+              // ユーザーメタデータからプロファイル情報を抽出
+              const userMeta = userData.user.user_metadata || {};
+              
+              // 新しいプロファイルを作成
+              const profileData = {
+                id: userId,
+                fullname: userMeta.full_name || null,
+                email: userData.user.email,
+                facility_id: userMeta.facility_id || null,
+                department_id: userMeta.department_id || null,
+                role: userMeta.role || 'regular_user',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              };
+              
+              console.log("AuthContext: 新規プロファイル作成:", profileData);
+              
+              // プロファイルをupsert
+              const { data: newProfile, error: insertError } = await supabase
+                .from('profiles')
+                .upsert(profileData)
+                .select('*')
+                .single();
+              
+              if (insertError) {
+                console.error("AuthContext: プロファイル作成エラー:", insertError);
+                // 次の試行に移る
+              } else if (newProfile) {
+                console.log("AuthContext: 新規プロファイル作成成功:", newProfile);
+                setCachedProfile(newProfile);
+                isRequestCompleted = true;
+                return { data: newProfile, error: null };
+              }
+            }
             
             if (retryAttempt < maxRetries - 1) {
               await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL));

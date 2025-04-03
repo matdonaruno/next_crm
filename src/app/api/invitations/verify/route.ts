@@ -140,7 +140,7 @@ export async function POST(request: NextRequest) {
         const { error: profileError } = await supabase
           .from('profiles')
           .update({
-            full_name: fullName,
+            fullname: fullName,
             role: invitation.role,
             facility_id: invitation.facility_id,
             department_id: invitation.department_id,
@@ -196,7 +196,7 @@ export async function POST(request: NextRequest) {
         console.log('新規ユーザーのプロフィール情報を更新:', { userId, fullName });
         const profileData = {
           id: userId,
-          full_name: fullName,
+          fullname: fullName,
           role: invitation.role,
           facility_id: invitation.facility_id,
           department_id: invitation.department_id,

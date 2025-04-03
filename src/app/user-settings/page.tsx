@@ -174,6 +174,46 @@ export default function UserSettings() {
 
       if (error) {
         setError(error.message);
+        
+        // プロファイル更新エラーの場合、直接Supabaseを使用して新規作成を試みる
+        if (user && user.id) {
+          console.log("プロファイル更新エラー、直接DBへの挿入を試みます");
+          
+          const profileData = {
+            id: user.id,
+            fullname: fullname,
+            facility_id: selectedFacility.id,
+            email: user.email,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          
+          // まずupsertを試す
+          const { error: upsertError } = await supabase
+            .from('profiles')
+            .upsert(profileData);
+          
+          if (upsertError) {
+            console.error("Supabase upsertエラー:", upsertError);
+            
+            // upsertに失敗した場合はinsertを試す
+            const { error: insertError } = await supabase
+              .from('profiles')
+              .insert(profileData);
+            
+            if (insertError) {
+              console.error("Supabase insertエラー:", insertError);
+            } else {
+              setMessage("プロファイル情報が作成されました");
+              // 成功したらページをリロード
+              window.location.reload();
+            }
+          } else {
+            setMessage("プロファイル情報が作成されました");
+            // 成功したらページをリロード
+            window.location.reload();
+          }
+        }
       } else {
         setMessage("プロファイル情報が更新されました");
       }
