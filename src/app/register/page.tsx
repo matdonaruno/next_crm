@@ -96,6 +96,21 @@ function RegisterContent() {
     validateToken();
   }, [token]);
   
+  // パスワードの強度を検証する関数
+  const validatePassword = (password: string) => {
+    const hasLowerCase = /[a-z]/.test(password);
+    const hasUpperCase = /[A-Z]/.test(password);
+    const hasNumber = /[0-9]/.test(password);
+    
+    return {
+      isValid: hasLowerCase && hasUpperCase && hasNumber && password.length >= 8,
+      hasLowerCase,
+      hasUpperCase,
+      hasNumber,
+      hasMinLength: password.length >= 8
+    };
+  };
+  
   // ユーザー登録の処理
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,8 +127,15 @@ function RegisterContent() {
     }
     
     // パスワードの強度検証
-    if (password.length < 8) {
-      setError('パスワードは8文字以上である必要があります。');
+    const passwordCheck = validatePassword(password);
+    if (!passwordCheck.isValid) {
+      let errorMsg = 'パスワードは以下の条件を満たす必要があります：';
+      if (!passwordCheck.hasMinLength) errorMsg += '\n- 8文字以上';
+      if (!passwordCheck.hasLowerCase) errorMsg += '\n- 小文字(a-z)を含む';
+      if (!passwordCheck.hasUpperCase) errorMsg += '\n- 大文字(A-Z)を含む';
+      if (!passwordCheck.hasNumber) errorMsg += '\n- 数字(0-9)を含む';
+      
+      setError(errorMsg);
       return;
     }
     
@@ -295,7 +317,7 @@ function RegisterContent() {
                   animate={{ opacity: 1, y: 0 }}
                   className="p-3 bg-red-50 border border-red-200 rounded-xl"
                 >
-                  <p className="text-sm text-red-700">{error}</p>
+                  <p className="text-sm text-red-700 whitespace-pre-line">{error}</p>
                 </motion.div>
               )}
 
@@ -365,7 +387,15 @@ function RegisterContent() {
                     required
                   />
                 </div>
-                <p className="text-xs text-gray-500">パスワードは8文字以上必要です</p>
+                <div className="text-xs space-y-1 text-gray-500">
+                  <p>パスワードは以下の条件を満たす必要があります：</p>
+                  <ul className="list-disc pl-5">
+                    <li className={password.length >= 8 ? "text-green-600" : ""}>8文字以上</li>
+                    <li className={/[a-z]/.test(password) ? "text-green-600" : ""}>小文字(a-z)を含む</li>
+                    <li className={/[A-Z]/.test(password) ? "text-green-600" : ""}>大文字(A-Z)を含む</li>
+                    <li className={/[0-9]/.test(password) ? "text-green-600" : ""}>数字(0-9)を含む</li>
+                  </ul>
+                </div>
               </div>
 
               <div className="space-y-2">
