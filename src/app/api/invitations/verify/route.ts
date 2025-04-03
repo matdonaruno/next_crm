@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
         
         // プロフィール情報を更新
         console.log('既存ユーザーのプロフィール情報を更新:', { userId, fullName });
-        const { error: profileError } = await supabase
+        const { error: profileError } = await supabaseAdmin
           .from('profiles')
           .update({
             fullname: fullName,
@@ -167,28 +167,30 @@ export async function POST(request: NextRequest) {
       try {
         console.log('新規ユーザー登録を実行:', { email: invitation.email });
         
-        const { data: authData, error: signUpError } = await supabase.auth.signUp({
+        // サービスロールを使用して管理者APIから直接ユーザーを作成
+        const { data: userData, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
           email: invitation.email,
-          password,
-          options: {
-            data: {
-              full_name: fullName || invitation.email.split('@')[0],
-              role: invitation.role,
-              facility_id: invitation.facility_id,
-              department_id: invitation.department_id
-            }
+          password: password,
+          email_confirm: true, // メール確認済みとしてマーク
+          user_metadata: {
+            full_name: fullName || invitation.email.split('@')[0],
+            role: invitation.role,
+            facility_id: invitation.facility_id,
+            department_id: invitation.department_id,
+            invited_by: invitation.invited_by,
+            facility_name: invitation.facility_name
           }
         });
         
-        if (signUpError || !authData.user) {
-          console.error('ユーザー登録エラー:', signUpError);
+        if (createUserError || !userData.user) {
+          console.error('ユーザー登録エラー:', createUserError);
           return NextResponse.json({ 
             error: 'ユーザー登録に失敗しました', 
-            details: signUpError 
+            details: createUserError 
           }, { status: 500 });
         }
         
-        userId = authData.user.id;
+        userId = userData.user.id;
         console.log('新規ユーザー登録が完了:', userId);
         
         // 新規ユーザーのプロフィール情報を明示的に更新
@@ -205,16 +207,16 @@ export async function POST(request: NextRequest) {
           created_at: new Date().toISOString()
         };
 
-        // まずはupsertを試す
-        const { error: upsertError } = await supabase
+        // まずはupsertを試す - 管理者権限でプロファイルを作成
+        const { error: upsertError } = await supabaseAdmin
           .from('profiles')
           .upsert(profileData);
         
         if (upsertError) {
           console.warn('プロフィールupsertエラー、insertを試みます:', upsertError);
           
-          // upsertに失敗した場合はinsertを試す
-          const { error: insertError } = await supabase
+          // upsertに失敗した場合はinsertを試す - 管理者権限で
+          const { error: insertError } = await supabaseAdmin
             .from('profiles')
             .insert(profileData);
           

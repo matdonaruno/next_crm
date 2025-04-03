@@ -200,9 +200,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             
             console.log(`AuthContext: プロファイル取得試行 ${retryAttempt + 1}/${maxRetries}`);
             
+            // Supabaseクエリにヘッダーを追加して406エラーを回避
+            const options = {
+              count: 'exact'
+            };
+            
             const { data, error } = await supabase
               .from('profiles')
-              .select('*')
+              .select('*', options)
               .eq('id', userId)
               .single();
               
@@ -217,7 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.log("AuthContext: プロファイル取得失敗:", error);
             
             // プロファイルが存在しない場合は作成を試みる
-            if (error && error.code === 'PGRST116') {
+            if (error && (error.code === 'PGRST116' || error.message?.includes('JSON object') || error.status === 406)) {
               console.log("AuthContext: プロファイルが存在しません。新規作成を試みます");
               
               // ユーザー情報を取得
@@ -244,21 +249,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               
               console.log("AuthContext: 新規プロファイル作成:", profileData);
               
-              // プロファイルをupsert
-              const { data: newProfile, error: insertError } = await supabase
-                .from('profiles')
-                .upsert(profileData)
-                .select('*')
-                .single();
-              
-              if (insertError) {
-                console.error("AuthContext: プロファイル作成エラー:", insertError);
-                // 次の試行に移る
-              } else if (newProfile) {
-                console.log("AuthContext: 新規プロファイル作成成功:", newProfile);
-                setCachedProfile(newProfile);
-                isRequestCompleted = true;
-                return { data: newProfile, error: null };
+              try {
+                // プロファイルを直接サーバーAPIで作成
+                const response = await fetch('/api/user/create-profile', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify(profileData),
+                });
+                
+                if (response.ok) {
+                  const newProfile = await response.json();
+                  console.log("AuthContext: 新規プロファイル作成成功:", newProfile);
+                  setCachedProfile(newProfile);
+                  isRequestCompleted = true;
+                  return { data: newProfile, error: null };
+                } else {
+                  console.error("AuthContext: プロファイル作成API呼び出し失敗:", await response.text());
+                }
+              } catch (createError) {
+                console.error("AuthContext: プロファイル作成中にエラー:", createError);
               }
             }
             
