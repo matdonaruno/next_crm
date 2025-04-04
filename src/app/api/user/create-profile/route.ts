@@ -13,6 +13,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'プロファイルデータとユーザーIDは必須です' }, { status: 400 });
     }
     
+    console.log('API Endpoint: /api/user/create-profile 受信データ:', profileData); // 受信データをログ記録
+    
     // ユーザー認証を確認
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     
@@ -39,6 +41,8 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString(),
       created_at: profileData.created_at || new Date().toISOString()
     };
+    
+    console.log('API Endpoint: upsertに渡すデータ:', cleanProfileData); // upsert前のデータをログ記録
     
     // バリデーション: 必須フィールドのチェック
     if (!cleanProfileData.id || !cleanProfileData.email || !cleanProfileData.role) {
@@ -115,11 +119,18 @@ export async function POST(request: NextRequest) {
       console.log('プロファイル作成成功:', insertData);
       return NextResponse.json(insertData);
     }
-  } catch (error) {
-    console.error('プロファイル作成処理エラー:', error);
-    return NextResponse.json({ 
-      error: 'プロファイル作成中にエラーが発生しました',
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
+  } catch (error: any) { // catchで型を指定
+    console.error('API処理中の予期せぬ例外:', error); // 例外全体をログ記録
+    // エラーオブジェクトが持つ可能性のあるプロパティをログに出力
+    console.error('例外詳細:', { 
+        message: error.message, 
+        stack: error.stack, 
+        name: error.name 
+        // 他に有用なプロパティがあれば追加
+    });
+    return NextResponse.json(
+      { error: '内部サーバーエラー', message: error.message },
+      { status: 500 }
+    );
   }
 } 
