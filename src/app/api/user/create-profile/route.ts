@@ -35,12 +35,11 @@ export async function POST(request: NextRequest) {
       fullname: profileData.fullname || null,
       email: profileData.email || user.email,
       facility_id: profileData.facility_id || null,
-      // department_id: profileData.department_id || null, // テーブルに存在しないためコメントアウトまたは削除
+      // department_id: profileData.department_id || null, // ここがコメントアウトされているか削除されていることを確認
       role: profileData.role || 'regular_user',
       is_active: profileData.is_active !== undefined ? profileData.is_active : true,
       updated_at: new Date().toISOString(),
-      // created_at はDBのデフォルトに任せるか、挿入時のみ設定する方が安全
-      // created_at: profileData.created_at || new Date().toISOString()
+      // created_at もコメントアウトされていることを確認
     };
     
     console.log('API Endpoint: upsertに渡すデータ:', cleanProfileData); // upsert前のデータをログ記録
