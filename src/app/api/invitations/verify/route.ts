@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
         
         userId = existingUser.id;
         
-        // プロフィール情報を更新
+        // 既存ユーザーのプロフィール情報を更新
         console.log('既存ユーザーのプロフィール情報を更新:', { userId, fullName });
         const { error: profileError } = await supabaseAdmin
           .from('profiles')
@@ -143,8 +143,7 @@ export async function POST(request: NextRequest) {
             fullname: fullName,
             role: invitation.role,
             facility_id: invitation.facility_id,
-            email: invitation.email,
-            updated_at: new Date().toISOString()
+            email: invitation.email
           })
           .eq('id', userId);
         
@@ -192,7 +191,6 @@ export async function POST(request: NextRequest) {
         console.log('新規ユーザー登録が完了:', userId);
         
         // 新規ユーザーのプロフィール情報を明示的に更新
-        // user_metadataに情報を保存しても、profilesテーブルには自動では反映されないため
         console.log('新規ユーザーのプロフィール情報を更新:', { userId, fullName });
         const profileData = {
           id: userId,
@@ -200,7 +198,6 @@ export async function POST(request: NextRequest) {
           role: invitation.role,
           facility_id: invitation.facility_id,
           email: invitation.email,
-          updated_at: new Date().toISOString(),
           created_at: new Date().toISOString()
         };
 

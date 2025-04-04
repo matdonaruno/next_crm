@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
       // department_id: profileData.department_id || null, // ここがコメントアウトされているか削除されていることを確認
       role: profileData.role || 'regular_user',
       is_active: profileData.is_active !== undefined ? profileData.is_active : true,
-      updated_at: new Date().toISOString(),
+      // updated_at: new Date().toISOString(), // DBで自動更新するため削除
       // created_at もコメントアウトされていることを確認
     };
     
