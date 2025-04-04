@@ -161,20 +161,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // プロファイル情報を取得する関数（キャッシュ対応）
   const fetchProfileWithRetry = async (userId: string, maxRetries = MAX_RETRY_COUNT, skipCache = false): Promise<{ data: UserProfile | null, error: any | null }> => {
-    // キャッシュをスキップするかチェック
-    if (skipCache) {
-      console.log("AuthContext: キャッシュをスキップしてプロフィールを取得");
-      clearProfileCache();
-    } else {
-      // キャッシュされたプロファイルを確認
-      const cachedProfile = getCachedProfile();
-      if (cachedProfile) {
-        console.log("AuthContext: キャッシュされたプロファイルを使用");
-        return { data: cachedProfile, error: null };
-      }
-    }
-
-    // リクエストが複数回実行されるのを防ぐためのフラグ
     let isRequestCompleted = false;
     
     try {
@@ -203,7 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             
             // Supabaseクエリにヘッダーを追加して406エラーを回避
             const options = {
-              count: 'exact'
+              count: 'exact' as const
             };
             
             const { data, error } = await supabase
@@ -223,7 +209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.log("AuthContext: プロファイル取得失敗:", error);
             
             // プロファイルが存在しない場合は作成を試みる
-            if (error && (error.code === 'PGRST116' || error.message?.includes('JSON object') || error.status === 406)) {
+            if (error && (error.code === 'PGRST116' || error.message?.includes('JSON object') || error.code === '406')) {
               console.log("AuthContext: プロファイルが存在しません。新規作成を試みます");
               
               // ユーザー情報を取得
@@ -244,63 +230,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 facility_id: userMeta.facility_id || null,
                 department_id: userMeta.department_id || null,
                 role: userMeta.role || 'regular_user',
+                is_active: true,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
               };
               
               console.log("AuthContext: 新規プロファイル作成:", profileData);
               
-              try {
-                // プロファイルを直接サーバーAPIで作成
-                const response = await fetch('/api/user/create-profile', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify(profileData),
-                });
-                
-                if (response.ok) {
-                  const newProfile = await response.json();
-                  console.log("AuthContext: 新規プロファイル作成成功:", newProfile);
-                  setCachedProfile(newProfile);
-                  isRequestCompleted = true;
-                  return { data: newProfile, error: null };
-                } else {
-                  console.error("AuthContext: プロファイル作成API呼び出し失敗:", await response.text());
-                }
-              } catch (createError) {
-                console.error("AuthContext: プロファイル作成中にエラー:", createError);
+              // プロファイル作成APIを呼び出す
+              const response = await fetch('/api/user/create-profile', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(profileData),
+              });
+              
+              if (!response.ok) {
+                const errorData = await response.json();
+                console.error("AuthContext: プロファイル作成APIエラー:", errorData);
+                throw new Error(errorData.error || 'プロファイル作成に失敗しました');
               }
-            }
-            
-            if (retryAttempt < maxRetries - 1) {
-              await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL));
-            }
-            
-            retryAttempt++;
-          } catch (e) {
-            console.error("AuthContext: プロファイル取得中に例外発生:", e);
-            
-            if (retryAttempt < maxRetries - 1) {
-              await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL));
+              
+              const newProfile = await response.json();
+              console.log("AuthContext: プロファイル作成成功:", newProfile);
+              
+              // プロファイルをキャッシュ
+              setCachedProfile(newProfile);
+              isRequestCompleted = true;
+              return { data: newProfile, error: null };
             }
             
             retryAttempt++;
+            if (retryAttempt < maxRetries) {
+              await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL));
+            }
+          } catch (retryError) {
+            console.error(`AuthContext: プロファイル取得試行 ${retryAttempt + 1} でエラー:`, retryError);
+            retryAttempt++;
+            if (retryAttempt < maxRetries) {
+              await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL));
+            }
           }
         }
         
-        isRequestCompleted = true;
-        return { data: null, error: new Error("プロファイル情報の取得に失敗しました") };
+        return { data: null, error: new Error('最大試行回数を超えました') };
       })();
       
-      // タイムアウトとリクエストのどちらか早い方を待つ
-      const result = await Promise.race([timeoutPromise, fetchPromise]);
-      isRequestCompleted = true;
-      return result;
-    } catch (e) {
-      console.error("AuthContext: プロファイル取得処理で例外発生:", e);
-      return { data: null, error: e };
+      return await Promise.race([fetchPromise, timeoutPromise]);
+    } catch (error) {
+      console.error("AuthContext: プロファイル取得処理でエラー:", error);
+      return { data: null, error };
     }
   };
 
@@ -590,44 +570,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // ログイン処理
+  // アクティビティログを記録する関数
+  const logUserActivity = async (actionType: string, actionDetails: any = {}) => {
+    try {
+      if (!user) {
+        console.error('アクティビティログ: ユーザーが認証されていません');
+        return;
+      }
+
+      const logData = {
+        user_id: user.id,
+        action_type: actionType,
+        action_details: actionDetails,
+        performed_by: user.id,
+        created_at: new Date().toISOString()
+      };
+
+      console.log('アクティビティログ記録:', logData);
+
+      const { error } = await supabase
+        .from('user_activity_logs')
+        .insert(logData);
+
+      if (error) {
+        console.error('アクティビティログ記録エラー:', error);
+      }
+    } catch (error) {
+      console.error('アクティビティログ記録中に例外発生:', error);
+    }
+  };
+
+  // ログイン処理を修正
   const signIn = async (email: string, password: string) => {
     try {
       console.log("signIn: ログイン処理を開始:", email);
-      setLoading(true); // ログイン処理開始時にloadingをtrueに設定
+      setLoading(true);
       setLoadingState('authenticating');
       setLoadingMessage('ログイン中...');
       
-      // 既存の認証関連ストレージをすべてクリア
-      clearAllAuthStorage();
-      
-      // タイムアウトを設定
-      const signInTimeout = setTimeout(() => {
-        console.log("signIn: ログイン処理タイムアウト");
-        setLoadingState('error');
-        setLoadingMessage('ログイン処理がタイムアウトしました。再試行してください。');
-        setLoading(false);
-      }, DATA_FETCH_TIMEOUT);
-      
-      // 直接fetchUserAndProfileを呼び出さず、認証とプロファイル取得を直接行う
-      console.log("signIn: Supabaseで認証を実行");
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
-      // タイムアウトをクリア
-      clearTimeout(signInTimeout);
-
-      console.log("signIn: 認証結果:", { 
-        success: !!data?.user, 
-        userId: data?.user?.id || 'なし', 
-        error: error?.message || 'なし' 
-      });
-
       if (error) {
         console.error("signIn: ログインエラー:", error.message);
-        setLoading(false); // エラー時はloadingをfalseに設定
+        setLoading(false);
         setLoadingState('error');
         setLoadingMessage('ログインに失敗しました: ' + error.message);
         return { error };
@@ -649,19 +637,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoadingMessage('プロファイル情報を読み込み中...');
       
       try {
-        // プロファイル情報取得タイムアウトを設定
-        const profileTimeout = setTimeout(() => {
-          console.log("signIn: プロファイル取得タイムアウト");
-          setLoadingState('error');
-          setLoadingMessage('プロファイル情報の取得に時間がかかっています。手動で再読み込みしてください。');
-          setLoading(false);
-        }, DATA_FETCH_TIMEOUT);
-        
-        // プロファイル情報を取得（再試行ロジック使用、キャッシュをスキップ）
+        // プロファイル情報を取得
         const { data: profileData, error: profileError } = await fetchProfileWithRetry(data.user.id, MAX_RETRY_COUNT, true);
-        
-        // タイムアウトをクリア
-        clearTimeout(profileTimeout);
 
         if (!profileData) {
           console.error('signIn: プロファイル情報の取得に失敗:', profileError);
@@ -673,32 +650,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setProfile(profileData);
           setLoadingState('idle');
           setLoadingMessage('');
+          
+          // ログインアクティビティを記録
+          await logUserActivity('login', {
+            email: email,
+            success: true
+          });
         }
       } catch (profileError) {
         console.error("signIn: プロファイル取得中にエラー:", profileError);
-        // プロファイル取得に失敗しても認証自体は成功とする
         setLoadingState('error');
         setLoadingMessage('プロファイル情報の取得中にエラーが発生しました。手動で再読み込みしてください。');
       }
       
-      console.log("signIn: 認証処理完了、loading状態をfalseに設定");
       setLoading(false);
       return { error: null };
     } catch (error) {
       console.error('signIn: ログイン処理中に例外が発生:', error);
-      setLoading(false); // 例外発生時もloadingをfalseに設定
+      setLoading(false);
       setLoadingState('error');
       setLoadingMessage('ログイン処理中に例外が発生しました');
       return { error };
     }
   };
 
-  // ログアウト処理
+  // ログアウト処理を修正
   const signOut = async () => {
     try {
       console.log("signOut: ログアウト処理を開始");
       setLoadingState('authenticating');
       setLoadingMessage('ログアウト中...');
+      
+      // ログアウトアクティビティを記録
+      if (user) {
+        await logUserActivity('logout', {
+          success: true
+        });
+      }
       
       // ユーザー状態をクリア
       setUser(null);
@@ -707,14 +695,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // すべての認証関連ストレージをクリア
       clearAllAuthStorage();
       
-      // グローバルスコープでログアウト（ローカルもクリア）
-      await supabase.auth.signOut({ scope: 'global' }); // globalスコープに変更
+      // グローバルスコープでログアウト
+      await supabase.auth.signOut({ scope: 'global' });
       console.log("signOut: ログアウト成功");
       
       setLoadingState('idle');
       setLoadingMessage('');
       
-      // 少し待ってからログインページにリダイレクト（ストレージのクリアを完了させるため）
+      // 少し待ってからログインページにリダイレクト
       setTimeout(() => {
         router.push('/login');
       }, 100);
