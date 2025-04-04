@@ -143,7 +143,6 @@ export async function POST(request: NextRequest) {
             fullname: fullName,
             role: invitation.role,
             facility_id: invitation.facility_id,
-            department_id: invitation.department_id,
             email: invitation.email,
             updated_at: new Date().toISOString()
           })
@@ -176,7 +175,6 @@ export async function POST(request: NextRequest) {
             full_name: fullName || invitation.email.split('@')[0],
             role: invitation.role,
             facility_id: invitation.facility_id,
-            department_id: invitation.department_id,
             invited_by: invitation.invited_by,
             facility_name: invitation.facility_name
           }
@@ -201,7 +199,6 @@ export async function POST(request: NextRequest) {
           fullname: fullName,
           role: invitation.role,
           facility_id: invitation.facility_id,
-          department_id: invitation.department_id,
           email: invitation.email,
           updated_at: new Date().toISOString(),
           created_at: new Date().toISOString()
