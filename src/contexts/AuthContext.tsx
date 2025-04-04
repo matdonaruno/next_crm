@@ -24,6 +24,7 @@ interface UserProfile {
   department_id?: string | null;
   email?: string | null;
   role?: string | null;
+  is_active?: boolean;
 }
 
 interface AuthContextType {
@@ -738,14 +739,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoadingState('loading-profile');
       setLoadingMessage('プロファイル情報を更新中...');
 
+      // 更新データに必須フィールドを追加
+      const updateData = {
+        ...data,
+        email: user.email, // 既存のメールアドレスを維持
+        role: profile?.role || 'regular_user', // 既存のロールを維持、なければデフォルト値
+        is_active: profile?.is_active !== undefined ? profile.is_active : true // 既存の状態を維持、なければtrue
+      };
+
       const { error } = await supabase
         .from('profiles')
-        .update(data)
+        .update(updateData)
         .eq('id', user.id);
 
       if (!error) {
         // プロフィール状態を更新
-        const newProfile = profile ? { ...profile, ...data } : null;
+        const newProfile = profile ? { ...profile, ...updateData } : null;
         setProfile(newProfile);
         
         // キャッシュも更新
@@ -757,6 +766,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoadingState('idle');
         setLoadingMessage('');
       } else {
+        console.error('プロファイル更新エラー:', error);
         setLoadingState('error');
         setLoadingMessage('プロファイル更新に失敗しました');
       }

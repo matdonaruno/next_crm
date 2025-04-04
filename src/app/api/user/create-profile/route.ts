@@ -52,10 +52,27 @@ export async function POST(request: NextRequest) {
       facility_id: profileData.facility_id || null,
       department_id: profileData.department_id || null,
       role: profileData.role || 'regular_user',
-      is_active: true,
+      is_active: profileData.is_active !== undefined ? profileData.is_active : true,
       updated_at: new Date().toISOString(),
       created_at: profileData.created_at || new Date().toISOString()
     };
+    
+    // バリデーション: 必須フィールドのチェック
+    if (!cleanProfileData.id || !cleanProfileData.email || !cleanProfileData.role) {
+      console.error('プロファイル作成: 必須フィールドが不足しています:', {
+        hasId: !!cleanProfileData.id,
+        hasEmail: !!cleanProfileData.email,
+        hasRole: !!cleanProfileData.role
+      });
+      return NextResponse.json({ 
+        error: '必須フィールド（id, email, role）が不足しています',
+        details: {
+          id: !cleanProfileData.id ? '必須' : undefined,
+          email: !cleanProfileData.email ? '必須' : undefined,
+          role: !cleanProfileData.role ? '必須' : undefined
+        }
+      }, { status: 400 });
+    }
     
     console.log('プロファイル作成/更新:', cleanProfileData);
     
