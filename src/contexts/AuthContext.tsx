@@ -223,19 +223,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               const userMeta = userData.user.user_metadata || {};
               
               // 新しいプロファイルを作成
-              const profileData = {
-                id: userId,
-                fullname: userMeta.full_name || null,
+              const newProfile = {
+                id: userData.user.id,
                 email: userData.user.email,
-                facility_id: userMeta.facility_id || null,
-                department_id: userMeta.department_id || null,
-                role: userMeta.role || 'regular_user',
+                fullname: userData.user.email?.split('@')[0] || 'Unknown',
+                role: 'regular_user',
                 is_active: true,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
+                created_at: new Date().toISOString()
               };
               
-              console.log("AuthContext: 新規プロファイル作成:", profileData);
+              console.log("AuthContext: 新規プロファイル作成:", newProfile);
               
               // プロファイル作成APIを呼び出す
               const response = await fetch('/api/user/create-profile', {
@@ -243,7 +240,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 headers: {
                   'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(profileData),
+                body: JSON.stringify(newProfile),
               });
               
               if (!response.ok) {
@@ -252,13 +249,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 throw new Error(errorData.error || 'プロファイル作成に失敗しました');
               }
               
-              const newProfile = await response.json();
-              console.log("AuthContext: プロファイル作成成功:", newProfile);
+              const createdProfile = await response.json();
+              console.log("AuthContext: プロファイル作成成功:", createdProfile);
               
               // プロファイルをキャッシュ
-              setCachedProfile(newProfile);
+              setCachedProfile(createdProfile);
               isRequestCompleted = true;
-              return { data: newProfile, error: null };
+              return { data: createdProfile, error: null };
             }
             
             retryAttempt++;

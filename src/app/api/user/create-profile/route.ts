@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '他のユーザーのプロファイルは更新できません' }, { status: 403 });
     }
     
-    // プロファイルデータを整形
+    // プロファイルデータを構築
     const cleanProfileData = {
       id: profileData.id,
       fullname: profileData.fullname || null,
