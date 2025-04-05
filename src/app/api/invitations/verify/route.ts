@@ -135,24 +135,61 @@ export async function POST(request: NextRequest) {
         
         userId = existingUser.id;
         
-        // 既存ユーザーのプロフィール情報を更新
-        console.log('既存ユーザーのプロフィール情報を更新:', { userId, fullName });
-        const { error: profileError } = await supabaseAdmin
-          .from('profiles')
-          .update({
-            fullname: fullName,
-            role: invitation.role,
-            facility_id: invitation.facility_id,
-            email: invitation.email
-          })
-          .eq('id', userId);
-        
-        if (profileError) {
-          console.error('プロフィール更新エラー:', profileError);
-          // プロフィール更新に失敗してもユーザー登録自体は成功とする
-        } else {
-          console.log('既存ユーザーのプロフィール更新が完了');
+        // 既存ユーザーのプロフィール情報を insert で試行
+        console.log('[Verify API] 既存ユーザーのプロフィール insert を試行します:', { userId, fullName });
+        const profileDataForInsert = {
+          id: userId,
+          fullname: fullName,
+          role: invitation.role,
+          facility_id: invitation.facility_id,
+          email: invitation.email,
+          is_active: true, // is_active も設定 (テーブル定義に合わせて)
+          created_at: new Date().toISOString()
+        };
+
+        try {
+          console.log('[Verify API] insert実行直前:', profileDataForInsert);
+          const { data: insertedProfile, error: profileInsertError } = await supabaseAdmin
+            .from('profiles')
+            .insert(profileDataForInsert)
+            .select(); // .select() で結果を取得
+
+          console.log('[Verify API] insert実行直後:', { insertedProfile, profileInsertError });
+
+          if (profileInsertError) {
+            console.error('[Verify API] プロフィールinsertエラー:', profileInsertError);
+            // ★ 一意性制約違反(23505)は、レコードが既に存在することを示す。他のエラーとは区別する。
+            if (profileInsertError.code === '23505') {
+              console.warn('[Verify API] プロフィールレコードは既に存在します。更新を試みます。');
+              // レコードが既に存在する場合は更新を試みる
+              const { data: updatedData, error: updateError } = await supabaseAdmin
+                .from('profiles')
+                .update({ 
+                    fullname: fullName, 
+                    role: invitation.role, 
+                    facility_id: invitation.facility_id 
+                    // updated_at はDBトリガーに任せる想定
+                }) 
+                .eq('id', userId)
+                .select();
+              if (updateError) {
+                 console.error('[Verify API] 既存プロファイルの更新エラー:', updateError);
+              } else {
+                 console.log('[Verify API] 既存プロファイルの更新完了:', updatedData);
+              }
+            } else {
+              // 23505以外のエラー
+              console.error('[Verify API] 予期せぬinsertエラーです。');
+            }
+            // エラーがあっても招待プロセスは続行させる場合が多いが、状況に応じてエラー応答を返すことも検討
+          } else {
+            console.log('[Verify API] プロフィールinsert成功、結果:', insertedProfile);
+          }
+        } catch (insertCatchError: any) {
+            console.error('[Verify API] プロフィールinsert処理中に予期せぬ例外が発生:', insertCatchError);
+            console.error('[Verify API] 例外詳細:', { message: insertCatchError.message, stack: insertCatchError.stack });
         }
+
       } catch (error) {
         console.error('ユーザー更新処理エラー:', error);
         return NextResponse.json({ 
@@ -202,26 +239,28 @@ export async function POST(request: NextRequest) {
         };
 
         // まずはupsertを試す - 管理者権限でプロファイルを作成
-        const { error: upsertError } = await supabaseAdmin
+        const { data: upsertedNewProfile, error: upsertError } = await supabaseAdmin
           .from('profiles')
-          .upsert(profileData);
+          .upsert(profileData)
+          .select();
         
         if (upsertError) {
           console.warn('プロフィールupsertエラー、insertを試みます:', upsertError);
           
           // upsertに失敗した場合はinsertを試す - 管理者権限で
-          const { error: insertError } = await supabaseAdmin
+          const { data: insertedNewProfile, error: insertError } = await supabaseAdmin
             .from('profiles')
-            .insert(profileData);
+            .insert(profileData)
+            .select();
           
           if (insertError) {
             console.error('新規ユーザーのプロフィール挿入エラー:', insertError);
             // プロフィール更新に失敗してもユーザー登録自体は成功とする
           } else {
-            console.log('新規ユーザーのプロフィール挿入が完了');
+            console.log('新規ユーザーのプロフィール挿入が完了、結果:', insertedNewProfile);
           }
         } else {
-          console.log('新規ユーザーのプロフィール更新が完了');
+          console.log('新規ユーザーのプロフィールupsertが完了、結果:', upsertedNewProfile);
         }
       } catch (error) {
         console.error('ユーザー登録処理エラー:', error);

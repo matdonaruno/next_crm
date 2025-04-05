@@ -120,47 +120,48 @@ export default function UserManagement() {
   // 招待リストと既存ユーザーの取得
   useEffect(() => {
     async function fetchInvitationsAndUsers() {
+      if (!isAuthorized) return; // 権限チェック後のみ実行
+      if (activeTab !== 'invitations' && activeTab !== 'users') return; // 対象タブの場合のみ実行
+
       setLoading(true);
       
       try {
-        // 招待リストの取得（クエリを簡素化）
-        const { data: invitationsData, error: invitationsError } = await supabase
-          .from('user_invitations')
-          .select(`
-            *,
-            facilities(name)
-          `)
-          .order('created_at', { ascending: false });
-        
-        if (invitationsError) {
-          console.error('招待リスト取得エラー:', invitationsError);
-        } else {
-          setInvitations(invitationsData || []);
+        if (activeTab === 'invitations') {
+          // 招待リストの取得
+          const { data: invitationsData, error: invitationsError } = await supabase
+            .from('user_invitations')
+            .select(`*,
+                      facilities(name)
+                    `)
+            .order('created_at', { ascending: false });
+          
+          if (invitationsError) {
+            console.error('招待リスト取得エラー:', invitationsError);
+            toast({ title: '招待リスト取得エラー', description: invitationsError.message, variant: 'destructive' });
+          } else {
+            setInvitations(invitationsData || []);
+          }
+        } else if (activeTab === 'users') {
+          // 既存ユーザーリストの取得 (APIルートを呼び出す)
+          const response = await fetch('/api/admin/users');
+          if (!response.ok) {
+            const errorData = await response.json();
+            console.error('ユーザーリスト取得APIエラー:', errorData);
+            throw new Error(errorData.error || 'ユーザーリストの取得に失敗しました');
+          }
+          const usersData = await response.json();
+          setUsers(usersData || []); // APIから取得したユーザーリストをセット
         }
-        
-        // 既存ユーザーリストの取得
-        const { data: usersData, error: usersError } = await supabase
-          .from('profiles')
-          .select(`
-            *,
-            facilities(name)
-          `)
-          .order('created_at', { ascending: false });
-        
-        if (usersError) {
-          console.error('ユーザーリスト取得エラー:', usersError);
-        } else {
-          setUsers(usersData || []);
-        }
-      } catch (error) {
+      } catch (error: any) {
         console.error('データ取得エラー:', error);
+        toast({ title: 'データ取得エラー', description: error.message, variant: 'destructive' });
       } finally {
         setLoading(false);
       }
     }
     
     fetchInvitationsAndUsers();
-  }, [activeTab]);
+  }, [activeTab, isAuthorized, toast]); // isAuthorizedとtoastを依存配列に追加
   
   // 新規ユーザー招待
   const handleInvite = async (e: React.FormEvent) => {
