@@ -1,16 +1,17 @@
 // src/app/layout.tsx
 
-'use client';
+// 'use client'; // ★ 削除: サーバーコンポーネントに戻す
 
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "/public/css/menu.css"
 import "/public/css/simple-css-waves.css"
-import { AuthProvider } from "@/contexts/AuthContext";
-import { ClientTokenCleaner } from "@/components/ClientTokenCleaner";
-import { LoadingUI } from "@/components/LoadingUI";
-import { Toaster } from "@/components/ui/toaster";
-import { PageTransition } from "@/components/PageTransition";
+// import { AuthProvider } from "@/contexts/AuthContext"; // ClientLayoutWrapper に移動
+// import { ClientTokenCleaner } from "@/components/ClientTokenCleaner"; // ClientLayoutWrapper に移動
+// import { LoadingUI } from "@/components/LoadingUI"; // ClientLayoutWrapper に移動
+// import { Toaster } from "@/components/ui/toaster"; // ClientLayoutWrapper に移動
+// import { PageTransition } from "@/components/PageTransition"; // ClientLayoutWrapper に移動
+import ClientLayoutWrapper from "@/components/ClientLayoutWrapper"; // ★ 新しいラッパーをインポート
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 
@@ -154,14 +155,10 @@ export default function RootLayout({
         />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} ${inter.className} antialiased`}>
-        <AuthProvider>
-          <ClientTokenCleaner />
-          <LoadingUI />
-          <PageTransition>
-            {children}
-          </PageTransition>
-          <Toaster />
-        </AuthProvider>
+        {/* ★ ClientLayoutWrapper でラップ */}
+        <ClientLayoutWrapper>
+          {children}
+        </ClientLayoutWrapper>
       </body>
     </html>
   );
