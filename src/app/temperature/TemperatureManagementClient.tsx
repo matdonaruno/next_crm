@@ -1081,7 +1081,7 @@ export default function TemperatureManagementClient() {
             </div>
           ) : records.length === 0 ? (
             <div className="p-8 text-center text-gray-500">
-              <Calendar className="h-16 w-16 text-gray-300 mx-auto mb-2" />
+              {/* <Calendar className="h-16 w-16 text-gray-300 mx-auto mb-2" /> */}
               <p>{includeAutoRecords ? 'データがありません' : '手動記録データがありません'}</p>
               {!includeAutoRecords && (
                 <p className="mt-2 text-sm">
