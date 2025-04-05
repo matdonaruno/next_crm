@@ -37,6 +37,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 // 機器タイプ
 interface Equipment {
@@ -205,7 +207,13 @@ export default function EquipmentDashboardClient() {
         if (profileData) {
           setCurrentUserName(profileData.fullname || '');
           setFacilityId(profileData.facility_id || '');
-          setFacilityName(profileData.facilities?.name || '');
+          const facilityInfo = profileData.facilities;
+          if (facilityInfo && typeof facilityInfo === 'object' && 'name' in facilityInfo && typeof facilityInfo.name === 'string') {
+             setFacilityName(facilityInfo.name || '');
+          } else {
+             setFacilityName(''); // 空文字列をセット
+             console.warn('[DEBUG] Facility info is not in the expected format or name is not a string:', facilityInfo);
+          }
           
           // 部署一覧取得
           if (profileData.facility_id) {
@@ -272,15 +280,21 @@ export default function EquipmentDashboardClient() {
         // 点検項目を取得
         const equipmentIds = formattedEquipment.map(e => e.id);
         if (equipmentIds.length > 0) {
+          console.log('[DEBUG] Fetching check items for equipment IDs:', equipmentIds);
           const { data: checkItemsData, error: checkItemsError } = await supabase
             .from('equipment_check_items')
             .select('*')
             .in('equipment_id', equipmentIds)
             .order('name');
             
-          if (checkItemsError) throw checkItemsError;
+          if (checkItemsError) {
+            console.error('[DEBUG] Check items fetch error:', checkItemsError);
+            throw checkItemsError;
+          }
+          console.log('[DEBUG] Fetched check items data:', checkItemsData); // ★ 取得データ確認
 
           // 最新の点検記録を取得
+          console.log('[DEBUG] Fetching latest maintenance records for equipment IDs:', equipmentIds);
           const { data: recordsData, error: recordsError } = await supabase
             .from('equipment_maintenance_records')
             .select(`
@@ -290,7 +304,11 @@ export default function EquipmentDashboardClient() {
             .in('equipment_id', equipmentIds)
             .order('performed_at', { ascending: false });
             
-          if (recordsError) throw recordsError;
+          if (recordsError) {
+             console.error('[DEBUG] Maintenance records fetch error:', recordsError);
+             throw recordsError;
+          }
+          console.log('[DEBUG] Fetched maintenance records data:', recordsData); // ★ 取得データ確認
           
           // 点検記録一覧用のデータを設定
           const formattedRecords: MaintenanceRecord[] = recordsData ? recordsData.map(record => ({
@@ -302,9 +320,7 @@ export default function EquipmentDashboardClient() {
           
           // 点検項目に最終点検日を追加
           const checkItemsWithLastCheck = checkItemsData ? checkItemsData.map(item => {
-            // この点検項目の最新の記録を見つける
             const lastRecord = formattedRecords.find(r => r.check_item_id === item.id);
-            
             return {
               ...item,
               lastCheckDate: lastRecord?.performed_at || null,
@@ -312,16 +328,18 @@ export default function EquipmentDashboardClient() {
               isOverdue: isCheckOverdue(lastRecord?.performed_at || null, item.frequency)
             };
           }) : [];
+          console.log('[DEBUG] Check items with last check info:', checkItemsWithLastCheck); // ★ 処理後データ確認
           
           // 各機器に点検項目を関連付け
           formattedEquipment.forEach(equipment => {
             const items = checkItemsWithLastCheck.filter(item => item.equipment_id === equipment.id);
             equipment.checkItems = items;
-            // 期限切れの点検項目数
             equipment.pendingChecks = items.filter(item => item.isOverdue).length;
+            console.log(`[DEBUG] Associating items for equipment ${equipment.id}:`, items); // ★ 関連付け確認
           });
         }
         
+        console.log('[DEBUG] Final formatted equipment list before setting state:', formattedEquipment); // ★ 最終データ確認
         setEquipmentList(formattedEquipment);
       } catch (error) {
         console.error('機器データ取得エラー:', error);
@@ -403,6 +421,131 @@ export default function EquipmentDashboardClient() {
   // 部署変更ハンドラ
   const handleDepartmentChange = (value: string) => {
     setSelectedDepartmentId(value);
+  };
+
+  const [selectedCheckItemIds, setSelectedCheckItemIds] = useState<Set<string>>(new Set());
+  const [isLoadingSubmit, setIsLoadingSubmit] = useState(false);
+
+  // チェックボックス変更ハンドラ
+  const handleCheckboxChange = (itemId: string, checked: any): void => {
+    setSelectedCheckItemIds(prev => {
+      const newSet = new Set(prev);
+      if (checked) {
+        newSet.add(itemId);
+      } else {
+        newSet.delete(itemId);
+      }
+      console.log('[DEBUG] Selected items set:', newSet);
+      return newSet;
+    });
+  };
+
+  // すべて選択/解除ハンドラ
+  const handleSelectAllChecks = (equipmentId: string, select: boolean) => {
+    const equipment = equipmentList.find(eq => eq.id === equipmentId);
+    if (!equipment || !equipment.checkItems) return;
+
+    setSelectedCheckItemIds(prev => {
+      const newSet = new Set(prev);
+      equipment.checkItems?.forEach(item => {
+        if (select) {
+          newSet.add(item.id);
+        } else {
+          newSet.delete(item.id);
+        }
+      });
+      return newSet;
+    });
+  };
+
+  // 選択項目を一括点検実施
+  const handleBulkCheckItems = async (equipmentId: string) => {
+    if (!user) return;
+    const itemsToCheck = Array.from(selectedCheckItemIds).filter(itemId => {
+      // この機器に関連する項目のみを対象とする
+      const equipment = equipmentList.find(eq => eq.id === equipmentId);
+      return equipment?.checkItems?.some(item => item.id === itemId);
+    });
+
+    if (itemsToCheck.length === 0) {
+      alert('点検する項目を選択してください。');
+      return;
+    }
+
+    setIsLoadingSubmit(true);
+    try {
+      const recordsToInsert = itemsToCheck.map(itemId => ({
+        check_item_id: itemId,
+        equipment_id: equipmentId,
+        performed_by: user.id,
+        performed_at: new Date().toISOString(),
+        result: true, // 一括実施は「正常」として記録（必要なら変更可）
+        comment: '一括実施'
+      }));
+
+      console.log('[DEBUG] Bulk inserting records:', recordsToInsert);
+
+      const { data: insertedRecords, error } = await supabase
+        .from('equipment_maintenance_records')
+        .insert(recordsToInsert)
+        .select(); // 挿入されたレコードを取得
+
+      if (error) throw error;
+
+      console.log('[DEBUG] Bulk insert success:', insertedRecords);
+
+      // 状態を更新してUIに反映
+      const nowStr = new Date().toISOString();
+      setEquipmentList(prevList => prevList.map(eq => {
+        if (eq.id === equipmentId) {
+          return {
+            ...eq,
+            checkItems: eq.checkItems?.map(item => {
+              if (itemsToCheck.includes(item.id)) {
+                return {
+                  ...item,
+                  lastCheckDate: nowStr,
+                  lastCheckResult: true,
+                  isOverdue: false // 点検実施したので期限切れ解除
+                };
+              }
+              return item;
+            }),
+            // pendingChecksも更新
+            pendingChecks: eq.checkItems?.filter(item => 
+              !itemsToCheck.includes(item.id) && item.isOverdue
+            ).length ?? 0
+          };
+        }
+        return eq;
+      }));
+
+      // 新しいレコードを履歴に追加 (任意)
+      if (insertedRecords) {
+        const formattedNewRecords = insertedRecords.map(rec => ({
+          ...rec,
+          performer_name: currentUserName,
+          check_item_name: equipmentList.find(e => e.id === equipmentId)?.checkItems?.find(i => i.id === rec.check_item_id)?.name,
+          equipment_name: equipmentList.find(e => e.id === equipmentId)?.name
+        }));
+        setMaintenanceRecords(prev => [...formattedNewRecords, ...prev]);
+      }
+
+      // 選択をクリア
+      setSelectedCheckItemIds(prev => {
+         const newSet = new Set(prev);
+         itemsToCheck.forEach(id => newSet.delete(id));
+         return newSet;
+      });
+
+      alert(`${itemsToCheck.length}項目の点検を記録しました。`);
+
+    } catch (error: any) {
+      console.error('一括点検記録エラー:', error);
+      alert(`点検記録の登録に失敗しました: ${error.message}`);
+    } finally {
+      setIsLoadingSubmit(false);
+    }
   };
 
   return (
@@ -584,6 +727,24 @@ export default function EquipmentDashboardClient() {
                           
                           <div className="flex justify-between items-center mb-2">
                             <h3 className="font-medium">点検項目</h3>
+                            {equipment.checkItems && equipment.checkItems.length > 0 && (
+                              <div className="flex gap-2">
+                                <Button 
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleSelectAllChecks(equipment.id, true)}
+                                >
+                                  すべて選択
+                                </Button>
+                                <Button 
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleSelectAllChecks(equipment.id, false)}
+                                >
+                                  すべて解除
+                                </Button>
+                              </div>
+                            )}
                             <Button 
                               variant="outline" 
                               size="sm"
@@ -603,40 +764,47 @@ export default function EquipmentDashboardClient() {
                                     item.isOverdue ? 'bg-amber-50 border border-amber-200' : 'bg-white border'
                                   }`}
                                 >
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-medium">{item.name}</span>
-                                      <Badge className="text-xs">{frequencyToJapanese(item.frequency)}</Badge>
-                                    </div>
-                                    
-                                    <div className="text-sm text-muted-foreground mt-1 flex items-center gap-4">
-                                      <span className="flex items-center">
-                                        <Calendar className="h-3.5 w-3.5 mr-1" />
-                                        最終点検: {formatDateTime(item.lastCheckDate)}
-                                      </span>
-                                      
-                                      {item.lastCheckResult !== null && (
+                                  <div className="flex items-center space-x-3">
+                                    <Checkbox 
+                                      id={`check-${item.id}`}
+                                      checked={selectedCheckItemIds.has(item.id)}
+                                      onCheckedChange={(checkedState) => {
+                                        handleCheckboxChange(item.id, checkedState as boolean);
+                                      }}
+                                      aria-label={`Select ${item.name}`}
+                                    />
+                                    <Label htmlFor={`check-${item.id}`} className="flex-grow cursor-pointer">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-medium">{item.name}</span>
+                                        <Badge className="text-xs">{frequencyToJapanese(item.frequency)}</Badge>
+                                      </div>
+                                      <div className="text-sm text-muted-foreground mt-1 flex items-center gap-4">
                                         <span className="flex items-center">
-                                          <span className={`mr-1 flex items-center justify-center w-4 h-4 rounded-full ${item.lastCheckResult ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                            {item.lastCheckResult ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
-                                          </span>
-                                          結果: {item.lastCheckResult ? '正常' : '異常'}
+                                          <Calendar className="h-3.5 w-3.5 mr-1" />
+                                          最終点検: {formatDateTime(item.lastCheckDate ?? null)}
                                         </span>
-                                      )}
-                                    </div>
+                                        {item.lastCheckResult !== null && (
+                                          <span className="flex items-center">
+                                            <span className={`mr-1 flex items-center justify-center w-4 h-4 rounded-full ${item.lastCheckResult ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                              {item.lastCheckResult ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                                            </span>
+                                            結果: {item.lastCheckResult ? '正常' : '異常'}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </Label>
                                   </div>
-                                  
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm"
-                                    onClick={() => handleCheckItem(equipment, item)}
-                                    className={item.isOverdue ? 'border-amber-300 hover:border-amber-400' : ''}
-                                  >
-                                    <Check className="mr-1 h-4 w-4" />
-                                    点検実施
-                                  </Button>
                                 </div>
                               ))}
+                              <div className="mt-4 flex justify-end">
+                                <Button
+                                  onClick={() => handleBulkCheckItems(equipment.id)}
+                                  disabled={isLoadingSubmit || !Array.from(selectedCheckItemIds).some(id => equipment.checkItems?.some(item => item.id === id))}
+                                  className="bg-primary hover:bg-primary/90 text-white"
+                                >
+                                  {isLoadingSubmit ? '処理中...' : `選択した ${Array.from(selectedCheckItemIds).filter(id => equipment.checkItems?.some(item => item.id === id)).length} 項目を点検実施`}
+                                </Button>
+                              </div>
                             </div>
                           ) : (
                             <p className="text-center text-muted-foreground py-4">
