@@ -35,6 +35,7 @@ export default function UserManagement() {
   const [isAuthorized, setIsAuthorized] = useState<boolean>(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [showInactiveUsers, setShowInactiveUsers] = useState(false);
   
   // 招待フォーム用のステート
   const [email, setEmail] = useState('');
@@ -556,9 +557,19 @@ export default function UserManagement() {
             <TabsContent value="users">
               <Card className="border-pink-200 shadow-md">
                 <CardHeader className="bg-gradient-to-r from-pink-100 to-purple-100 rounded-t-lg">
-                  <CardTitle className="flex items-center gap-2 text-pink-800">
-                    <Users className="h-5 w-5" />
-                    ユーザーリスト
+                  <CardTitle className="flex items-center justify-between gap-2 text-pink-800">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-5 w-5" />
+                      ユーザーリスト
+                    </div>
+                    <Button 
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowInactiveUsers(!showInactiveUsers)}
+                      className="bg-white border-pink-300 text-pink-800 hover:bg-pink-50"
+                    >
+                      {showInactiveUsers ? '停止中を隠す' : '停止中を表示'}
+                    </Button>
                   </CardTitle>
                   <CardDescription>
                     登録済みのユーザー一覧です。
@@ -587,7 +598,9 @@ export default function UserManagement() {
                           </tr>
                         </thead>
                         <tbody>
-                          {users.map((user) => (
+                          {users
+                            .filter(user => showInactiveUsers || user.is_active)
+                            .map((user) => (
                             <tr key={user.id} className="border-b border-pink-100 hover:bg-pink-50">
                               <td className="p-2">{user.fullname || '-'}</td>
                               <td className="p-2">{user.email}</td>
