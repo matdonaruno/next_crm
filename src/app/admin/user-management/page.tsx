@@ -13,6 +13,7 @@ import { AppHeader } from '@/components/ui/app-header';
 import { Users } from 'lucide-react';
 import { LoadingUI } from '@/components/LoadingUI';
 import { useEffect as useEffectOnce } from 'react';
+import { User } from '@supabase/supabase-js';
 
 // ロールの選択肢
 const ROLE_OPTIONS = [
@@ -33,6 +34,7 @@ export default function UserManagement() {
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [isAuthorized, setIsAuthorized] = useState<boolean>(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   
   // 招待フォーム用のステート
   const [email, setEmail] = useState('');
@@ -47,6 +49,7 @@ export default function UserManagement() {
       const { data: { user } } = await supabase.auth.getUser();
       
       if (user) {
+        setCurrentUser(user);
         const { data: profile } = await supabase
           .from('profiles')
           .select('role, facility_id')
@@ -121,37 +124,47 @@ export default function UserManagement() {
   useEffect(() => {
     async function fetchInvitationsAndUsers() {
       if (!isAuthorized) return; // 権限チェック後のみ実行
-      if (activeTab !== 'invitations' && activeTab !== 'users') return; // 対象タブの場合のみ実行
+      // if (activeTab !== 'invitations' && activeTab !== 'users') return; // 両方のタブでデータを取得し直す場合
 
       setLoading(true);
       
       try {
-        if (activeTab === 'invitations') {
-          // 招待リストの取得
-          const { data: invitationsData, error: invitationsError } = await supabase
-            .from('user_invitations')
-            .select(`*,
-                      facilities(name)
-                    `)
-            .order('created_at', { ascending: false });
-          
-          if (invitationsError) {
-            console.error('招待リスト取得エラー:', invitationsError);
-            toast({ title: '招待リスト取得エラー', description: invitationsError.message, variant: 'destructive' });
-          } else {
-            setInvitations(invitationsData || []);
-          }
-        } else if (activeTab === 'users') {
-          // 既存ユーザーリストの取得 (APIルートを呼び出す)
-          const response = await fetch('/api/admin/users');
-          if (!response.ok) {
-            const errorData = await response.json();
-            console.error('ユーザーリスト取得APIエラー:', errorData);
-            throw new Error(errorData.error || 'ユーザーリストの取得に失敗しました');
-          }
-          const usersData = await response.json();
-          setUsers(usersData || []); // APIから取得したユーザーリストをセット
+        // 常に招待リストを取得 (タブ切り替え時に毎回最新化)
+        const { data: invitationsData, error: invitationsError } = await supabase
+          .from('user_invitations')
+          .select(`*,
+                    facilities(name)
+                  `)
+          .order('created_at', { ascending: false });
+        
+        if (invitationsError) {
+          console.error('招待リスト取得エラー:', invitationsError);
+          toast({ title: '招待リスト取得エラー', description: invitationsError.message, variant: 'destructive' });
+        } else {
+          setInvitations(invitationsData || []);
         }
+        
+        // 常にユーザーリストを取得 (タブ切り替え時に毎回最新化)
+        const { data: usersData, error: usersError } = await supabase
+          .from('profiles') // ★ APIルートではなくprofilesテーブルから取得
+          .select(`
+            id,
+            fullname,
+            email,
+            role,
+            is_active,
+            facility_id,
+            facilities(name) // 施設名も取得
+          `)
+          .order('created_at', { ascending: false });
+
+        if (usersError) {
+          console.error('ユーザーリスト取得エラー:', usersError);
+          toast({ title: 'ユーザーリスト取得エラー', description: usersError.message, variant: 'destructive' });
+        } else {
+          setUsers(usersData || []); // profilesから取得したユーザーリストをセット
+        }
+          
       } catch (error: any) {
         console.error('データ取得エラー:', error);
         toast({ title: 'データ取得エラー', description: error.message, variant: 'destructive' });
@@ -160,8 +173,13 @@ export default function UserManagement() {
       }
     }
     
-    fetchInvitationsAndUsers();
-  }, [activeTab, isAuthorized, toast]); // isAuthorizedとtoastを依存配列に追加
+    // isAuthorizedが変わった時、またはタブが変わった時にデータを取得
+    if (isAuthorized) { 
+      fetchInvitationsAndUsers();
+    }
+    // 依存配列から activeTab を削除し、isAuthorized のみでトリガーする（または必要に応じて activeTab も残す）
+    // この例では isAuthorized が true になったときに初期ロードを行う想定
+  }, [isAuthorized, toast]); 
   
   // 新規ユーザー招待
   const handleInvite = async (e: React.FormEvent) => {
@@ -571,14 +589,14 @@ export default function UserManagement() {
                         <tbody>
                           {users.map((user) => (
                             <tr key={user.id} className="border-b border-pink-100 hover:bg-pink-50">
-                              <td className="p-2">{user.full_name || '-'}</td>
+                              <td className="p-2">{user.fullname || '-'}</td>
                               <td className="p-2">{user.email}</td>
                               <td className="p-2">
                                 <select
                                   value={user.role}
                                   onChange={(e) => handleChangeUserRole(user.id, e.target.value)}
                                   className="p-1 border border-pink-200 rounded focus:border-pink-500 focus:ring-pink-500 text-sm w-full"
-                                  disabled={loading}
+                                  disabled={loading || !isAuthorized || currentUserRole !== 'superuser'}
                                 >
                                   {ROLE_OPTIONS
                                     .filter(option => currentUserRole === 'superuser' || option.value !== 'superuser')
@@ -589,7 +607,7 @@ export default function UserManagement() {
                                     ))}
                                 </select>
                               </td>
-                              <td className="p-2">{user.facilities?.name}</td>
+                              <td className="p-2">{user.facilities?.name || '-'}</td>
                               <td className="p-2">
                                 {user.is_active ? (
                                   <span className="text-green-600">有効</span>
@@ -602,7 +620,7 @@ export default function UserManagement() {
                                   variant={user.is_active ? "destructive" : "default"} 
                                   size="sm" 
                                   onClick={() => handleToggleUserActive(user.id, user.is_active)}
-                                  disabled={loading}
+                                  disabled={loading || !isAuthorized || user.id === currentUser?.id}
                                   className={user.is_active ? "bg-pink-600 hover:bg-pink-700" : "bg-pink-500 hover:bg-pink-600"}
                                 >
                                   {user.is_active ? '停止' : '有効化'}
