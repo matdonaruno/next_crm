@@ -39,6 +39,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Textarea } from "@/components/ui/textarea";
 
 // 機器タイプ
 interface Equipment {
@@ -81,6 +84,12 @@ interface MaintenanceRecord {
   performer_name?: string; // Join時に使用
   check_item_name?: string; // Join時に使用
   equipment_name?: string; // Join時に使用
+}
+
+// モーダルで扱うデータの型
+interface ModalCheckItemData extends EquipmentCheckItem {
+  submitResult: boolean; // true: 正常, false: 異常
+  submitComment: string | null;
 }
 
 // 日付フォーマット関数
@@ -425,6 +434,10 @@ export default function EquipmentDashboardClient() {
 
   const [selectedCheckItemIds, setSelectedCheckItemIds] = useState<Set<string>>(new Set());
   const [isLoadingSubmit, setIsLoadingSubmit] = useState(false);
+  const [isSubmittingAllDepartment, setIsSubmittingAllDepartment] = useState(false);
+  const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
+  const [modalData, setModalData] = useState<ModalCheckItemData[]>([]);
+  const [submittingFromModal, setSubmittingFromModal] = useState(false);
 
   // チェックボックス変更ハンドラ
   const handleCheckboxChange = (itemId: string, checked: any): void => {
@@ -458,94 +471,156 @@ export default function EquipmentDashboardClient() {
     });
   };
 
-  // 選択項目を一括点検実施
-  const handleBulkCheckItems = async (equipmentId: string) => {
-    if (!user) return;
-    const itemsToCheck = Array.from(selectedCheckItemIds).filter(itemId => {
-      // この機器に関連する項目のみを対象とする
-      const equipment = equipmentList.find(eq => eq.id === equipmentId);
-      return equipment?.checkItems?.some(item => item.id === itemId);
+  // ★ 選択項目を一括点検実施 (モーダルを開く処理に変更)
+  const handleOpenSubmitModal = (equipmentId: string | null = null) => {
+    const itemsToProcess = Array.from(selectedCheckItemIds).filter(itemId => {
+      if (equipmentId) {
+        const equipment = equipmentList.find(eq => eq.id === equipmentId);
+        return equipment?.checkItems?.some(item => item.id === itemId);
+      } else {
+        return filteredEquipment.some(eq => eq.checkItems?.some(item => item.id === itemId));
+      }
     });
 
-    if (itemsToCheck.length === 0) {
+    if (itemsToProcess.length === 0) {
       alert('点検する項目を選択してください。');
       return;
     }
 
-    setIsLoadingSubmit(true);
+    // モーダルに渡すデータを準備
+    const dataForModal: ModalCheckItemData[] = [];
+    itemsToProcess.forEach(itemId => {
+      const equipment = equipmentList.find(eq => eq.checkItems?.some(item => item.id === itemId));
+      const checkItem = equipment?.checkItems?.find(item => item.id === itemId);
+      if (checkItem) {
+        dataForModal.push({
+          ...checkItem,
+          submitResult: true,
+          submitComment: null
+        });
+      }
+    });
+
+    if (dataForModal.length === 0) {
+       alert('選択された項目の詳細を取得できませんでした。');
+       return;
+    }
+    
+    // 項目名でソート (任意)
+    dataForModal.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+
+    setModalData(dataForModal);
+    setIsSubmitModalOpen(true);
+  };
+
+  // ★ モーダル内で結果やコメントが変更されたときのハンドラ
+  const handleModalDataChange = (itemId: string, field: 'submitResult' | 'submitComment', value: boolean | string | null) => {
+    setModalData(prev => prev.map(item => {
+      if (item.id === itemId) {
+        const newResult = field === 'submitResult' ? (value as boolean) : item.submitResult;
+        const newComment = field === 'submitComment' ? (value as string) : item.submitComment;
+        return {
+          ...item,
+          [field]: value,
+          submitComment: newResult === true ? null : newComment
+        };
+      }
+      return item;
+    }));
+  };
+
+  // ★ モーダルからの一括登録実行ハンドラ
+  const handleSubmitFromModal = async () => {
+    if (!user) return;
+    if (modalData.length === 0) return;
+
+    setSubmittingFromModal(true);
     try {
-      const recordsToInsert = itemsToCheck.map(itemId => ({
-        check_item_id: itemId,
-        equipment_id: equipmentId,
+      const recordsToInsert = modalData.map(item => ({
+        check_item_id: item.id,
+        equipment_id: item.equipment_id,
         performed_by: user.id,
         performed_at: new Date().toISOString(),
-        result: true, // 一括実施は「正常」として記録（必要なら変更可）
-        comment: '一括実施'
+        result: item.submitResult,
+        comment: item.submitResult ? null : item.submitComment
       }));
 
-      console.log('[DEBUG] Bulk inserting records:', recordsToInsert);
+      console.log('[DEBUG] Inserting records from modal:', recordsToInsert);
 
       const { data: insertedRecords, error } = await supabase
         .from('equipment_maintenance_records')
         .insert(recordsToInsert)
-        .select(); // 挿入されたレコードを取得
+        .select();
 
       if (error) throw error;
 
-      console.log('[DEBUG] Bulk insert success:', insertedRecords);
+      console.log('[DEBUG] Insert from modal success:', insertedRecords);
 
-      // 状態を更新してUIに反映
+      // --- UI状態の更新 --- 
       const nowStr = new Date().toISOString();
+      const updatedItemIds = modalData.map(item => item.id);
+
       setEquipmentList(prevList => prevList.map(eq => {
-        if (eq.id === equipmentId) {
-          return {
-            ...eq,
-            checkItems: eq.checkItems?.map(item => {
-              if (itemsToCheck.includes(item.id)) {
-                return {
-                  ...item,
-                  lastCheckDate: nowStr,
-                  lastCheckResult: true,
-                  isOverdue: false // 点検実施したので期限切れ解除
-                };
-              }
-              return item;
-            }),
-            // pendingChecksも更新
-            pendingChecks: eq.checkItems?.filter(item => 
-              !itemsToCheck.includes(item.id) && item.isOverdue
-            ).length ?? 0
-          };
-        }
-        return eq;
+        const itemsToUpdate = eq.checkItems?.filter(item => updatedItemIds.includes(item.id)) ?? [];
+        if (itemsToUpdate.length === 0) return eq;
+
+        const updatedCheckItems = eq.checkItems?.map(item => {
+          const updatedInfo = modalData.find(m => m.id === item.id);
+          if (updatedInfo) {
+            return {
+              ...item,
+              lastCheckDate: nowStr,
+              lastCheckResult: updatedInfo.submitResult,
+              isOverdue: false
+            };
+          }
+          return item;
+        });
+
+        return {
+          ...eq,
+          checkItems: updatedCheckItems,
+          pendingChecks: updatedCheckItems?.filter(item => item.isOverdue).length ?? 0
+        };
       }));
 
-      // 新しいレコードを履歴に追加 (任意)
+      // 新しいレコードを履歴に追加
       if (insertedRecords) {
-        const formattedNewRecords = insertedRecords.map(rec => ({
-          ...rec,
-          performer_name: currentUserName,
-          check_item_name: equipmentList.find(e => e.id === equipmentId)?.checkItems?.find(i => i.id === rec.check_item_id)?.name,
-          equipment_name: equipmentList.find(e => e.id === equipmentId)?.name
-        }));
+        const formattedNewRecords = insertedRecords.map(rec => {
+          const equipment = equipmentList.find(e => e.id === rec.equipment_id);
+          const checkItem = equipment?.checkItems?.find(i => i.id === rec.check_item_id);
+          return {
+             ...rec,
+             performer_name: currentUserName,
+             check_item_name: checkItem?.name,
+             equipment_name: equipment?.name
+          };
+        });
         setMaintenanceRecords(prev => [...formattedNewRecords, ...prev]);
       }
 
-      // 選択をクリア
+      // 選択をクリア & モーダルを閉じる
       setSelectedCheckItemIds(prev => {
          const newSet = new Set(prev);
-         itemsToCheck.forEach(id => newSet.delete(id));
+         updatedItemIds.forEach(id => newSet.delete(id));
          return newSet;
       });
+      setIsSubmitModalOpen(false);
+      setModalData([]);
 
-      alert(`${itemsToCheck.length}項目の点検を記録しました。`);
+      alert(`${modalData.length}項目の点検を記録しました。`);
 
     } catch (error: any) {
-      console.error('一括点検記録エラー:', error);
+      console.error('モーダルからの点検記録エラー:', error);
       alert(`点検記録の登録に失敗しました: ${error.message}`);
     } finally {
-      setIsLoadingSubmit(false);
+      setSubmittingFromModal(false);
     }
+  };
+
+  // ★ 部署内の全項目を選択/解除するハンドラ (関数名を確認)
+  const handleSelectAllDepartmentChecks = (select: boolean) => {
+    // ... (関数本体は変更なし)
   };
 
   return (
@@ -618,6 +693,35 @@ export default function EquipmentDashboardClient() {
               新規機器登録
             </Button>
           </div>
+        </div>
+        
+        {/* ★ 部署全体の一括操作ボタン */} 
+        <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3">
+          <div className="flex gap-2">
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => handleSelectAllDepartmentChecks(true)}
+              disabled={isLoading || isSubmittingAllDepartment}
+            >
+              部署の全項目を選択
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => handleSelectAllDepartmentChecks(false)}
+              disabled={isLoading || isSubmittingAllDepartment}
+            >
+              部署の全選択を解除
+            </Button>
+          </div>
+          <Button 
+            onClick={() => handleOpenSubmitModal()}
+            disabled={isLoading || isLoadingSubmit || isSubmittingAllDepartment || selectedCheckItemIds.size === 0 || !Array.from(selectedCheckItemIds).some(id => filteredEquipment.some(eq => eq.checkItems?.some(item => item.id === id))) }
+            className="bg-primary hover:bg-primary/90 text-white w-full sm:w-auto"
+          >
+            {`選択中の全 ${Array.from(selectedCheckItemIds).filter(id => filteredEquipment.some(eq => eq.checkItems?.some(item => item.id === id))).length} 項目を確認/記録`}
+          </Button>
         </div>
         
         {/* 検索・フィルター部分 */}
@@ -798,11 +902,12 @@ export default function EquipmentDashboardClient() {
                               ))}
                               <div className="mt-4 flex justify-end">
                                 <Button
-                                  onClick={() => handleBulkCheckItems(equipment.id)}
+                                  onClick={() => handleOpenSubmitModal(equipment.id)}
                                   disabled={isLoadingSubmit || !Array.from(selectedCheckItemIds).some(id => equipment.checkItems?.some(item => item.id === id))}
-                                  className="bg-primary hover:bg-primary/90 text-white"
+                                  className="bg-secondary hover:bg-secondary/90 text-secondary-foreground"
+                                  size="sm"
                                 >
-                                  {isLoadingSubmit ? '処理中...' : `選択した ${Array.from(selectedCheckItemIds).filter(id => equipment.checkItems?.some(item => item.id === id)).length} 項目を点検実施`}
+                                  {`この機器で選択した ${Array.from(selectedCheckItemIds).filter(id => equipment.checkItems?.some(item => item.id === id)).length} 項目を確認/記録`}
                                 </Button>
                               </div>
                             </div>
@@ -876,6 +981,59 @@ export default function EquipmentDashboardClient() {
             )}
           </TabsContent>
         </Tabs>
+
+        {/* ★ 点検結果確認モーダル */} 
+        <Dialog open={isSubmitModalOpen} onOpenChange={setIsSubmitModalOpen}>
+          <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle>点検結果の確認・記録</DialogTitle>
+            </DialogHeader>
+            <div className="flex-grow overflow-y-auto pr-6 space-y-4">
+              {modalData.map((item) => (
+                <div key={item.id} className="p-4 border rounded-md bg-white">
+                  <p className="font-medium mb-2">{item.name} <span className="text-sm text-muted-foreground">({frequencyToJapanese(item.frequency)})</span></p>
+                  <RadioGroup 
+                    defaultValue="true" 
+                    value={item.submitResult.toString()} 
+                    onValueChange={(value: string) => handleModalDataChange(item.id, 'submitResult', value === 'true')}
+                    className="flex gap-4 mb-2"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="true" id={`result-ok-${item.id}`} />
+                      <Label htmlFor={`result-ok-${item.id}`} className="text-green-700">正常</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="false" id={`result-ng-${item.id}`} />
+                      <Label htmlFor={`result-ng-${item.id}`} className="text-red-700">異常</Label>
+                    </div>
+                  </RadioGroup>
+                  {item.submitResult === false && (
+                    <Textarea 
+                      placeholder="異常内容や対応を入力してください" 
+                      value={item.submitComment || ''}
+                      onChange={(e) => handleModalDataChange(item.id, 'submitComment', e.target.value)}
+                      className="mt-2"
+                      rows={3}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+            <DialogFooter className="mt-4">
+              <DialogClose asChild>
+                <Button variant="outline">キャンセル</Button>
+              </DialogClose>
+              <Button 
+                onClick={handleSubmitFromModal}
+                disabled={submittingFromModal}
+                className="bg-primary hover:bg-primary/90 text-white"
+              >
+                {submittingFromModal ? '処理中...' : `${modalData.length}件の記録を実行`}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </div>
   );
