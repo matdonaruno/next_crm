@@ -623,6 +623,21 @@ export default function EquipmentDashboardClient() {
     // ... (関数本体は変更なし)
   };
 
+  const [isAllExpanded, setIsAllExpanded] = useState(false);
+
+  // ★ すべて展開/閉じるハンドラ
+  const toggleAllEquipment = () => {
+    const newState = !isAllExpanded;
+    setIsAllExpanded(newState);
+    // 更新後の状態を計算するロジックを明確にする
+    const updatedExpandedState: Record<string, boolean> = {};
+    // equipmentListから現在のキーを取得して状態を設定
+    equipmentList.forEach(eq => {
+      updatedExpandedState[eq.id] = newState;
+    });
+    setExpandedEquipment(updatedExpandedState);
+  };
+
   return (
     <div className="min-h-screen bg-white">
       <AppHeader 
@@ -695,77 +710,6 @@ export default function EquipmentDashboardClient() {
           </div>
         </div>
         
-        {/* ★ 部署全体の一括操作ボタン */} 
-        <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3">
-          <div className="flex gap-2">
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => handleSelectAllDepartmentChecks(true)}
-              disabled={isLoading || isSubmittingAllDepartment}
-            >
-              部署の全項目を選択
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => handleSelectAllDepartmentChecks(false)}
-              disabled={isLoading || isSubmittingAllDepartment}
-            >
-              部署の全選択を解除
-            </Button>
-          </div>
-          <Button 
-            onClick={() => handleOpenSubmitModal()}
-            disabled={isLoading || isLoadingSubmit || isSubmittingAllDepartment || selectedCheckItemIds.size === 0 || !Array.from(selectedCheckItemIds).some(id => filteredEquipment.some(eq => eq.checkItems?.some(item => item.id === id))) }
-            className="bg-primary hover:bg-primary/90 text-white w-full sm:w-auto"
-          >
-            {`選択中の全 ${Array.from(selectedCheckItemIds).filter(id => filteredEquipment.some(eq => eq.checkItems?.some(item => item.id === id))).length} 項目を確認/記録`}
-          </Button>
-        </div>
-        
-        {/* 検索・フィルター部分 */}
-        <div className="mb-6 bg-white p-4 rounded-lg shadow-sm">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="機器名・部署名・点検項目で検索"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-8"
-                />
-              </div>
-            </div>
-            
-            <div className="w-full md:w-auto">
-              <Select value={selectedDepartmentId} onValueChange={handleDepartmentChange}>
-                <SelectTrigger className="w-full md:w-[180px]">
-                  <SelectValue placeholder="部署を選択" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部署</SelectItem>
-                  {departments.map(dept => (
-                    <SelectItem key={dept.id} value={dept.id}>{dept.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="flex items-center">
-              <Button 
-                variant={showOverdueOnly ? "secondary" : "outline"} 
-                className={`text-sm w-full justify-start md:w-auto ${showOverdueOnly ? "bg-amber-100 text-amber-800 border-amber-300" : ""}`}
-                onClick={() => setShowOverdueOnly(!showOverdueOnly)}
-              >
-                <AlertTriangle className={`mr-2 h-4 w-4 ${showOverdueOnly ? "text-amber-600" : "text-muted-foreground"}`} />
-                期限切れのみ表示
-              </Button>
-            </div>
-          </div>
-        </div>
-        
         {/* タブ */}
         <Tabs defaultValue="equipment" className="mb-6" value={activeTab} onValueChange={(value) => setActiveTab(value as 'equipment' | 'history')}>
           <TabsList className="grid w-full grid-cols-2 mb-4">
@@ -781,6 +725,47 @@ export default function EquipmentDashboardClient() {
           
           {/* 機器一覧タブコンテンツ */}
           <TabsContent value="equipment" className="mt-4">
+            {/* ★★★ 部署全体操作ボタンと展開ボタンをこのタブ内に移動 ★★★ */}
+            <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3">
+              <div className="flex items-center gap-2">
+                {/* 部署の全選択/解除ボタン */} 
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleSelectAllDepartmentChecks(true)}
+                  disabled={isLoading || isSubmittingAllDepartment}
+                >
+                  部署の全項目を選択
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleSelectAllDepartmentChecks(false)}
+                  disabled={isLoading || isSubmittingAllDepartment}
+                >
+                  部署の全選択を解除
+                </Button>
+                {/* すべて展開/閉じるボタン */} 
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={toggleAllEquipment}
+                  disabled={isLoading}
+                  className="ml-auto" // 右寄せにする
+                >
+                  {isAllExpanded ? 'すべて閉じる' : 'すべて展開'}
+                </Button>
+              </div>
+              {/* 部署全体の一括実施ボタン */}
+              <Button
+                onClick={() => handleOpenSubmitModal()} // 引数なしで部署全体
+                disabled={isLoading || isLoadingSubmit || isSubmittingAllDepartment || selectedCheckItemIds.size === 0 || !Array.from(selectedCheckItemIds).some(id => filteredEquipment.some(eq => eq.checkItems?.some(item => item.id === id))) }
+                className="bg-primary hover:bg-primary/90 text-white w-full sm:w-auto"
+              >
+                {isSubmittingAllDepartment ? '処理中...' : `選択中の全 ${Array.from(selectedCheckItemIds).filter(id => filteredEquipment.some(eq => eq.checkItems?.some(item => item.id === id))).length} 項目を確認/記録`}
+              </Button>
+            </div>
+
             {isLoading ? (
               <div className="flex justify-center items-center py-12">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
