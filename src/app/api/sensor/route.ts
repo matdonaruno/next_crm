@@ -7,10 +7,10 @@ export async function POST(request: Request) {
     const startTime = Date.now(); // 処理開始時間
     console.log(`センサーAPI: リクエスト受信 ${new Date().toISOString()}`);
     
-    const { ahtTemp, ahtHum, bmpTemp, bmpPres, deviceId, ipAddress } = await request.json();
+    const { ahtTemp, ahtHum, bmpTemp, bmpPres, batteryVolt, deviceId, ipAddress, timestamp } = await request.json();
     const ip = request.headers.get('x-forwarded-for') || ipAddress || 'unknown';
     
-    console.log(`受信センサーデータ: ${ip} - AHT温度: ${ahtTemp}℃, BMP温度: ${bmpTemp}℃, デバイスID: ${deviceId || 'なし'}`);
+    console.log(`受信センサーデータ: ${ip} - AHT温度: ${ahtTemp}℃, BMP温度: ${bmpTemp}℃, バッテリー: ${batteryVolt}V, デバイスID: ${deviceId || 'なし'}`);
     
     // デバイスIDとIPアドレスの両方で検索（deviceIdを優先）
     let deviceData = null;
@@ -40,11 +40,11 @@ export async function POST(request: Request) {
     }
       
     if (!deviceData) {
-      console.log(`未登録デバイス(${deviceId || ip})からのデータ: ${ahtTemp}℃, ${bmpTemp}℃`);
+      console.log(`未登録デバイス(${deviceId || ip})からのデータ: ${ahtTemp}℃, ${bmpTemp}℃, バッテリー: ${batteryVolt}V`);
       
-      // 未登録デバイスの場合はログだけ残す
+      // 未登録デバイスの場合はログだけ残す。batteryVoltを追加
       await supabase.from('sensor_logs').insert({
-        raw_data: { ahtTemp, ahtHum, bmpTemp, bmpPres },
+        raw_data: { ahtTemp, ahtHum, bmpTemp, bmpPres, batteryVolt },
         ip_address: ip,
         device_id: deviceId || null,
         recorded_at: getJstTimestamp() // 日本時間のタイムスタンプを使用
@@ -66,10 +66,10 @@ export async function POST(request: Request) {
     if (deviceId) updateData.device_id = deviceId;
     
     const [logInsertResult, deviceUpdateResult, mappingsResult] = await Promise.all([
-      // センサーログを記録
+      // センサーログを記録。batteryVoltを追加
       supabase.from('sensor_logs').insert({
         sensor_device_id: deviceData.id,
-        raw_data: { ahtTemp, ahtHum, bmpTemp, bmpPres },
+        raw_data: { ahtTemp, ahtHum, bmpTemp, bmpPres, batteryVolt },
         ip_address: ip,
         device_id: deviceId || null,
         recorded_at: getJstTimestamp()
@@ -160,11 +160,16 @@ export async function POST(request: Request) {
         case 'bmpTemp': sensorValue = bmpTemp; break;
         case 'ahtHum': sensorValue = ahtHum; break;
         case 'bmpPres': sensorValue = bmpPres; break;
+        case 'batteryVolt': sensorValue = batteryVolt; break; // バッテリー電圧のケースも追加
         default: return Promise.resolve(); // マッピングなしはスキップ
       }
       
       // オフセット値を適用
-      sensorValue += mapping.offset_value || 0;
+      if (sensorValue !== undefined && sensorValue !== null) {
+        sensorValue += mapping.offset_value || 0;
+      } else {
+        return Promise.resolve(); // 値がなければスキップ
+      }
       
       // 既存レコードをチェックして、新規追加か更新かを判断して処理
       return processDetailRecord(recordId, mapping.temperature_item_id, sensorValue);

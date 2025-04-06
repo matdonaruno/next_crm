@@ -123,7 +123,7 @@ export default function TemperatureManagementClient() {
   const [facilityId, setFacilityId] = useState<string>("");
   const [userName, setUserName] = useState<string>("");
   const [dateRange, setDateRange] = useState<DateRange>('2weeks');
-  const [includeAutoRecords, setIncludeAutoRecords] = useState<boolean>(false);
+  const [includeAutoRecords, setIncludeAutoRecords] = useState<boolean>(true);
 
   // 通知データの状態
   const [notifications, setNotifications] = useState<Notification[]>([
@@ -536,65 +536,75 @@ export default function TemperatureManagementClient() {
       
       console.log('最新のセンサーログを取得しました:', logData);
       
-      // UTCタイムスタンプを変換
-      const utcDate = new Date(logData.recorded_at);
-      // UTCから直接変換してJSTの現地時間として表示（UTCから9時間引く）
-      const jstDate = new Date(utcDate.getTime() - 9 * 60 * 60 * 1000);
+      // recorded_atはUTC時間なので、変換せずにそのまま使用
+      const recordedAt = new Date(logData.recorded_at);
       
       console.log('タイムスタンプの解析:', {
         original: logData.recorded_at,
-        parsed: utcDate,
-        formatted: jstDate.toLocaleString()
+        parsed: recordedAt,
+        formatted: recordedAt.toLocaleString()
       });
+      
+      // raw_dataがJSON文字列の場合はパースする
+      let sensorRawData = logData.raw_data;
+      if (typeof sensorRawData === 'string') {
+        try {
+          sensorRawData = JSON.parse(sensorRawData);
+        } catch (e) {
+          console.error('センサーデータのJSONパースエラー:', e);
+        }
+      }
       
       // センサーデータがあればフラグを立てる
       setShowSensorData(true);
       
+      // バッテリー電圧を確認（存在しない場合は3.3Vをデフォルト値として使用）
+      const batteryVolt = sensorRawData.batteryVolt !== undefined ? 
+                          sensorRawData.batteryVolt : 
+                          3.3; // デフォルト値として3.3Vを使用
+      
       // センサーデータを設定（バッテリー電圧を含む）
       setSensorData({
-        ahtTemp: logData.raw_data.ahtTemp || null,
-        bmpTemp: logData.raw_data.bmpTemp || null,
-        ahtHum: logData.raw_data.ahtHum || null,
-        bmpPres: logData.raw_data.bmpPres || null,
-        batteryVolt: logData.raw_data.batteryVolt || null, // バッテリー電圧を追加
+        ahtTemp: sensorRawData.ahtTemp || null,
+        bmpTemp: sensorRawData.bmpTemp || null,
+        ahtHum: sensorRawData.ahtHum || null,
+        bmpPres: sensorRawData.bmpPres || null,
+        batteryVolt: batteryVolt,
         lastUpdated: logData.recorded_at
       });
       
       // バッテリーレベルを計算
-      if (logData.raw_data.batteryVolt !== undefined && logData.raw_data.batteryVolt !== null) {
-        const batteryLevel = getBatteryLevel(logData.raw_data.batteryVolt);
-        
-        // バッテリー警告レベルの場合は通知を追加
-        if (batteryLevel === BatteryLevel.LOW || batteryLevel === BatteryLevel.WARNING) {
-          // useRefを使わなくても、setNotificationsの関数形式を使用して安全に更新
-          setNotifications(prev => {
-            // 既存のバッテリー通知があるか確認
-            const existingBatteryNotification = prev.find(
-              n => n.type === 'battery' && n.message.includes('バッテリー')
-            );
-            
-            // すでに通知がある場合は、既存の通知を更新せずに現状を返す
-            if (existingBatteryNotification) {
-              return prev;
-            }
-            
-            // 新しい通知を追加
-            return [{
-              id: Date.now(),
-              type: 'battery',
-              message: getBatteryMessage(batteryLevel),
-              timestamp: new Date(),
-              priority: batteryLevel === BatteryLevel.WARNING ? 'high' : 'medium'
-            }, ...prev];
-          });
-        }
+      const batteryLevel = getBatteryLevel(batteryVolt);
+      
+      // バッテリー警告レベルの場合は通知を追加
+      if (batteryLevel === BatteryLevel.LOW || batteryLevel === BatteryLevel.WARNING) {
+        // useRefを使わなくても、setNotificationsの関数形式を使用して安全に更新
+        setNotifications(prev => {
+          // 既存のバッテリー通知があるか確認
+          const existingBatteryNotification = prev.find(
+            n => n.type === 'battery' && n.message.includes('バッテリー')
+          );
+          
+          // すでに通知がある場合は、既存の通知を更新せずに現状を返す
+          if (existingBatteryNotification) {
+            return prev;
+          }
+          
+          // 新しい通知を追加
+          return [{
+            id: Date.now(),
+            type: 'battery',
+            message: getBatteryMessage(batteryLevel),
+            timestamp: new Date(),
+            priority: batteryLevel === BatteryLevel.WARNING ? 'high' : 'medium'
+          }, ...prev];
+        });
       }
       
       console.log('センサーデータを設定しました:', {
         timestamp: logData.recorded_at,
-        localTime: jstDate.toLocaleString(),
-        utcTime: new Date(logData.recorded_at).toUTCString(),
-        batteryVolt: logData.raw_data.batteryVolt
+        localTime: new Date(logData.recorded_at).toLocaleString(),
+        batteryVolt: batteryVolt
       });
     } catch (error) {
       console.error('センサーデータ取得エラー:', error);
@@ -855,11 +865,9 @@ export default function TemperatureManagementClient() {
               </Button>
               <span className="ml-auto text-xs text-gray-500">
                 最終更新: {(() => {
-                  // UTCタイムスタンプを取得
-                  const utcDate = new Date(sensorData.lastUpdated);
-                  // UTCから直接変換してJSTの現地時間として表示（UTCから9時間引く）
-                  const jstDate = new Date(utcDate.getTime() - 9 * 60 * 60 * 1000);
-                  return jstDate.toLocaleString();
+                  // UTCタイムスタンプをそのまま表示（ブラウザが自動的にローカル時間に変換）
+                  const recordedAt = new Date(sensorData.lastUpdated);
+                  return recordedAt.toLocaleString();
                 })()}
               </span>
             </h3>
@@ -1119,10 +1127,9 @@ export default function TemperatureManagementClient() {
                   <tr key={record.id} className="hover:bg-secondary/30">
                     <td className="px-4 py-3">
                       {(() => {
-                        // UTCタイムスタンプをJSTに変換
-                        const utcDate = new Date(record.record_date);
-                        const jstDate = new Date(utcDate.getTime() + 9 * 60 * 60 * 1000);
-                        return jstDate.toLocaleString('ja-JP', {
+                        // UTCタイムスタンプをそのまま表示（ブラウザが自動的にローカル時間に変換）
+                        const recordDate = new Date(record.record_date);
+                        return recordDate.toLocaleString('ja-JP', {
                           year: 'numeric',
                           month: '2-digit',
                           day: '2-digit',
@@ -1294,9 +1301,9 @@ export default function TemperatureManagementClient() {
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600 text-center">
                               {device.lastUpdated ? (
                                 (() => {
-                                  const utcDate = new Date(device.lastUpdated);
-                                  const jstDate = new Date(utcDate.getTime() + 9 * 60 * 60 * 1000);
-                                  return jstDate.toLocaleString('ja-JP', {
+                                  // UTCタイムスタンプをそのまま表示（ブラウザが自動的にローカル時間に変換）
+                                  const recordedAt = new Date(device.lastUpdated);
+                                  return recordedAt.toLocaleString('ja-JP', {
                                     year: 'numeric',
                                     month: '2-digit',
                                     day: '2-digit',

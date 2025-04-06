@@ -43,6 +43,7 @@ interface SensorLog {
     bmpTemp: number | null;
     ahtHum: number | null;
     bmpPres: number | null;
+    batteryVolt: number | null;
   };
   recorded_at: string;
 }
@@ -323,7 +324,7 @@ function SensorDataContent() {
   const downloadCSV = () => {
     if (!sensorLogs.length) return;
 
-    let csvContent = "日時,AHT20温度(℃),BMP280温度(℃),AHT20湿度(%),BMP280気圧(hPa)\n";
+    let csvContent = "日時,AHT20温度(℃),BMP280温度(℃),AHT20湿度(%),BMP280気圧(hPa),バッテリー電圧(V),バッテリー残量(%)\n";
     
     sensorLogs.forEach(log => {
       const date = new Date(log.recorded_at).toLocaleString();
@@ -331,8 +332,18 @@ function SensorDataContent() {
       const bmpTemp = log.raw_data?.bmpTemp !== null ? log.raw_data.bmpTemp.toFixed(1) : "";
       const ahtHum = log.raw_data?.ahtHum !== null ? log.raw_data.ahtHum.toFixed(1) : "";
       const bmpPres = log.raw_data?.bmpPres !== null ? log.raw_data.bmpPres.toFixed(1) : "";
+      const batteryVolt = log.raw_data?.batteryVolt !== null ? log.raw_data.batteryVolt.toFixed(2) : "";
       
-      csvContent += `${date},${ahtTemp},${bmpTemp},${ahtHum},${bmpPres}\n`;
+      // バッテリー残量を計算（3.0V=0%, 4.2V=100%）
+      let batteryPercentage = "";
+      if (log.raw_data?.batteryVolt !== null && log.raw_data?.batteryVolt !== undefined) {
+        const minVoltage = 3.0;
+        const maxVoltage = 4.2;
+        const percentage = ((log.raw_data.batteryVolt - minVoltage) / (maxVoltage - minVoltage)) * 100;
+        batteryPercentage = Math.max(0, Math.min(100, percentage)).toFixed(0);
+      }
+      
+      csvContent += `${date},${ahtTemp},${bmpTemp},${ahtHum},${bmpPres},${batteryVolt},${batteryPercentage}\n`;
     });
 
     const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvContent);
@@ -355,6 +366,7 @@ function SensorDataContent() {
     const bmpTempData = sensorLogs.map(log => log.raw_data?.bmpTemp ?? null);
     const ahtHumData = sensorLogs.map(log => log.raw_data?.ahtHum ?? null);
     const bmpPresData = sensorLogs.map(log => log.raw_data?.bmpPres ?? null);
+    const batteryVoltData = sensorLogs.map(log => log.raw_data?.batteryVolt ?? null);
 
     return {
       labels,
@@ -394,6 +406,15 @@ function SensorDataContent() {
           tension: 0.1,
           pointRadius: 2,
           yAxisID: 'y3',
+        },
+        {
+          label: 'バッテリー電圧 (V)',
+          data: batteryVoltData,
+          borderColor: 'rgb(153, 102, 255)',
+          backgroundColor: 'rgba(153, 102, 255, 0.5)',
+          tension: 0.1,
+          pointRadius: 2,
+          yAxisID: 'y4',
         }
       ]
     };
@@ -460,6 +481,20 @@ function SensorDataContent() {
         title: {
           display: true,
           text: '気圧 (hPa)'
+        },
+        grid: {
+          drawOnChartArea: false
+        }
+      },
+      y4: {
+        type: 'linear' as const,
+        display: true,
+        position: 'right' as const,
+        min: 2.5,  // バッテリー電圧の最小値
+        max: 4.5,  // バッテリー電圧の最大値
+        title: {
+          display: true,
+          text: '電圧 (V)'
         },
         grid: {
           drawOnChartArea: false
@@ -639,6 +674,8 @@ function SensorDataContent() {
                     <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">BMP280温度 (℃)</th>
                     <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">AHT20湿度 (%)</th>
                     <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">BMP280気圧 (hPa)</th>
+                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">バッテリー電圧 (V)</th>
+                    <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">バッテリー残量 (%)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -665,6 +702,21 @@ function SensorDataContent() {
                       <td className="px-4 py-3 text-sm text-center text-teal-600">
                         {log.raw_data?.bmpPres !== null && log.raw_data?.bmpPres !== undefined
                           ? log.raw_data.bmpPres.toFixed(1)
+                          : '-'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-center text-purple-600">
+                        {log.raw_data?.batteryVolt !== null && log.raw_data?.batteryVolt !== undefined
+                          ? log.raw_data.batteryVolt.toFixed(2)
+                          : '-'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-center text-indigo-600">
+                        {log.raw_data?.batteryVolt !== null && log.raw_data?.batteryVolt !== undefined
+                          ? (() => {
+                              const minVoltage = 3.0;
+                              const maxVoltage = 4.2;
+                              const percentage = ((log.raw_data.batteryVolt - minVoltage) / (maxVoltage - minVoltage)) * 100;
+                              return Math.max(0, Math.min(100, percentage)).toFixed(0) + '%';
+                            })()
                           : '-'}
                       </td>
                     </tr>
