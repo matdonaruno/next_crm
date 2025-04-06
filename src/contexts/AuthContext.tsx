@@ -1,9 +1,12 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import Cookies from 'js-cookie';
+import { User, Session, PostgrestError, Subscription } from '@supabase/supabase-js';
+// import { Profile } from '@/types/index'; // ★ 正しいパスが見つかるまでコメントアウト
+import { useToast } from '@/hooks/use-toast';
 
 // グローバルウィンドウにCookiesを追加
 declare global {
@@ -28,9 +31,11 @@ interface UserProfile {
 }
 
 interface AuthContextType {
-  user: any | null;
-  profile: UserProfile | null;
+  user: User | null;
+  profile: any | null; // ★ 一時的に any に変更
   loading: boolean;
+  sessionCheckEnabled: boolean;
+  setSessionCheckEnabled: (enabled: boolean) => void;
   loadingState: 'idle' | 'authenticating' | 'loading-profile' | 'error';
   loadingMessage: string;
   manualReload: () => void;
@@ -48,7 +53,7 @@ const INACTIVITY_TIMEOUT = 30 * 60 * 1000;
 const SESSION_CHECK_INTERVAL = 5 * 60 * 1000;
 
 // セッション確認の有効化フラグ - デフォルトでは無効化（必要なページでのみ有効化する）
-let SESSION_CHECK_ENABLED = false;
+let SESSION_CHECK_ENABLED = true;
 
 // データ取得タイムアウト（ミリ秒）- 15秒
 const DATA_FETCH_TIMEOUT = 15000;
@@ -68,15 +73,29 @@ export const setSessionCheckEnabled = (enabled: boolean) => {
   SESSION_CHECK_ENABLED = enabled;
 };
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<any | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<any | null>(null); // ★ 一時的に any に変更
   const [loading, setLoading] = useState(true);
+  const [sessionCheckEnabled, _setSessionCheckEnabled] = useState(SESSION_CHECK_ENABLED);
   const [loadingState, setLoadingState] = useState<'idle' | 'authenticating' | 'loading-profile' | 'error'>('idle');
   const [loadingMessage, setLoadingMessage] = useState<string>('読み込み中...');
   const [lastActivity, setLastActivity] = useState<number>(Date.now());
   const [retryCount, setRetryCount] = useState<number>(0);
   const router = useRouter();
+  const { toast } = useToast();
+
+  // ★ 現在のユーザー/プロファイル情報と初回チェック状態を保持するRef
+  const userRef = useRef<User | null>(null);
+  const profileRef = useRef<any | null>(null); // ★ 一時的に any に変更
+  const initialAuthCheckComplete = useRef(false);
+
+  // セッション確認有効フラグのセッター (グローバル変数も更新)
+  const setSessionCheckEnabledState = useCallback((enabled: boolean) => {
+    console.log("AuthProvider: setSessionCheckEnabledState called with:", enabled);
+    _setSessionCheckEnabled(enabled);
+    SESSION_CHECK_ENABLED = enabled; // グローバル変数も更新
+  }, []);
 
   // 手動リロード - 状態をリセットしてからリロード
   const manualReload = () => {
@@ -319,253 +338,236 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       clearInterval(inactivityCheckInterval);
     };
-  }, [user, lastActivity]);
+  }, [user]); // lastActivityを依存配列から削除
 
-  // 初期化時とauth状態変更時にユーザー情報を取得
+  // ★ ユーザー情報とプロファイル情報を取得・更新する関数
+  const fetchUserAndProfile = useCallback(async (userId: string) => {
+    console.log("AuthContext: fetchUserAndProfile 開始 for user:", userId);
+    // この関数内ではローディング状態を設定しない（呼び出し元で管理）
+    try {
+      // ユーザー情報を再確認 (オプションだが、最新情報を取得する場合)
+      const { data: { user: currentUserData }, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        console.error("AuthContext: ユーザー再確認エラー:", userError);
+      } else if (currentUserData && JSON.stringify(currentUserData) !== JSON.stringify(userRef.current)) {
+         console.log("AuthContext: ユーザーオブジェクト参照を更新");
+         setUser(currentUserData); // stateも更新
+         userRef.current = currentUserData; // refも更新
+      }
+
+      // プロファイル情報を取得
+      console.log("AuthContext: プロファイル取得試行 for user:", userId);
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('*') // 必要に応じてリレーションも指定: '*, facilities(*)'
+        .eq('id', userId)
+        .single<any>(); // ★ single<any>() で型を指定 (オプション)
+
+      if (profileError) {
+        if (profileError.code !== 'PGRST116') { // "Not found" は通常のエラーとして扱わない場合
+          console.error('AuthContext: プロファイル取得エラー:', profileError);
+          toast({
+            title: "プロファイル取得エラー",
+            description: profileError.message,
+            variant: "destructive",
+          });
+        } else {
+          console.log('AuthContext: プロファイルが見つかりませんでした (PGRST116)。新規作成が必要かもしれません。');
+          // 必要であればここでプロファイル作成APIを呼び出すなどの処理を追加
+        }
+        setProfile(null);
+        profileRef.current = null;
+      } else {
+        console.log('AuthContext: プロファイル取得成功:', profileData);
+        // ★ 取得データが現在のプロファイルと異なる場合のみ更新
+        if (JSON.stringify(profileData) !== JSON.stringify(profileRef.current)) {
+          setProfile(profileData);
+          profileRef.current = profileData;
+          console.log("AuthContext: プロファイル情報を更新しました");
+        } else {
+          console.log("AuthContext: プロファイル情報に変化なし、更新スキップ");
+        }
+      }
+    } catch (error) {
+      console.error("AuthContext: fetchUserAndProfile 関数内でエラー:", error);
+      setProfile(null); // エラー時はプロファイルもクリア
+      profileRef.current = null;
+       toast({
+         title: "データ取得エラー",
+         description: error instanceof Error ? error.message : String(error),
+         variant: "destructive",
+       });
+    }
+  }, [toast]); // 依存配列に toast を追加
+
+  // --- 初期化と認証状態監視 ---
   useEffect(() => {
-    console.log("AuthContext: 初期化処理を開始");
-    setLoadingState('authenticating');
-    setLoadingMessage('認証状態を確認中...');
-    
-    // セッション管理を一元化した初期化処理
+    console.log("AuthContext: 初期化 Effect が実行されました");
+    let isMounted = true;
+
+    // ★ 非同期の初期化関数
     const initializeAuth = async () => {
       console.log("AuthContext: 認証初期化を開始");
-      setLoading(true);
-
+      setLoading(true); // 初期化開始時にローディング開始
       try {
-        // まずキャッシュされたセッションをチェック
-        const cachedSession = getCachedSession();
-        if (cachedSession) {
-          console.log("AuthContext: キャッシュされたセッションを使用");
-          setUser(cachedSession.user);
-          
-          // キャッシュからプロファイルを取得
-          const cachedProfile = getCachedProfile();
-          if (cachedProfile) {
-            console.log("AuthContext: キャッシュされたプロファイルを使用");
-            setProfile(cachedProfile);
-            setLoading(false);
-            setLoadingState('idle');
-            setLoadingMessage('');
-            return;
-          }
-          
-          // プロファイルをキャッシュから取得できない場合は取得処理を実行
-          setLoadingState('loading-profile');
-          setLoadingMessage('プロファイル情報を読み込み中...');
-          
-          // プロファイル情報を取得（タイムアウトはfetchProfileWithRetry内で処理）
-          const { data: profileData, error: profileError } = await fetchProfileWithRetry(cachedSession.user.id, MAX_RETRY_COUNT, false);
-          
-          if (profileData) {
-            setProfile(profileData);
-            setLoadingState('idle');
-            setLoadingMessage('');
-          } else {
-            console.error("AuthContext: プロファイル取得エラー:", profileError?.message);
-            setProfile(null);
-            setLoadingState('error');
-            setLoadingMessage('プロファイル情報の取得に失敗しました。手動で再読み込みしてください。');
-          }
-          
-          setLoading(false);
-          return;
+        // 初回セッション取得
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+          console.error("AuthContext: 初回セッション取得エラー:", sessionError);
         }
 
-        // キャッシュにセッションがない場合はサーバーから取得
-        const { data, error } = await supabase.auth.getSession();
-        
-        console.log("AuthContext: セッション初期化結果", { 
-          hasSession: !!data.session, 
-          userId: data.session?.user?.id || "なし",
-          error: error?.message || "なし",
-          timestamp: new Date().toISOString()
-        });
-
-        if (error) {
-          console.error("AuthContext: セッション初期化エラー:", error.message);
-          setUser(null);
-          setProfile(null);
-          setLoading(false);
-          setLoadingState('error');
-          setLoadingMessage('セッションの取得に失敗しました');
-          return;
-        }
-
-        if (data.session?.user) {
-          console.log("AuthContext: セッション初期化成功、ユーザーID:", data.session.user.id);
-          setUser(data.session.user);
-          setCachedSession(data.session);
-          
-          setLoadingState('loading-profile');
-          setLoadingMessage('プロファイル情報を読み込み中...');
-          
-          // プロファイル情報を取得（タイムアウトはfetchProfileWithRetry内で処理）
-          const { data: profileData, error: profileError } = await fetchProfileWithRetry(data.session.user.id, MAX_RETRY_COUNT, true);
-
-          if (profileData) {
-            setProfile(profileData);
-            setLoadingState('idle');
-            setLoadingMessage('');
+        if (isMounted) {
+          if (session) {
+            console.log("AuthContext: 初期セッションあり");
+            // ★ 以前のユーザーと違うか、ユーザーがいない場合のみ fetch
+            if (!userRef.current || userRef.current.id !== session.user.id) {
+              console.log("AuthContext: 初期ユーザー設定 & プロファイル取得実行");
+              setUser(session.user);
+              userRef.current = session.user;
+              await fetchUserAndProfile(session.user.id);
+            } else {
+              console.log("AuthContext: 初期ユーザー同じ、プロファイル取得スキップ");
+              // ユーザーオブジェクトの参照だけ更新する場合
+              setUser(session.user); // stateは更新しておく
+              userRef.current = session.user; // refも更新
+              // profileは既存のものを維持 (profileRef.current)
+              setProfile(profileRef.current);
+            }
           } else {
-            console.error("AuthContext: プロファイル取得エラー:", profileError?.message);
+            console.log("AuthContext: 初期セッションなし");
+            setUser(null);
             setProfile(null);
-            setLoadingState('error');
-            setLoadingMessage('プロファイル情報の取得に失敗しました。手動で再読み込みしてください。');
+            userRef.current = null;
+            profileRef.current = null;
           }
-        } else {
-          console.log("AuthContext: アクティブなセッションなし");
-          setUser(null);
-          setProfile(null);
-          setLoadingState('idle');
-          setLoadingMessage('');
         }
       } catch (error) {
-        console.error("AuthContext: 初期化エラー:", error);
-        setUser(null);
-        setProfile(null);
-        setLoadingState('error');
-        setLoadingMessage('予期せぬエラーが発生しました');
+        console.error("AuthContext: 認証初期化中にエラー発生:", error);
+        if (isMounted) {
+          setUser(null);
+          setProfile(null);
+          userRef.current = null;
+          profileRef.current = null;
+        }
       } finally {
-        console.log("AuthContext: 初期化完了");
-        setLoading(false);
+        if (isMounted) {
+          initialAuthCheckComplete.current = true; // ★ 初回チェック完了フラグを立てる
+          setLoading(false); // ★ 初期化完了時にローディング終了
+          console.log("AuthContext: 初期化完了 (loading=false)");
+        }
       }
     };
 
     initializeAuth();
 
-    // 認証状態の変更をリッスンする関数を定義
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("AuthContext: 認証状態変更イベント:", event);
-      
-      // ユーザー状態を更新
-      if (session?.user) {
-        setUser(session.user);
-        setCachedSession(session);
-      } else {
-        setUser(null);
-        setProfile(null);
+    // ★ 認証状態の変更を監視
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log(`AuthContext: onAuthStateChange イベント: ${event}, セッション有無: ${!!session}`);
+
+        // ★ isMounted チェックを追加
+        if (!isMounted) {
+          console.log("AuthContext: Component unmounted, skipping auth state change.");
+          return;
+        }
+
+        // ★ 初回チェック完了前に他のイベントが来た場合、またはセッションがない場合は基本的に何もしないことが多い
+        //    ただし、SIGNED_OUT は処理する必要がある
+        if (!initialAuthCheckComplete.current && event !== 'INITIAL_SESSION') {
+          console.log(`AuthContext: 初回チェック完了前 (${event}) - 処理スキップ`);
+          return;
+        }
+        if (event === 'INITIAL_SESSION') {
+           // initializeAuth で処理済みのはずだが、念のためローディング解除
+           if (loading) setLoading(false);
+           return;
+        }
+
+
+        const currentUserId = userRef.current?.id;
+        const newUserId = session?.user?.id;
+
+        if (event === 'SIGNED_IN') {
+          if (newUserId && newUserId !== currentUserId) {
+            // ユーザーが実際に切り替わった場合のみデータ取得
+            console.log(`AuthContext: SIGNED_IN - ユーザー変更 (${currentUserId} -> ${newUserId})。データ取得実行`);
+            setLoading(true);
+            setUser(session!.user);
+            userRef.current = session!.user;
+            await fetchUserAndProfile(newUserId);
+            setLoading(false);
+          } else if (newUserId && newUserId === currentUserId) {
+            // ユーザーIDは同じだがイベント発生 (タブアクティブ化など)
+            console.log(`AuthContext: SIGNED_IN - ユーザー同じ (${newUserId})。ユーザーオブジェクト更新のみ`);
+            setUser(session!.user); // ユーザーオブジェクト参照の更新は行う
+            userRef.current = session!.user;
+            // プロファイルは再取得しない
+          } else if (!newUserId) {
+             console.warn(`AuthContext: SIGNED_IN イベントだが session.user が存在しない`);
+             setUser(null);
+             setProfile(null);
+             userRef.current = null;
+             profileRef.current = null;
+             setLoading(false);
+          }
+        } else if (event === 'SIGNED_OUT') {
+          console.log(`AuthContext: SIGNED_OUT 検出`);
+          setUser(null);
+          setProfile(null);
+          userRef.current = null;
+          profileRef.current = null;
+          setLoading(false); // 必要なら
+        } else if (event === 'TOKEN_REFRESHED') {
+          console.log(`AuthContext: TOKEN_REFRESHED`);
+          if (session) {
+              console.log(`AuthContext: セッションあり、ユーザーオブジェクト更新のみ`);
+              // 新しいセッション情報でユーザー状態を更新する (プロファイルは取得しない)
+              setUser(session.user);
+              userRef.current = session.user;
+          } else {
+              console.warn(`AuthContext: TOKEN_REFRESHED イベントだがセッションがない、サインアウトとして扱う`);
+               setUser(null);
+               setProfile(null);
+               userRef.current = null;
+               profileRef.current = null;
+               setLoading(false);
+          }
+        } else if (event === 'USER_UPDATED') {
+          console.log(`AuthContext: USER_UPDATED`);
+           if (session) {
+              console.log(`AuthContext: ユーザーオブジェクト更新、プロファイルも再取得`);
+              // USER_UPDATEDの場合はプロファイルも変更されている可能性があるため再取得
+              setLoading(true);
+              setUser(session.user);
+              userRef.current = session.user;
+              await fetchUserAndProfile(session.user.id);
+              setLoading(false);
+           }
+        } else {
+          console.log(`AuthContext: その他のイベント (${event})`);
+          // 必要に応じて他のイベント (PASSWORD_RECOVERY など) の処理を追加
+        }
       }
-      
-      // ログイン時のみプロファイル情報を取得
-      if (event === 'SIGNED_IN' && session?.user) {
-        setLoadingState('loading-profile');
-        setLoadingMessage('プロファイル情報を読み込み中...');
-        
-        fetchUserAndProfile(session.user.id);
-      }
-    });
+    );
 
     // クリーンアップ関数
     return () => {
-      authListener.subscription.unsubscribe();
+      isMounted = false;
+      authListener?.subscription.unsubscribe();
+      console.log("AuthContext: リスナー解除、クリーンアップ完了");
     };
-  }, []);
+  }, [fetchUserAndProfile]); // fetchUserAndProfile を依存配列に追加
 
-  // 定期的なセッション確認の設定
+  // グローバル変数と同期するEffect (オプション、もしあれば)
   useEffect(() => {
-    if (!user) return;
-    if (!SESSION_CHECK_ENABLED) {
-      console.log("AuthContext: セッション確認は無効化されています");
-      return;
-    }
-
-    // セッション確認が有効な場合のみログ出力
-    console.log("AuthContext: 定期的なセッション確認を開始（" + SESSION_CHECK_INTERVAL/60000 + "分間隔）");
-    
-    const sessionCheckInterval = setInterval(async () => {
-      // セッション確認をスキップする条件
-      if (!SESSION_CHECK_ENABLED) {
-        return;
-      }
-
-      try {
-        // キャッシュされたセッションを確認
-        const cachedSession = getCachedSession();
-        if (cachedSession) {
-          // キャッシュがある場合は詳細ログは出力しない
-          return;
-        }
-        
-        // デバッグモードが有効な場合のみ詳細ログを出力（本番環境では出力しない）
-        if (process.env.NODE_ENV === 'development') {
-          console.log("AuthContext: セッションの有効性を確認中...");
-        }
-        
-        const { data, error } = await supabase.auth.getSession();
-        
-        if (error || !data.session) {
-          console.log("AuthContext: セッションが無効になっています、ログアウトします");
-          clearInterval(sessionCheckInterval);
-          setUser(null);
-          setProfile(null);
-          router.push('/login');
-        } else {
-          // セッションをキャッシュ
-          setCachedSession(data.session);
-        }
-      } catch (e) {
-        console.error("AuthContext: セッション確認中にエラーが発生しました", e);
-      }
-    }, SESSION_CHECK_INTERVAL);
-    
-    return () => {
-      clearInterval(sessionCheckInterval);
-    };
-  }, [user, router]);
-
-  // ユーザー情報とプロファイル情報を取得
-  const fetchUserAndProfile = async (userId: string) => {
-    try {
-      console.log("fetchUserAndProfile: ユーザー情報とプロファイル情報の取得を開始");
-      setLoadingState('authenticating');
-      setLoadingMessage('ユーザー情報を確認中...');
-      
-      const { data: { user }, error } = await supabase.auth.getUser();
-      
-      console.log("fetchUserAndProfile: supabase.auth.getUser の結果:", { user: user?.id || 'なし', error: error?.message || 'なし' });
-      
-      if (error || !user) {
-        console.error("fetchUserAndProfile: ユーザー情報の取得に失敗:", error);
-        setUser(null);
-        setProfile(null);
-        setLoading(false); // エラー時もローディング状態を解除
-        setLoadingState('error');
-        setLoadingMessage('ユーザー情報の取得に失敗しました');
-        return;
-      }
-
-      console.log("fetchUserAndProfile: ユーザー情報を取得:", user.id);
-      setUser(user);
-
-      // プロファイル情報を取得
-      console.log("fetchUserAndProfile: プロファイル情報の取得を開始:", user.id);
-      setLoadingState('loading-profile');
-      setLoadingMessage('プロファイル情報を読み込み中...');
-      
-      // 再試行ロジックを使用
-      const { data: profileData, error: profileError } = await fetchProfileWithRetry(user.id);
-
-      if (!profileData) {
-        console.error('fetchUserAndProfile: プロファイル情報の取得に失敗:', profileError);
-        setProfile(null);
-        setLoadingState('error');
-        setLoadingMessage('プロファイル情報の取得に失敗しました');
-      } else {
-        console.log("fetchUserAndProfile: プロファイル情報を取得:", profileData);
-        setProfile(profileData);
-        setLoadingState('idle');
-        setLoadingMessage('');
-      }
-    } catch (error) {
-      console.error('fetchUserAndProfile: 例外が発生:', error);
-      setLoadingState('error');
-      setLoadingMessage('予期せぬエラーが発生しました');
-    } finally {
-      console.log("fetchUserAndProfile: ユーザー情報とプロファイル情報の取得を完了, loading=false に設定");
-      setLoading(false); // 常にロード完了時にloadingをfalseに設定
-    }
-  };
+      const intervalId = setInterval(() => {
+          if (sessionCheckEnabled !== SESSION_CHECK_ENABLED) {
+              console.log("Syncing global session check state:", SESSION_CHECK_ENABLED);
+              setSessionCheckEnabledState(SESSION_CHECK_ENABLED);
+          }
+      }, 1000); // 1秒ごとに同期チェック
+      return () => clearInterval(intervalId);
+  }, [sessionCheckEnabled]);
 
   // アクティビティログを記録する関数
   const logUserActivity = async (actionType: string, actionDetails: any = {}) => {
@@ -769,6 +771,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     profile,
     loading,
+    sessionCheckEnabled,
+    setSessionCheckEnabled: setSessionCheckEnabledState,
     loadingState,
     loadingMessage,
     manualReload,
@@ -778,7 +782,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
+};
 
 export function useAuth() {
   const context = useContext(AuthContext);

@@ -160,7 +160,9 @@ const DirectLoginPage = () => {
       
       console.log("DirectLogin: クリーンなクライアントを初期化", { url: supabaseUrl, projectId, storageKey });
       
-      // 特殊設定を使わない単純なクライアント
+      // 特殊設定を使わない単純なクライアント - シングルトンとして1回だけ作成
+      // 重複呼び出しを避けるためにuseStateやuseRefで管理するか、外部で1回だけ作るべきですが
+      // このコンポーネントの特殊な用途（セッションをクリアして新規作成）のため、ここでは許容します
       const supabase = createClient(supabaseUrl, supabaseAnonKey, {
         auth: {
           persistSession: false,

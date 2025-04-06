@@ -15,7 +15,10 @@ import {
   ChevronUp,
   Search,
   RefreshCw,
-  FileText
+  FileText,
+  List,
+  Grid,
+  TableIcon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,6 +45,9 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
+import { format, addDays, eachDayOfInterval, startOfMonth, endOfMonth, differenceInDays, subMonths, addMonths, getYear, getMonth } from 'date-fns';
+import { ja } from 'date-fns/locale';
+import holidays from '@holiday-jp/holiday_jp';
 
 // 機器タイプ
 interface Equipment {
@@ -138,6 +144,34 @@ const isCheckOverdue = (lastCheckDate: string | null, frequency: string): boolea
   }
 };
 
+// ★ テーブル表示用データの型
+interface TableCellData {
+  result: boolean | null; // true: 正常, false: 異常, null: 未実施
+  recordId?: string; // 対応する点検記録ID (オプション)
+}
+interface TableRowData {
+  type: 'equipment' | 'frequency' | 'item';
+  id: string; // equipmentId または itemId
+  equipmentName?: string;
+  itemName?: string;
+  frequency?: string;
+  cells: Record<string, TableCellData>; // key: 'YYYY-MM-DD'
+}
+
+// ★ 表示モードの型
+type ViewMode = 'equipment' | 'frequency' | 'table'; // ★ viewModeの型定義を先に
+
+// 日本の祝日判定関数
+const isJapaneseHoliday = (date: Date): boolean => {
+  return holidays.isHoliday(date);
+};
+
+// 祝日の名前を取得する関数
+const getHolidayName = (date: Date): string | null => {
+  const holiday = holidays.between(date, date)[0];
+  return holiday ? holiday.name : null;
+};
+
 export default function EquipmentDashboardClient() {
   const { profile, user, loading } = useAuth();
   const router = useRouter();
@@ -171,25 +205,60 @@ export default function EquipmentDashboardClient() {
     }
   ]);
   
+  // クライアントサイドのみで動作する状態
+  const [isClient, setIsClient] = useState(false);
+  
+  // クライアントサイドでのみ実行される処理
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+  
+  // 日付を固定フォーマットで表示する関数（hydration errorを避けるため）
+  const formatNotificationDate = (date: Date) => {
+    if (!isClient) {
+      // サーバーサイドでは空文字を返す
+      return '';
+    }
+    // クライアントサイドでのみ日付をフォーマット
+    return format(date, 'yyyy/MM/dd HH:mm', { locale: ja });
+  };
+  
   // フィルターと検索
   const [searchQuery, setSearchQuery] = useState("");
   const [showOverdueOnly, setShowOverdueOnly] = useState(false);
-  const [activeTab, setActiveTab] = useState<'equipment' | 'history'>('equipment');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAllExpanded, setIsAllExpanded] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('table');
   
   // データ読み込み中
-  const [isLoading, setIsLoading] = useState(true);
-  
-  // セッション確認の無効化
   useEffect(() => {
     // コンポーネントのマウント時にセッション確認を無効化
     setSessionCheckEnabled(false);
     console.log("EquipmentDashboard: セッション確認を無効化しました");
+
+    // visibility変更を監視し、Supabaseの自動更新を防ぐ
+    const handleVisibilityChange = () => {
+      // visibilitychangeイベントを処理するが、不要なリロードを抑制
+      console.log("EquipmentDashboard: visibilitychangeイベント検出しましたが、リロードはスキップします");
+    };
+
+    // visibilitychangeイベントリスナーを追加
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     
     // クリーンアップ時（コンポーネントのアンマウント時）にセッション確認を再度有効化
     return () => {
       setSessionCheckEnabled(true);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       console.log("EquipmentDashboard: セッション確認を再有効化しました");
     };
+  }, []);
+  
+  // 機器データをフェッチするための状態
+  const [dataFetchTrigger, setDataFetchTrigger] = useState(0);
+  
+  // データの手動リロード関数
+  const handleManualRefresh = useCallback(() => {
+    setDataFetchTrigger(prev => prev + 1);
   }, []);
   
   // 初期データ取得
@@ -289,7 +358,6 @@ export default function EquipmentDashboardClient() {
         // 点検項目を取得
         const equipmentIds = formattedEquipment.map(e => e.id);
         if (equipmentIds.length > 0) {
-          console.log('[DEBUG] Fetching check items for equipment IDs:', equipmentIds);
           const { data: checkItemsData, error: checkItemsError } = await supabase
             .from('equipment_check_items')
             .select('*')
@@ -300,10 +368,7 @@ export default function EquipmentDashboardClient() {
             console.error('[DEBUG] Check items fetch error:', checkItemsError);
             throw checkItemsError;
           }
-          console.log('[DEBUG] Fetched check items data:', checkItemsData); // ★ 取得データ確認
 
-          // 最新の点検記録を取得
-          console.log('[DEBUG] Fetching latest maintenance records for equipment IDs:', equipmentIds);
           const { data: recordsData, error: recordsError } = await supabase
             .from('equipment_maintenance_records')
             .select(`
@@ -317,7 +382,6 @@ export default function EquipmentDashboardClient() {
              console.error('[DEBUG] Maintenance records fetch error:', recordsError);
              throw recordsError;
           }
-          console.log('[DEBUG] Fetched maintenance records data:', recordsData); // ★ 取得データ確認
           
           // 点検記録一覧用のデータを設定
           const formattedRecords: MaintenanceRecord[] = recordsData ? recordsData.map(record => ({
@@ -337,18 +401,15 @@ export default function EquipmentDashboardClient() {
               isOverdue: isCheckOverdue(lastRecord?.performed_at || null, item.frequency)
             };
           }) : [];
-          console.log('[DEBUG] Check items with last check info:', checkItemsWithLastCheck); // ★ 処理後データ確認
           
           // 各機器に点検項目を関連付け
           formattedEquipment.forEach(equipment => {
             const items = checkItemsWithLastCheck.filter(item => item.equipment_id === equipment.id);
             equipment.checkItems = items;
             equipment.pendingChecks = items.filter(item => item.isOverdue).length;
-            console.log(`[DEBUG] Associating items for equipment ${equipment.id}:`, items); // ★ 関連付け確認
           });
         }
         
-        console.log('[DEBUG] Final formatted equipment list before setting state:', formattedEquipment); // ★ 最終データ確認
         setEquipmentList(formattedEquipment);
       } catch (error) {
         console.error('機器データ取得エラー:', error);
@@ -357,8 +418,11 @@ export default function EquipmentDashboardClient() {
       }
     };
     
+    // 初回ロード時またはトリガーが変更されたときのみデータを取得
     fetchEquipmentAndRecords();
-  }, [facilityId, selectedDepartmentId]);
+    
+    // facilityIdとselectedDepartmentIdが変わった時、または明示的なトリガー時のみ
+  }, [facilityId, selectedDepartmentId, dataFetchTrigger]);
   
   // 検索とフィルター適用済みの機器リスト
   const filteredEquipment = useMemo(() => {
@@ -389,12 +453,51 @@ export default function EquipmentDashboardClient() {
     }).sort((a, b) => new Date(b.performed_at).getTime() - new Date(a.performed_at).getTime());
   }, [maintenanceRecords, searchQuery]);
   
+  // ★ すべて展開/閉じるハンドラ
+  const toggleAllEquipment = () => {
+    const newState = !isAllExpanded;
+    setIsAllExpanded(newState);
+    // 更新後の状態を計算するロジックを明確にする
+    const updatedExpandedState: Record<string, boolean> = {};
+    // equipmentListから現在のキーを取得して状態を設定
+    equipmentList.forEach(eq => {
+      updatedExpandedState[eq.id] = newState;
+    });
+    setExpandedEquipment(updatedExpandedState);
+  };
+  
+  // 実際の展開状態を確認する関数を追加
+  const checkActualExpandedState = useCallback(() => {
+    // 機器が1つも無い場合は何もしない
+    if (equipmentList.length === 0) return;
+    
+    // 展開されている機器の数をカウント
+    const expandedCount = Object.values(expandedEquipment).filter(Boolean).length;
+    
+    // すべての機器が展開されているかどうかを確認
+    const allExpanded = expandedCount === equipmentList.length;
+    
+    // 実際の状態と保持している状態が異なる場合は更新
+    if (allExpanded !== isAllExpanded) {
+      setIsAllExpanded(allExpanded);
+    }
+  }, [equipmentList, expandedEquipment, isAllExpanded]);
+
+  // 展開状態が変わったときに実際の状態をチェック
+  useEffect(() => {
+    checkActualExpandedState();
+  }, [expandedEquipment, checkActualExpandedState]);
+  
   // 機器の展開/折りたたみを切り替え
   const toggleEquipment = (equipmentId: string) => {
-    setExpandedEquipment(prev => ({
+    setExpandedEquipment(prev => {
+      const newState = {
       ...prev,
       [equipmentId]: !prev[equipmentId]
-    }));
+      };
+      
+      return newState;
+    });
   };
   
   // 点検実施処理
@@ -432,6 +535,74 @@ export default function EquipmentDashboardClient() {
     setSelectedDepartmentId(value);
   };
 
+  // 日付範囲関連の状態
+  // 最初は現在月を選択
+  const [selectedMonth, setSelectedMonth] = useState<Date>(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
+
+  const [tableDateRange, setTableDateRange] = useState<{ start: Date; end: Date }>(() => {
+    const today = new Date();
+    const start = startOfMonth(today);
+    const end = endOfMonth(today);
+    return { start, end };
+  });
+
+  // 年月の選択肢を生成 (今月から3年前まで)
+  const monthOptions = useMemo(() => {
+    const options = [];
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth();
+    
+    // 過去3年分の月を選択肢として生成
+    for (let year = currentYear; year >= currentYear - 3; year--) {
+      const endMonth = year === currentYear ? currentMonth : 11;
+      const startMonth = 0; // 1月
+      
+      for (let month = endMonth; month >= startMonth; month--) {
+        options.push({
+          value: `${year}-${month}`,
+          label: `${year}年${month + 1}月`,
+          date: new Date(year, month, 1)
+        });
+      }
+    }
+    
+    return options;
+  }, []);
+
+  // 選択された月が変更されたときに日付範囲を更新する
+  useEffect(() => {
+    const start = startOfMonth(selectedMonth);
+    const end = endOfMonth(selectedMonth);
+    console.log('日付範囲を更新:', format(start, 'yyyy/MM/dd'), '~', format(end, 'yyyy/MM/dd'));
+    setTableDateRange({ start, end });
+  }, [selectedMonth]);
+
+  // 月選択ハンドラ
+  const handleMonthChange = (yearMonthValue: string) => {
+    console.log('選択された年月:', yearMonthValue);
+    
+    try {
+      // 値の解析
+      const [year, month] = yearMonthValue.split('-').map(Number);
+      
+      // 値のバリデーション
+      if (isNaN(year) || isNaN(month) || year < 1900 || year > 2100 || month < 0 || month > 11) {
+        console.error('不正な年月の値:', yearMonthValue);
+        return;
+      }
+      
+      console.log(`${year}年${month + 1}月に変更します`);
+      const newDate = new Date(year, month, 1);
+      setSelectedMonth(newDate);
+    } catch (error) {
+      console.error('年月の解析エラー:', error);
+    }
+  };
+
   const [selectedCheckItemIds, setSelectedCheckItemIds] = useState<Set<string>>(new Set());
   const [isLoadingSubmit, setIsLoadingSubmit] = useState(false);
   const [isSubmittingAllDepartment, setIsSubmittingAllDepartment] = useState(false);
@@ -440,7 +611,7 @@ export default function EquipmentDashboardClient() {
   const [submittingFromModal, setSubmittingFromModal] = useState(false);
 
   // チェックボックス変更ハンドラ
-  const handleCheckboxChange = (itemId: string, checked: any): void => {
+  const handleCheckboxChange = (itemId: string, checked: boolean): void => {
     setSelectedCheckItemIds(prev => {
       const newSet = new Set(prev);
       if (checked) {
@@ -448,7 +619,6 @@ export default function EquipmentDashboardClient() {
       } else {
         newSet.delete(itemId);
       }
-      console.log('[DEBUG] Selected items set:', newSet);
       return newSet;
     });
   };
@@ -471,46 +641,47 @@ export default function EquipmentDashboardClient() {
     });
   };
 
-  // ★ 選択項目を一括点検実施 (モーダルを開く処理に変更)
-  const handleOpenSubmitModal = (equipmentId: string | null = null) => {
-    const itemsToProcess = Array.from(selectedCheckItemIds).filter(itemId => {
-      if (equipmentId) {
-        const equipment = equipmentList.find(eq => eq.id === equipmentId);
-        return equipment?.checkItems?.some(item => item.id === itemId);
-      } else {
-        return filteredEquipment.some(eq => eq.checkItems?.some(item => item.id === itemId));
-      }
-    });
-
-    if (itemsToProcess.length === 0) {
-      alert('点検する項目を選択してください。');
-      return;
-    }
-
-    // モーダルに渡すデータを準備
-    const dataForModal: ModalCheckItemData[] = [];
-    itemsToProcess.forEach(itemId => {
-      const equipment = equipmentList.find(eq => eq.checkItems?.some(item => item.id === itemId));
-      const checkItem = equipment?.checkItems?.find(item => item.id === itemId);
-      if (checkItem) {
-        dataForModal.push({
-          ...checkItem,
-          submitResult: true,
-          submitComment: null
-        });
-      }
-    });
-
-    if (dataForModal.length === 0) {
-       alert('選択された項目の詳細を取得できませんでした。');
-       return;
-    }
+  // ★ 部署内の全項目を選択/解除するハンドラ
+  const handleSelectAllDepartmentChecks = (select: boolean) => {
+    if (!filteredEquipment) return;
     
-    // 項目名でソート (任意)
-    dataForModal.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+    setSelectedCheckItemIds(prev => {
+      const newSet = new Set(prev);
+      filteredEquipment.forEach(equipment => {
+        equipment.checkItems?.forEach(item => {
+          if (select) {
+            newSet.add(item.id);
+      } else {
+            newSet.delete(item.id);
+          }
+        });
+      });
+      return newSet;
+    });
+  };
 
-    setModalData(dataForModal);
-    setIsSubmitModalOpen(true);
+  // ★ 点検項目を頻度でグループ化するヘルパー
+  const groupCheckItemsByFrequency = (items: EquipmentCheckItem[] | undefined): Record<string, EquipmentCheckItem[]> => {
+    if (!items) return {};
+    const grouped: Record<string, EquipmentCheckItem[]> = {
+      daily: [], weekly: [], monthly: [], as_needed: []
+    };
+    items.forEach(item => {
+      // frequency の型を厳密にチェック
+      const freqKey = item.frequency as keyof typeof grouped;
+      if (grouped[freqKey]) {
+        grouped[freqKey].push(item);
+      } else {
+        console.warn("Unknown frequency:", item.frequency);
+      }
+    });
+    // 項目がない頻度は削除
+    Object.keys(grouped).forEach(key => {
+      if (grouped[key].length === 0) {
+        delete grouped[key];
+      }
+    });
+    return grouped;
   };
 
   // ★ モーダル内で結果やコメントが変更されたときのハンドラ
@@ -518,7 +689,7 @@ export default function EquipmentDashboardClient() {
     setModalData(prev => prev.map(item => {
       if (item.id === itemId) {
         const newResult = field === 'submitResult' ? (value as boolean) : item.submitResult;
-        const newComment = field === 'submitComment' ? (value as string) : item.submitComment;
+        const newComment = field === 'submitComment' ? (value as string | null) : item.submitComment;
         return {
           ...item,
           [field]: value,
@@ -545,16 +716,12 @@ export default function EquipmentDashboardClient() {
         comment: item.submitResult ? null : item.submitComment
       }));
 
-      console.log('[DEBUG] Inserting records from modal:', recordsToInsert);
-
       const { data: insertedRecords, error } = await supabase
         .from('equipment_maintenance_records')
         .insert(recordsToInsert)
         .select();
 
       if (error) throw error;
-
-      console.log('[DEBUG] Insert from modal success:', insertedRecords);
 
       // --- UI状態の更新 --- 
       const nowStr = new Date().toISOString();
@@ -618,24 +785,782 @@ export default function EquipmentDashboardClient() {
     }
   };
 
-  // ★ 部署内の全項目を選択/解除するハンドラ (関数名を確認)
-  const handleSelectAllDepartmentChecks = (select: boolean) => {
-    // ... (関数本体は変更なし)
+  // 頻度別表示の展開状態を管理
+  const [expandedFrequencies, setExpandedFrequencies] = useState<Record<string, boolean>>({
+    daily: true,
+    weekly: true,
+    monthly: true,
+    as_needed: true
+  });
+  
+  // 頻度別表示ですべての頻度が展開されているかどうか
+  const [isAllFrequenciesExpanded, setIsAllFrequenciesExpanded] = useState(true);
+  
+  // 頻度の展開/収縮を切り替える
+  const toggleFrequency = (frequency: string) => {
+    setExpandedFrequencies(prev => {
+      const newState = {
+        ...prev,
+        [frequency]: !prev[frequency]
+      };
+      
+      // すべて展開されているかチェック
+      const allExpanded = Object.values(newState).every(Boolean);
+      setIsAllFrequenciesExpanded(allExpanded);
+      
+      return newState;
+    });
+  };
+  
+  // すべての頻度の展開/収縮を切り替える
+  const toggleAllFrequencies = () => {
+    const newState = !isAllFrequenciesExpanded;
+    setIsAllFrequenciesExpanded(newState);
+    
+    const updatedFrequencies: Record<string, boolean> = {};
+    Object.keys(expandedFrequencies).forEach(freq => {
+      updatedFrequencies[freq] = newState;
+    });
+    
+    setExpandedFrequencies(updatedFrequencies);
   };
 
-  const [isAllExpanded, setIsAllExpanded] = useState(false);
+  // === 頻度別表示モード ===
+  const renderFrequencyContent = () => {
+    if (viewMode !== 'frequency') {
+      return null;
+    }
 
-  // ★ すべて展開/閉じるハンドラ
-  const toggleAllEquipment = () => {
-    const newState = !isAllExpanded;
-    setIsAllExpanded(newState);
-    // 更新後の状態を計算するロジックを明確にする
-    const updatedExpandedState: Record<string, boolean> = {};
-    // equipmentListから現在のキーを取得して状態を設定
-    equipmentList.forEach(eq => {
-      updatedExpandedState[eq.id] = newState;
+    if (isLoading) {
+      return (
+        <div className="flex justify-center items-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        </div>
+      );
+    }
+
+    if (filteredEquipment.length === 0) {
+      return (
+        <div className="bg-white rounded-lg border shadow-sm p-12 text-center">
+          <p className="text-muted-foreground mb-4">検索条件に一致する機器がありません</p>
+          <Button variant="outline" onClick={() => { setSearchQuery(''); setShowOverdueOnly(false); }}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            検索条件をリセット
+          </Button>
+        </div>
+      );
+    }
+    
+    // 頻度別に項目をグループ化
+    const frequencyGroups: Record<string, {
+      items: Array<{equipment: Equipment, checkItem: EquipmentCheckItem}>,
+      overdueCount: number
+    }> = {
+      daily: { items: [], overdueCount: 0 },
+      weekly: { items: [], overdueCount: 0 },
+      monthly: { items: [], overdueCount: 0 },
+      as_needed: { items: [], overdueCount: 0 }
+    };
+
+    // 機器の点検項目を頻度別にグループ化
+    filteredEquipment.forEach(equipment => {
+      equipment.checkItems?.forEach(item => {
+        if (frequencyGroups[item.frequency]) {
+          frequencyGroups[item.frequency].items.push({
+            equipment,
+            checkItem: item
+          });
+          if (item.isOverdue) {
+            frequencyGroups[item.frequency].overdueCount++;
+          }
+        }
+      });
     });
-    setExpandedEquipment(updatedExpandedState);
+
+    // 頻度ごとの表示名とアイコン
+    const frequencyInfo = {
+      daily: { 
+        name: '毎日', 
+        icon: <Clock className="h-5 w-5 text-blue-500" />,
+        description: '毎日実施が必要な点検項目です。',
+        color: 'border-blue-200 bg-blue-50'
+      },
+      weekly: { 
+        name: '毎週', 
+        icon: <Calendar className="h-5 w-5 text-green-500" />,
+        description: '週に一度実施が必要な点検項目です。',
+        color: 'border-green-200 bg-green-50'
+      },
+      monthly: { 
+        name: '毎月', 
+        icon: <FileText className="h-5 w-5 text-purple-500" />,
+        description: '月に一度実施が必要な点検項目です。',
+        color: 'border-purple-200 bg-purple-50'
+      },
+      as_needed: { 
+        name: '必要時', 
+        icon: <AlertTriangle className="h-5 w-5 text-amber-500" />,
+        description: '必要に応じて実施する点検項目です。',
+        color: 'border-amber-200 bg-amber-50'
+      }
+    };
+    
+    // 項目がある頻度の数をカウント
+    const frequencyCount = Object.entries(frequencyGroups).filter(([_, group]) => group.items.length > 0).length;
+
+    return (
+      <div className="space-y-6">
+        {/* すべての頻度を展開/収縮するボタン */}
+        {frequencyCount > 0 && (
+          <div className="flex justify-end mb-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleAllFrequencies}
+              className="text-xs"
+            >
+              {isAllFrequenciesExpanded ? 'すべて閉じる' : 'すべて展開する'}
+            </Button>
+          </div>
+        )}
+        
+        {Object.entries(frequencyGroups).map(([frequency, group]) => {
+          // 項目がない頻度は表示しない
+          if (group.items.length === 0) return null;
+          
+          const info = frequencyInfo[frequency as keyof typeof frequencyInfo];
+          const isExpanded = expandedFrequencies[frequency];
+          
+          // 機器ごとに項目をグループ化
+          const equipmentItems: Record<string, {
+            equipment: Equipment,
+            items: EquipmentCheckItem[]
+          }> = {};
+          
+          group.items.forEach(({equipment, checkItem}) => {
+            if (!equipmentItems[equipment.id]) {
+              equipmentItems[equipment.id] = {
+                equipment,
+                items: []
+              };
+            }
+            equipmentItems[equipment.id].items.push(checkItem);
+          });
+          
+          return (
+            <Card key={`frequency-${frequency}`} className={`overflow-hidden border-l-4 ${info.color}`}>
+              <CardHeader 
+                className="bg-white p-4 cursor-pointer flex flex-row items-center"
+                onClick={() => toggleFrequency(frequency)}
+              >
+                <div className="flex-grow">
+                  <div className="flex items-center gap-2">
+                    {info.icon}
+                    <CardTitle className="text-lg font-semibold">{info.name}点検</CardTitle>
+                    <Badge variant="outline" className={info.color}>
+                      {group.items.length}項目
+                    </Badge>
+                    {group.overdueCount > 0 && (
+                      <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300">
+                        期限切れ: {group.overdueCount}項目
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">{info.description}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="ml-2"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleFrequency(frequency);
+                  }}
+                >
+                  {isExpanded ? (
+                    <ChevronUp className="h-5 w-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                  )}
+                </Button>
+              </CardHeader>
+              
+              {isExpanded && (
+                <CardContent className="p-4 bg-white">
+                  {/* 頻度内の全選択/解除ボタン */}
+                  <div className="flex items-center justify-between mb-4 pb-2 border-b">
+                    <div className="flex items-center gap-2">
+                      <Button 
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          // この頻度の全項目を選択
+                          setSelectedCheckItemIds(prev => {
+                            const newSet = new Set(prev);
+                            group.items.forEach(({checkItem}) => {
+                              newSet.add(checkItem.id);
+                            });
+                            return newSet;
+                          });
+                        }}
+                      >
+                        すべて選択
+                      </Button>
+                      <Button 
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          // この頻度の全項目を解除
+                          setSelectedCheckItemIds(prev => {
+                            const newSet = new Set(prev);
+                            group.items.forEach(({checkItem}) => {
+                              newSet.delete(checkItem.id);
+                            });
+                            return newSet;
+                          });
+                        }}
+                      >
+                        すべて解除
+                      </Button>
+                    </div>
+                    
+                    <Button
+                      onClick={() => {
+                        // この頻度の選択項目を一括点検
+                        const selectedItemsInFrequency = Array.from(selectedCheckItemIds).filter(id => 
+                          group.items.some(item => item.checkItem.id === id)
+                        );
+                        if (selectedItemsInFrequency.length > 0) {
+                          handleOpenSubmitModal(null, selectedItemsInFrequency);
+                        } else {
+                          alert('点検する項目を選択してください。');
+                        }
+                      }}
+                      disabled={isLoadingSubmit || !Array.from(selectedCheckItemIds).some(id => 
+                        group.items.some(item => item.checkItem.id === id)
+                      )}
+                      className="bg-primary hover:bg-primary/90 text-white"
+                      size="sm"
+                    >
+                      {`選択した${info.name}点検 (${Array.from(selectedCheckItemIds).filter(id => 
+                        group.items.some(item => item.checkItem.id === id)
+                      ).length}項目) を実施`}
+                    </Button>
+                  </div>
+                  
+                  {/* 機器ごとの項目表示 */}
+                  <div className="space-y-4">
+                    {Object.values(equipmentItems).map(({equipment, items}) => (
+                      <div key={`${frequency}-${equipment.id}`} className="border rounded-md p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <Wrench className="h-4 w-4 text-primary" />
+                            <h3 className="font-medium">{equipment.name}</h3>
+                            <span className="text-xs text-muted-foreground">{equipment.department_name}</span>
+                          </div>
+                          
+                          <div className="flex gap-2">
+                            <Button 
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              onClick={() => {
+                                // この機器のこの頻度の項目をすべて選択
+                                setSelectedCheckItemIds(prev => {
+                                  const newSet = new Set(prev);
+                                  items.forEach(item => {
+                                    newSet.add(item.id);
+                                  });
+                                  return newSet;
+                                });
+                              }}
+                            >
+                              選択
+                            </Button>
+                            <Button 
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              onClick={() => {
+                                // この機器のこの頻度の項目をすべて解除
+                                setSelectedCheckItemIds(prev => {
+                                  const newSet = new Set(prev);
+                                  items.forEach(item => {
+                                    newSet.delete(item.id);
+                                  });
+                                  return newSet;
+                                });
+                              }}
+                            >
+                              解除
+                            </Button>
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-2 mt-2">
+                          {items.map(item => (
+                            <div 
+                              key={item.id} 
+                              className={`p-2 rounded-md flex justify-between items-center ${
+                                item.isOverdue ? 'bg-amber-50 border border-amber-200' : 'bg-white border'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-3">
+                                <Checkbox 
+                                  id={`freq-check-${item.id}`}
+                                  checked={selectedCheckItemIds.has(item.id)}
+                                  onCheckedChange={(checkedState) => {
+                                    if (typeof checkedState === 'boolean') {
+                                      handleCheckboxChange(item.id, checkedState);
+                                    }
+                                  }}
+                                  aria-label={`Select ${item.name}`}
+                                />
+                                <Label htmlFor={`freq-check-${item.id}`} className="flex-grow cursor-pointer">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">{item.name}</span>
+                                  </div>
+                                  <div className="text-sm text-muted-foreground mt-1 flex items-center gap-4">
+                                    <span className="flex items-center">
+                                      <Calendar className="h-3.5 w-3.5 mr-1" />
+                                      最終点検: {formatDateTime(item.lastCheckDate ?? null)}
+                                    </span>
+                                    {item.lastCheckResult !== null && (
+                                      <span className="flex items-center">
+                                        <span className={`mr-1 flex items-center justify-center w-4 h-4 rounded-full ${item.lastCheckResult ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                          {item.lastCheckResult ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                                        </span>
+                                        結果: {item.lastCheckResult ? '正常' : '異常'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </Label>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // === テーブル表示モード ===
+  const renderTableContent = () => {
+    // 表示モードがテーブルでない場合は何も表示しない
+    if (viewMode !== 'table') {
+      return null;
+    }
+
+    if (isLoading) {
+      return (
+        <div className="flex justify-center items-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        </div>
+      );
+    }
+
+    if (tableData.rows.length === 0) {
+      return (
+        <div className="bg-white rounded-lg border shadow-sm p-12 text-center">
+          <p className="text-muted-foreground">表示対象期間に点検記録のある機器または該当期間の記録がありません。</p>
+          
+          {/* 日付範囲変更UI */}
+          <div className="mt-4 flex justify-center">
+            <div className="flex items-center gap-4 mt-2">
+              <Button 
+                type="button"
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  console.log('前月ボタンクリック (空データ)');
+                  const prevMonth = subMonths(selectedMonth, 1);
+                  setSelectedMonth(prevMonth);
+                }}
+                className="text-xs px-3 py-2 h-9 min-w-[60px]"
+              >
+                前月
+              </Button>
+              
+              <div className="relative z-10">
+                <Select 
+                  defaultValue={`${getYear(selectedMonth)}-${getMonth(selectedMonth)}`}
+                  value={`${getYear(selectedMonth)}-${getMonth(selectedMonth)}`}
+                  onValueChange={(value) => {
+                    console.log('セレクト変更 (空データ):', value);
+                    const [year, month] = value.split('-').map(Number);
+                    if (!isNaN(year) && !isNaN(month)) {
+                      setSelectedMonth(new Date(year, month, 1));
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-[140px] h-9">
+                    <SelectValue>{format(selectedMonth, 'yyyy年M月')}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[300px]">
+                    {monthOptions.map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <Button 
+                type="button"
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  console.log('次月ボタンクリック (空データ)');
+                  const now = new Date();
+                  const currentMonthDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                  
+                  if (selectedMonth.getTime() >= currentMonthDate.getTime()) {
+                    return;
+                  }
+                  
+                  const nextMonth = addMonths(selectedMonth, 1);
+                  setSelectedMonth(nextMonth);
+                }}
+                disabled={selectedMonth.getTime() >= new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime()}
+                className="text-xs px-3 py-2 h-9 min-w-[60px]"
+              >
+                次月
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
+            <div className="mb-4 md:mb-0 mr-4">
+              <CardTitle>点検記録テーブル</CardTitle>
+              <p className="text-sm text-muted-foreground mt-2">
+                期間: {format(tableDateRange.start, 'yyyy/MM/dd')} ~ {format(tableDateRange.end, 'yyyy/MM/dd')}
+              </p>
+            </div>
+
+            {/* 月選択用のボタンとセレクター */}
+            <div className="flex items-center gap-4 mt-2 md:mt-0">
+              <Button 
+                type="button"
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  console.log('前月ボタンクリック');
+                  const prevMonth = subMonths(selectedMonth, 1);
+                  console.log('変更前:', format(selectedMonth, 'yyyy/MM'), '変更後:', format(prevMonth, 'yyyy/MM'));
+                  setSelectedMonth(prevMonth);
+                }}
+                className="text-xs px-3 py-2 h-9 min-w-[60px]"
+              >
+                前月
+              </Button>
+              
+              <div className="relative z-10">
+                <Select 
+                  defaultValue={`${getYear(selectedMonth)}-${getMonth(selectedMonth)}`}
+                  value={`${getYear(selectedMonth)}-${getMonth(selectedMonth)}`}
+                  onValueChange={(value) => {
+                    console.log('セレクト変更:', value);
+                    // 値の解析
+                    const [year, month] = value.split('-').map(Number);
+                    if (!isNaN(year) && !isNaN(month)) {
+                      console.log(`${year}年${month + 1}月に変更します`);
+                      setSelectedMonth(new Date(year, month, 1));
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-[140px] h-9">
+                    <SelectValue>{format(selectedMonth, 'yyyy年M月')}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[300px]">
+                    {monthOptions.map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <Button 
+                type="button"
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  console.log('次月ボタンクリック');
+                  const now = new Date();
+                  const currentMonthDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                  
+                  // 現在の月より先には進めない
+                  if (selectedMonth.getTime() >= currentMonthDate.getTime()) {
+                    console.log('次月は選択できません（現在月以降）');
+                    return;
+                  }
+                  
+                  const nextMonth = addMonths(selectedMonth, 1);
+                  console.log('変更前:', format(selectedMonth, 'yyyy/MM'), '変更後:', format(nextMonth, 'yyyy/MM'));
+                  setSelectedMonth(nextMonth);
+                }}
+                disabled={selectedMonth.getTime() >= new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime()}
+                className="text-xs px-3 py-2 h-9 min-w-[60px]"
+              >
+                次月
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0 overflow-x-auto">
+          <Table className="min-w-full divide-y divide-gray-200 border-collapse border border-gray-300">
+            <TableHeader className="bg-gray-50 sticky top-0 z-10"> 
+              <TableRow>
+                <TableHead className="sticky left-0 bg-gray-50 z-20 px-3 py-3.5 text-left text-sm font-semibold text-gray-900 border border-gray-300 w-60 min-w-[240px]"> 
+                  機器 / 点検項目
+                </TableHead>
+                {tableData.dates.map(dateStr => {
+                  const dateObj = new Date(dateStr + 'T00:00:00');
+                  const dayOfWeek = format(dateObj, 'E', { locale: ja });
+                  const isSaturday = dayOfWeek === '土';
+                  const isSunday = dayOfWeek === '日';
+                  const isHoliday = isJapaneseHoliday(dateObj);
+                  const holidayName = getHolidayName(dateObj);
+                  
+                  // 背景色の決定: 祝日 > 日曜日 > 土曜日 の優先順位
+                  const bgColorClass = isHoliday ? 'bg-pink-50' : isSunday ? 'bg-red-50' : isSaturday ? 'bg-blue-50' : '';
+                  const textColorClass = isHoliday ? 'text-pink-600' : isSunday ? 'text-red-600' : isSaturday ? 'text-blue-600' : 'text-gray-400';
+                  
+                  return (
+                    <TableHead
+                      key={dateStr}
+                      className={`px-2 py-2 text-center text-sm font-semibold text-gray-900 border border-gray-300 ${bgColorClass} w-12`}
+                    >
+                      <div>{format(dateObj, 'd')}</div>
+                      <div className={`text-xs ${textColorClass}`}>{dayOfWeek}</div>
+                      {holidayName && (
+                        <div className="text-xs text-pink-600 truncate max-w-[48px]" title={holidayName}>
+                          {holidayName}
+                        </div>
+                      )}
+                    </TableHead>
+                  );
+                })}
+              </TableRow>
+            </TableHeader>
+            <TableBody className="divide-y divide-gray-200 bg-white">
+              {tableData.rows.map(row => renderTableRow(row, tableData.dates))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    );
+  };
+
+  // ★ テーブル行レンダリング関数
+  const renderTableRow = (row: TableRowData, dates: string[]): React.ReactNode => {
+    if (row.type === 'equipment') {
+      return (
+        <TableRow key={row.id} className="bg-gray-100 font-semibold">
+          <TableCell className="sticky left-0 bg-gray-100 z-10 px-3 py-2 text-sm text-gray-900 border border-gray-300 font-semibold whitespace-nowrap"> 
+            {row.equipmentName}
+          </TableCell>
+          <TableCell colSpan={dates.length} className="px-3 py-2 border border-gray-300"></TableCell>
+        </TableRow>
+      );
+    } else if (row.type === 'frequency') {
+      return (
+        <TableRow key={row.id} className="bg-gray-50">
+          <TableCell className="sticky left-0 bg-gray-50 z-10 pl-6 pr-3 py-1 text-sm text-gray-700 border border-gray-300 whitespace-nowrap"> 
+            {row.frequency}
+          </TableCell>
+          <TableCell colSpan={dates.length} className="px-3 py-1 border border-gray-300"></TableCell>
+        </TableRow>
+      );
+    } else { // type === 'item'
+      return (
+        <TableRow key={row.id}>
+          <TableCell className="sticky left-0 bg-white z-10 pl-9 pr-3 py-2 text-sm text-gray-700 border border-gray-300 whitespace-nowrap"> 
+            {row.itemName}
+          </TableCell>
+          {dates.map(dateStr => {
+            const cellData = row.cells[dateStr];
+            const dateObj = new Date(dateStr + 'T00:00:00');
+            const dayOfWeek = format(dateObj, 'E', { locale: ja });
+            const isSaturday = dayOfWeek === '土';
+            const isSunday = dayOfWeek === '日';
+            const isHoliday = isJapaneseHoliday(dateObj);
+            
+            // 背景色の決定
+            const bgColorClass = isHoliday ? 'bg-pink-50' : isSunday ? 'bg-red-50' : isSaturday ? 'bg-blue-50' : '';
+            
+            return (
+              <TableCell 
+                key={`${row.id}-${dateStr}`} 
+                className={`px-2 py-2 text-center border border-gray-300 ${bgColorClass}`}
+              >
+                {cellData.result === true ? (
+                  <Check className="h-4 w-4 text-green-500 inline-block" />
+                ) : cellData.result === false ? (
+                  <X className="h-4 w-4 text-red-500 inline-block" />
+                ) : (
+                  <span className="text-gray-300 text-sm">-</span>
+                )}
+              </TableCell>
+            );
+          })}
+        </TableRow>
+      );
+    }
+  };
+
+  // ★ テーブル表示用のデータを生成するuseMemo
+  const tableData = useMemo(() => {
+    // viewModeをチェックしない。表示モードの切り替えでデータが変わるわけではない
+    if (!filteredEquipment || maintenanceRecords.length === 0) {
+      return { dates: [], rows: [] };
+    }
+
+    // 1. 表示する日付の配列を生成 (YYYY-MM-DD)
+    const dates = eachDayOfInterval({ start: tableDateRange.start, end: tableDateRange.end })
+                   .map(d => format(d, 'yyyy-MM-dd'));
+
+    // 2. 点検記録を日付と項目IDで検索しやすいようにマップ化
+    const recordsMap = new Map<string, TableCellData>(); // key: 'YYYY-MM-DD_checkItemId'
+    maintenanceRecords.forEach(record => {
+      try {
+        const recordDateStr = format(new Date(record.performed_at), 'yyyy-MM-dd');
+        if (dates.includes(recordDateStr)) { // 日付範囲内の記録のみ対象
+            const key = `${recordDateStr}_${record.check_item_id}`;
+            // 同じ日に複数記録がある場合、最新を優先 (既に降順でソートされている想定)
+            if (!recordsMap.has(key)) {
+              recordsMap.set(key, { result: record.result, recordId: record.id });
+            }
+        }
+      } catch (e) {
+        console.error("Error processing record date:", record.performed_at, e);
+      }
+    });
+
+    // 3. テーブルの行データを生成
+    const rows: TableRowData[] = [];
+    filteredEquipment.forEach(equipment => {
+      // 機器行
+      rows.push({
+        type: 'equipment',
+        id: equipment.id,
+        equipmentName: equipment.name,
+        cells: {}, // 機器行のセルは空
+      });
+
+      // ★ groupCheckItemsByFrequency を参照できるようにする
+      const groupedItems = groupCheckItemsByFrequency(equipment.checkItems);
+
+      // ★ entries と items に型注針を追加
+      Object.entries(groupedItems).forEach(([freq, items]: [string, EquipmentCheckItem[]]) => {
+        if (items.length > 0) {
+          // 頻度行 (オプション)
+          rows.push({
+             type: 'frequency',
+             id: `${equipment.id}-${freq}`,
+             frequency: frequencyToJapanese(freq),
+             cells: {},
+          });
+
+          // ★ item に型注針を追加
+          items.forEach((item: EquipmentCheckItem) => {
+            // 点検項目行
+            const cells: Record<string, TableCellData> = {};
+            dates.forEach(dateStr => {
+              const key = `${dateStr}_${item.id}`;
+              cells[dateStr] = recordsMap.get(key) || { result: null }; // 記録がなければnull
+            });
+
+            rows.push({
+              type: 'item',
+              id: item.id,
+              equipmentName: equipment.name, // どの機器の項目かわかるように追加
+              itemName: item.name,
+              cells: cells,
+            });
+          });
+        }
+      });
+    });
+
+    return { dates, rows };
+  // viewModeを依存配列から削除。フィルタリングされた機器データ、メンテナンス記録、日付範囲が変わったときだけ再計算
+  }, [filteredEquipment, maintenanceRecords, tableDateRange]);
+
+  // モーダルを開く処理を拡張（特定のアイテムのみを対象に）
+  const handleOpenSubmitModal = (equipmentId: string | null = null, specificItemIds: string[] | null = null) => {
+    let itemsToProcess: string[] = [];
+    
+    if (specificItemIds) {
+      // 特定のアイテムIDが指定された場合はそれらを使用
+      itemsToProcess = specificItemIds;
+      } else {
+      // 従来のロジック：チェックボックスで選択されたアイテムから抽出
+      itemsToProcess = Array.from(selectedCheckItemIds).filter(itemId => {
+        if (equipmentId) {
+          const equipment = equipmentList.find(eq => eq.id === equipmentId);
+          return equipment?.checkItems?.some(item => item.id === itemId);
+        } else {
+          return filteredEquipment.some(eq => eq.checkItems?.some(item => item.id === itemId));
+        }
+      });
+    }
+    
+    if (itemsToProcess.length === 0) {
+      alert('点検する項目を選択してください。');
+      return;
+    }
+    
+    // モーダルに渡すデータを準備
+    const dataForModal: ModalCheckItemData[] = [];
+    itemsToProcess.forEach(itemId => {
+      // 全機器の中から該当する点検項目を探す
+      let foundItem: EquipmentCheckItem | undefined;
+      let parentEquipment: Equipment | undefined;
+      
+      for (const equipment of equipmentList) {
+        const checkItem = equipment.checkItems?.find(item => item.id === itemId);
+        if (checkItem) {
+          foundItem = checkItem;
+          parentEquipment = equipment;
+          break;
+        }
+      }
+      
+      if (foundItem && parentEquipment) {
+        dataForModal.push({
+          ...foundItem,
+          submitResult: true,
+          submitComment: null
+        });
+      }
+    });
+    
+    if (dataForModal.length === 0) {
+      alert('選択された項目の詳細を取得できませんでした。');
+      return;
+    }
+    
+    // 項目名でソート (任意)
+    dataForModal.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+    
+    setModalData(dataForModal);
+    setIsSubmitModalOpen(true);
   };
 
   return (
@@ -660,9 +1585,11 @@ export default function EquipmentDashboardClient() {
                   {notifications.map((notification) => (
                     <li key={`notification-${notification.id}`} className="text-sm text-yellow-700 mb-1">
                       {notification.message}
+                      {isClient && (
                       <span className="text-xs text-muted-foreground ml-2">
-                        {notification.timestamp.toLocaleString()}
+                          {formatNotificationDate(notification.timestamp)}
                       </span>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -700,6 +1627,16 @@ export default function EquipmentDashboardClient() {
           </div>
           
           <div className="flex flex-col sm:flex-row gap-2">
+            {/* 手動更新ボタンを追加 */}
+            <Button 
+              variant="outline"
+              onClick={handleManualRefresh}
+              disabled={isLoading}
+              className="mr-2"
+            >
+              <RefreshCw className="mr-2 h-4 w-4" />
+              データ更新
+            </Button>
             <Button 
               onClick={() => router.push(`/equipment_dash/new?department=${encodeURIComponent(departmentName)}&departmentId=${encodeURIComponent(selectedDepartmentId !== 'all' ? selectedDepartmentId : departmentId)}`)}
               className="bg-primary hover:bg-primary/90 text-white"
@@ -710,20 +1647,29 @@ export default function EquipmentDashboardClient() {
           </div>
         </div>
         
-        {/* タブ */}
-        <Tabs defaultValue="equipment" className="mb-6" value={activeTab} onValueChange={(value) => setActiveTab(value as 'equipment' | 'history')}>
-          <TabsList className="grid w-full grid-cols-2 mb-4">
-            <TabsTrigger value="equipment" className="text-base py-3">
-              <Wrench className="mr-2 h-4 w-4" />
-              機器一覧
+        {/* ★ 表示モード切替タブ (これがメインのタブになる) */}
+        <Tabs defaultValue="table" className="mb-6" value={viewMode} onValueChange={(value) => setViewMode(value as ViewMode)}>
+          <TabsList className="grid w-full grid-cols-3 mb-4">
+            <TabsTrigger value="table" className="text-base py-3">
+              <TableIcon className="mr-2 h-4 w-4" />
+              テーブル表示
             </TabsTrigger>
-            <TabsTrigger value="history" className="text-base py-3">
-              <FileText className="mr-2 h-4 w-4" />
-              点検履歴
+            <TabsTrigger value="equipment" className="text-base py-3">
+              <List className="mr-2 h-4 w-4" />
+              機器別表示
+            </TabsTrigger>
+            <TabsTrigger value="frequency" className="text-base py-3">
+              <Grid className="mr-2 h-4 w-4" />
+              頻度別表示
             </TabsTrigger>
           </TabsList>
           
-          {/* 機器一覧タブコンテンツ */}
+          {/* === テーブル表示モード === */}
+          <TabsContent value="table" className="mt-4">
+            {renderTableContent()}
+          </TabsContent>
+
+          {/* === 機器別表示モード === */}
           <TabsContent value="equipment" className="mt-4">
             {/* ★★★ 部署全体操作ボタンと展開ボタンをこのタブ内に移動 ★★★ */}
             <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3">
@@ -749,7 +1695,7 @@ export default function EquipmentDashboardClient() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={toggleAllEquipment}
+                  onClick={() => toggleAllEquipment()}
                   disabled={isLoading}
                   className="ml-auto" // 右寄せにする
                 >
@@ -758,7 +1704,7 @@ export default function EquipmentDashboardClient() {
               </div>
               {/* 部署全体の一括実施ボタン */}
               <Button
-                onClick={() => handleOpenSubmitModal()} // 引数なしで部署全体
+                onClick={() => handleOpenSubmitModal()}
                 disabled={isLoading || isLoadingSubmit || isSubmittingAllDepartment || selectedCheckItemIds.size === 0 || !Array.from(selectedCheckItemIds).some(id => filteredEquipment.some(eq => eq.checkItems?.some(item => item.id === id))) }
                 className="bg-primary hover:bg-primary/90 text-white w-full sm:w-auto"
               >
@@ -821,14 +1767,14 @@ export default function EquipmentDashboardClient() {
                                 <Button 
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => handleSelectAllChecks(equipment.id, true)}
+                                  onClick={(e) => { e.stopPropagation(); handleSelectAllChecks(equipment.id, true); }}
                                 >
                                   すべて選択
                                 </Button>
                                 <Button 
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => handleSelectAllChecks(equipment.id, false)}
+                                  onClick={(e) => { e.stopPropagation(); handleSelectAllChecks(equipment.id, false); }}
                                 >
                                   すべて解除
                                 </Button>
@@ -858,7 +1804,9 @@ export default function EquipmentDashboardClient() {
                                       id={`check-${item.id}`}
                                       checked={selectedCheckItemIds.has(item.id)}
                                       onCheckedChange={(checkedState) => {
-                                        handleCheckboxChange(item.id, checkedState as boolean);
+                                        if (typeof checkedState === 'boolean') {
+                                          handleCheckboxChange(item.id, checkedState);
+                                        }
                                       }}
                                       aria-label={`Select ${item.name}`}
                                     />
@@ -887,7 +1835,7 @@ export default function EquipmentDashboardClient() {
                               ))}
                               <div className="mt-4 flex justify-end">
                                 <Button
-                                  onClick={() => handleOpenSubmitModal(equipment.id)}
+                                  onClick={(e) => { e.stopPropagation(); handleOpenSubmitModal(equipment.id); }}
                                   disabled={isLoadingSubmit || !Array.from(selectedCheckItemIds).some(id => equipment.checkItems?.some(item => item.id === id))}
                                   className="bg-secondary hover:bg-secondary/90 text-secondary-foreground"
                                   size="sm"
@@ -910,60 +1858,9 @@ export default function EquipmentDashboardClient() {
             )}
           </TabsContent>
           
-          {/* 点検履歴タブコンテンツ */}
-          <TabsContent value="history" className="mt-4">
-            {isLoading ? (
-              <div className="flex justify-center items-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-              </div>
-            ) : filteredRecords.length === 0 ? (
-              <div className="bg-white rounded-lg border shadow-sm p-12 text-center">
-                <p className="text-muted-foreground">点検記録がありません</p>
-              </div>
-            ) : (
-              <Card>
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>点検日時</TableHead>
-                        <TableHead>機器名</TableHead>
-                        <TableHead>点検項目</TableHead>
-                        <TableHead>点検者</TableHead>
-                        <TableHead>結果</TableHead>
-                        <TableHead>コメント</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredRecords.map((record) => (
-                        <TableRow key={record.id}>
-                          <TableCell>
-                            {new Date(record.performed_at).toLocaleString('ja-JP', {
-                              year: 'numeric',
-                              month: '2-digit',
-                              day: '2-digit',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
-                          </TableCell>
-                          <TableCell>{record.equipment_name}</TableCell>
-                          <TableCell>{record.check_item_name}</TableCell>
-                          <TableCell>{record.performer_name}</TableCell>
-                          <TableCell>
-                            <Badge className={record.result ? 'bg-green-100 text-green-800 border-green-300' : 'bg-red-100 text-red-800 border-red-300'}>
-                              {record.result ? '正常' : '異常'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="max-w-xs truncate">
-                            {record.comment || '-'}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            )}
+          {/* === 頻度別表示モード === */}
+          <TabsContent value="frequency" className="mt-4">
+            {renderFrequencyContent()}
           </TabsContent>
         </Tabs>
 
@@ -1010,10 +1907,10 @@ export default function EquipmentDashboardClient() {
               </DialogClose>
               <Button 
                 onClick={handleSubmitFromModal}
-                disabled={submittingFromModal}
+                disabled={isLoadingSubmit || isSubmittingAllDepartment}
                 className="bg-primary hover:bg-primary/90 text-white"
               >
-                {submittingFromModal ? '処理中...' : `${modalData.length}件の記録を実行`}
+                {isSubmittingAllDepartment ? '処理中...' : `${modalData.length}件の記録を実行`}
               </Button>
             </DialogFooter>
           </DialogContent>

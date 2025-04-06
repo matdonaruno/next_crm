@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { createClient } from '@/utils/supabase/client';
+import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 import { Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -18,7 +18,6 @@ interface Notification {
 }
 
 export default function UserNotifications() {
-  const supabase = useMemo(() => createClient(), []);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
@@ -71,7 +70,7 @@ export default function UserNotifications() {
       mounted = false;
       supabase.removeChannel(channel);
     };
-  }, []); // supabaseを依存配列から削除
+  }, []); // 依存配列は空のまま
 
   // 通知を既読にする
   const markAsRead = async (notificationId: string) => {

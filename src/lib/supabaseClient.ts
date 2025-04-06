@@ -115,6 +115,12 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       }).finally(() => clearTimeout(timeoutId));
     }
   },
+  realtime: {
+    // リアルタイム更新設定
+    params: {
+      eventsPerSecond: 1 // イベントレートを下げる
+    }
+  },
   db: {
     schema: 'public'
   }
@@ -143,4 +149,31 @@ if (typeof window !== 'undefined') {
       console.error("セッション確認エラー:", e);
     }
   }, 1000);
+}
+
+// visibilitychange時の自動更新を無効化
+if (typeof window !== 'undefined') {
+  // 既存のvisibilitychangeイベントリスナーを上書き
+  const originalAddEventListener = window.document.addEventListener;
+  window.document.addEventListener = function(
+    type: string, 
+    listener: EventListenerOrEventListenerObject, 
+    options?: boolean | AddEventListenerOptions
+  ) {
+    if (type === 'visibilitychange' && typeof listener === 'function') {
+      // Supabaseの自動更新リスナーと思われるものをブロック
+      const listenerStr = listener.toString();
+      if (listenerStr.includes('autoRefreshToken') || listenerStr.includes('_onVisibilityChanged')) {
+        console.log('Suppressing Supabase visibilitychange auto-refresh listener');
+        // 代わりにダミーリスナーを登録
+        return originalAddEventListener.call(
+          this,
+          type,
+          () => console.log('Ignored visibilitychange event for Supabase auto-refresh'),
+          options
+        );
+      }
+    }
+    return originalAddEventListener.call(this, type, listener, options);
+  };
 }
