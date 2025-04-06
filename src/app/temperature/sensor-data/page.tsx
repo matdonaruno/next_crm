@@ -332,13 +332,13 @@ function SensorDataContent() {
       const bmpTemp = log.raw_data?.bmpTemp !== null ? log.raw_data.bmpTemp.toFixed(1) : "";
       const ahtHum = log.raw_data?.ahtHum !== null ? log.raw_data.ahtHum.toFixed(1) : "";
       const bmpPres = log.raw_data?.bmpPres !== null ? log.raw_data.bmpPres.toFixed(1) : "";
-      const batteryVolt = log.raw_data?.batteryVolt !== null ? log.raw_data.batteryVolt.toFixed(2) : "";
+      const batteryVolt = log.raw_data?.batteryVolt !== null ? log.raw_data.batteryVolt.toFixed(3) : "";
       
-      // バッテリー残量を計算（3.0V=0%, 4.2V=100%）
+      // バッテリー残量を計算（3.000V=0%, 3.300V=100%）
       let batteryPercentage = "";
       if (log.raw_data?.batteryVolt !== null && log.raw_data?.batteryVolt !== undefined) {
-        const minVoltage = 3.0;
-        const maxVoltage = 4.2;
+        const minVoltage = 3.000;
+        const maxVoltage = 3.300;
         const percentage = ((log.raw_data.batteryVolt - minVoltage) / (maxVoltage - minVoltage)) * 100;
         batteryPercentage = Math.max(0, Math.min(100, percentage)).toFixed(0);
       }
@@ -490,8 +490,8 @@ function SensorDataContent() {
         type: 'linear' as const,
         display: true,
         position: 'right' as const,
-        min: 2.5,  // バッテリー電圧の最小値
-        max: 4.5,  // バッテリー電圧の最大値
+        min: 3.000,  // バッテリー電圧の最小値を3.000Vに修正
+        max: 3.300,  // バッテリー電圧の最大値を3.300Vに修正
         title: {
           display: true,
           text: '電圧 (V)'
@@ -706,14 +706,14 @@ function SensorDataContent() {
                       </td>
                       <td className="px-4 py-3 text-sm text-center text-purple-600">
                         {log.raw_data?.batteryVolt !== null && log.raw_data?.batteryVolt !== undefined
-                          ? log.raw_data.batteryVolt.toFixed(2)
+                          ? log.raw_data.batteryVolt.toFixed(3)
                           : '-'}
                       </td>
                       <td className="px-4 py-3 text-sm text-center text-indigo-600">
                         {log.raw_data?.batteryVolt !== null && log.raw_data?.batteryVolt !== undefined
                           ? (() => {
-                              const minVoltage = 3.0;
-                              const maxVoltage = 4.2;
+                              const minVoltage = 3.000;
+                              const maxVoltage = 3.300;
                               const percentage = ((log.raw_data.batteryVolt - minVoltage) / (maxVoltage - minVoltage)) * 100;
                               return Math.max(0, Math.min(100, percentage)).toFixed(0) + '%';
                             })()

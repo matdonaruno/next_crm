@@ -440,10 +440,10 @@ export default function TemperatureManagementClient() {
   const getBatteryLevel = (voltage: number | null): BatteryLevel => {
     if (voltage === null) return BatteryLevel.UNKNOWN;
     
-    // 電圧値に基づいてレベルを判定（値は仮の閾値です。実際のデバイスに合わせて調整してください）
-    if (voltage > 3.6) return BatteryLevel.HIGH;
-    if (voltage > 3.3) return BatteryLevel.MIDDLE; 
-    if (voltage > 3.0) return BatteryLevel.LOW;
+    // 電圧値に基づいてレベルを判定（3.000V-3.300Vの範囲に合わせて調整）
+    if (voltage >= 3.225) return BatteryLevel.HIGH;
+    if (voltage >= 3.150) return BatteryLevel.MIDDLE; 
+    if (voltage >= 3.075) return BatteryLevel.LOW;
     return BatteryLevel.WARNING;
   };
 
@@ -451,10 +451,9 @@ export default function TemperatureManagementClient() {
   const getBatteryPercentage = (voltage: number | null): number => {
     if (voltage === null) return 0;
     
-    // ESP32/ESPモジュールの一般的なリチウムイオン電池の電圧範囲
-    // 最小電圧: 3.0V（0%）、最大電圧: 4.2V（100%）
-    const minVoltage = 3.0;
-    const maxVoltage = 4.2;
+    // センサーの電圧範囲：最小 3.000V（0%）、最大 3.300V（100%）
+    const minVoltage = 3.000;
+    const maxVoltage = 3.300;
     
     // 電圧を0-100%の範囲に変換
     let percentage = ((voltage - minVoltage) / (maxVoltage - minVoltage)) * 100;
@@ -953,7 +952,7 @@ export default function TemperatureManagementClient() {
                       {getBatteryMessage(getBatteryLevel(sensorData.batteryVolt))}
                       
                       {/* 電圧情報も小さく表示 */}
-                      <span className="text-gray-500 ml-auto">{sensorData.batteryVolt.toFixed(2)}V</span>
+                      <span className="text-gray-500 ml-auto">{sensorData.batteryVolt.toFixed(3)}V</span>
                     </div>
                   </div>
                 </div>
@@ -1291,7 +1290,7 @@ export default function TemperatureManagementClient() {
                                   </div>
                                   
                                   <span className="text-xs text-gray-500 mt-1">
-                                    {device.batteryVolt.toFixed(2)}V
+                                    {device.batteryVolt.toFixed(3)}V
                                   </span>
                                 </div>
                               ) : (
