@@ -105,18 +105,17 @@ export default function SensorMonitor() {
     
     // 定期的な更新（1分ごと）
     const interval = setInterval(fetchData, 60 * 1000);
-    return () => clearInterval(interval);
     
     // リアルタイム更新のサブスクリプション
-    // const subscription = supabase
-    //   .channel('sensor_logs_changes')
-    //   .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sensor_logs' }, fetchData)
-    //   .subscribe();
-    // 
-    // return () => {
-    //   subscription.unsubscribe();
-    //   clearInterval(interval);
-    // };
+    const subscription = supabase
+      .channel('sensor_logs_changes')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sensor_logs' }, fetchData)
+      .subscribe();
+    
+    return () => {
+      subscription.unsubscribe();
+      clearInterval(interval);
+    };
   }, []);
   
   return (
