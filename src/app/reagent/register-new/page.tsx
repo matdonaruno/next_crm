@@ -23,7 +23,6 @@ import { getJstTimestamp } from "@/lib/utils";
 
 type FormValues = {
   department: string;
-  departmentId: string; // 部署IDを追加
   reagentName: string;
   specification: string;
   lotNo: string;
@@ -74,46 +73,72 @@ function ReagentRegistrationContent() {
   // 認証チェック
   useEffect(() => {
     // ロード中は何もしない
-    if (loading) return;
+    if (loading) {
+      addDebugLog("認証情報ロード中...");
+      return;
+    }
 
     // 認証されていない場合はログインページにリダイレクト
     if (!user) {
+      addDebugLog("認証エラー: ユーザー情報がありません");
       router.push("/login");
       return;
     }
 
-    // フルネームが設定されていない場合はユーザー設定ページにリダイレクト
-    if (!profile?.fullname) {
-      router.push("/user-settings");
+    addDebugLog(`認証成功: ユーザーID ${user.id}`);
+    
+    // プロファイル情報をチェック
+    addDebugLog(`プロファイル情報: ${JSON.stringify({
+      exists: !!profile,
+      fullname: profile?.fullname || "未設定",
+      facility_id: profile?.facility_id || "未設定"
+    })}`);
+
+    // プロファイル自体が存在しない場合は続行（リダイレクトしない）
+    if (!profile) {
+      addDebugLog("警告: プロファイル情報がありませんが、処理を続行します");
       return;
     }
 
-    // 施設IDが設定されていない場合はユーザー設定ページにリダイレクト
-    if (!profile?.facility_id) {
-      router.push("/user-settings");
-      return;
+    // フルネームや施設IDが設定されていなくても処理を続行
+    if (!profile.fullname) {
+      addDebugLog("警告: フルネームが設定されていませんが、処理を続行します");
     }
-  }, [user, profile, loading, router]);
+
+    if (!profile.facility_id) {
+      addDebugLog("警告: 施設IDが設定されていませんが、処理を続行します");
+    }
+
+    addDebugLog("認証・プロファイルチェック完了: 問題なし");
+  }, [user, profile, loading, router, addDebugLog]);
 
   // URLパラメータから部署情報を設定
   useEffect(() => {
-    if (departmentName && departmentId) {
-      addDebugLog(`URLパラメータから部署情報を設定: ${departmentName} (ID: ${departmentId})`);
+    if (departmentName) {
+      addDebugLog(`URLパラメータから部署情報を設定: ${departmentName}`);
       setValue("department", departmentName);
-      setValue("departmentId", departmentId);
     }
-  }, [departmentName, departmentId, setValue, addDebugLog]);
+  }, [departmentName, setValue, addDebugLog]);
 
   // ユーザー情報と施設情報の取得
   const fetchUserAndFacilityInfo = useCallback(async () => {
     try {
+      addDebugLog("ユーザー・施設情報取得開始");
+      
       // プロファイル情報からユーザー名を取得
       if (profile?.fullname) {
         setCurrentUserName(profile.fullname);
+        addDebugLog(`ユーザー名を設定: ${profile.fullname}`);
+      } else {
+        // プロファイルからフルネームが取得できない場合はメールアドレスなどで代用
+        const displayName = user?.email || user?.id?.substring(0, 8) || "ゲスト";
+        setCurrentUserName(displayName);
+        addDebugLog(`ユーザー名の代替を設定: ${displayName}`);
       }
       
       // 施設情報を取得
       if (profile?.facility_id) {
+        addDebugLog(`施設情報取得開始: ID=${profile.facility_id}`);
         const { data: facilityData, error: facilityError } = await supabase
           .from("facilities")
           .select("name")
@@ -122,12 +147,22 @@ function ReagentRegistrationContent() {
           
         if (!facilityError && facilityData) {
           setFacilityName(facilityData.name);
+          addDebugLog(`施設名を設定: ${facilityData.name}`);
+        } else {
+          addDebugLog(`施設情報取得エラー: ${facilityError?.message || "不明なエラー"}`);
+          // エラーがあっても処理を継続
         }
+      } else {
+        // 施設IDがない場合も処理を継続
+        addDebugLog("施設IDがありません");
       }
+      
+      addDebugLog("ユーザー・施設情報取得完了");
     } catch (error) {
       addDebugLog("ユーザーおよび施設情報取得エラー: " + JSON.stringify(error));
+      // エラーがあっても処理を継続
     }
-  }, [profile, addDebugLog]);
+  }, [profile, user, addDebugLog]);
 
   // コンポーネントマウント時にユーザー情報と施設情報を取得
   useEffect(() => {
@@ -152,6 +187,13 @@ function ReagentRegistrationContent() {
       setError("");
       
       const formValues = getValues();
+      
+      // URLパラメータから部署情報が設定されている場合は上書き
+      if (departmentName) {
+        formValues.department = departmentName;
+        addDebugLog(`部署情報を上書き - 部署名: ${departmentName}`);
+      }
+      
       addDebugLog("フォーム値: " + JSON.stringify(formValues));
       
       // ユーザー情報取得
@@ -188,7 +230,7 @@ function ReagentRegistrationContent() {
       
       // 試薬データ作成（カラム名の大文字小文字に注意）
       const reagentData = {
-        department: formValues.department,
+        department: formValues.department, // 部署名のみを使用
         name: formValues.reagentName,
         specification: formValues.specification || "",
         "lotNo": formValues.lotNo, // 大文字小文字を正確に
@@ -203,36 +245,55 @@ function ReagentRegistrationContent() {
         jan_code: formValues.janCode || "", // JANコード
       };
       addDebugLog("試薬データ作成: " + JSON.stringify(reagentData));
-
-      // 試薬データの登録
-      addDebugLog("試薬データ登録開始");
-      const { data: reagentDataInserted, error: reagentError } = await supabase
-        .from("reagents")
-        .insert([reagentData])
-        .select();
-
-      if (reagentError) {
-        addDebugLog("試薬データ登録エラー: " + JSON.stringify(reagentError));
-        setError("試薬データの登録に失敗しました");
+      
+      // 重要なフィールドの確認
+      addDebugLog(`重要フィールド確認 - facility_id: ${reagentData.facility_id}, department: ${reagentData.department}`);
+      
+      if (!reagentData.facility_id) {
+        setError("施設IDが取得できません。もう一度ログインしてください。");
+        return;
+      }
+      
+      if (!reagentData.department) {
+        setError("部署が設定されていません。部署を選択してください。");
         return;
       }
 
-      addDebugLog("試薬データ登録成功: " + JSON.stringify(reagentDataInserted));
+      // 試薬データの登録
+      addDebugLog("試薬データ登録開始");
+      try {
+        // 認証情報はsupabaseクライアントが自動的に使用するため明示的に設定する必要はない
+        const { data: reagentDataInserted, error: reagentError } = await supabase
+          .from("reagents")
+          .insert([reagentData])
+          .select();
 
-      // トースト通知（正しい書式で）
-      toast({
-        title: "登録完了",
-        description: "試薬の登録が完了しました",
-        duration: 3000,
-      });
+        if (reagentError) {
+          addDebugLog("試薬データ登録エラー: " + JSON.stringify(reagentError));
+          setError("試薬データの登録に失敗しました");
+          return;
+        }
 
-      // フォームをリセット
-      reset();
-      
-      // 少し待ってからリダイレクト
-      setTimeout(() => {
-        router.push("/reagent_dash");
-      }, 1500);
+        addDebugLog("試薬データ登録成功: " + JSON.stringify(reagentDataInserted));
+
+        // トースト通知（正しい書式で）
+        toast({
+          title: "登録完了",
+          description: "試薬の登録が完了しました",
+          duration: 3000,
+        });
+
+        // フォームをリセット
+        reset();
+        
+        // 少し待ってからリダイレクト
+        setTimeout(() => {
+          router.push("/reagent_dash");
+        }, 1500);
+      } catch (error) {
+        addDebugLog("試薬データ登録エラー: " + JSON.stringify(error));
+        setError("試薬登録中にエラーが発生しました。後でもう一度お試しください。");
+      }
     } catch (error) {
       addDebugLog("試薬登録エラー: " + JSON.stringify(error));
       setError("試薬登録中にエラーが発生しました。後でもう一度お試しください。");
@@ -456,11 +517,16 @@ function ReagentRegistrationContent() {
         }
       }
       
+      // URLパラメータから設定された部署情報を保持
+      if (departmentName) {
+        setValue("department", departmentName);
+      }
+      
       // 検出結果を設定
       setBarcodeDetected(success);
       return success;
     },
-    [products, setValue, addDebugLog]
+    [products, setValue, addDebugLog, departmentName]
   );
 
   // 1次元バーコード専用のパース処理（GS1-128、EANなど）
@@ -519,6 +585,11 @@ function ReagentRegistrationContent() {
           addDebugLog("GTIN/JANコード不一致: " + gtin);
         }
         
+        // URLパラメータから設定された部署情報を保持
+        if (departmentName) {
+          setValue("department", departmentName);
+        }
+        
         setBarcodeDetected(true);
         return true;
       }
@@ -572,7 +643,7 @@ function ReagentRegistrationContent() {
       // どのパターンにも一致しなかった場合は、汎用パーサーを試す
       return parseGS1Barcode(originalBarcode);
     },
-    [parseGS1Barcode, products, setValue, addDebugLog]
+    [parseGS1Barcode, products, setValue, addDebugLog, departmentName]
   );
 
   // 2次元バーコード専用のパース処理（QRコード、データマトリックスなど）
@@ -679,6 +750,11 @@ function ReagentRegistrationContent() {
       // 検出結果を設定
       setBarcodeDetected(success);
       
+      // URLパラメータから設定された部署情報を保持
+      if (departmentName) {
+        setValue("department", departmentName);
+      }
+      
       // 成功したか、パースできなかった場合は汎用パーサーを試す
       if (success) {
         return true;
@@ -686,7 +762,7 @@ function ReagentRegistrationContent() {
         return parseGS1Barcode(originalBarcode);
       }
     },
-    [parseGS1Barcode, products, setValue, addDebugLog]
+    [parseGS1Barcode, products, setValue, addDebugLog, departmentName]
   );
 
   // バーコード検出ハンドラ
@@ -710,13 +786,18 @@ function ReagentRegistrationContent() {
         success = parseGS1Barcode(barcodeData);
       }
       
+      // URLパラメータから部署情報が設定されている場合は再設定
+      if (departmentName) {
+        setValue("department", departmentName);
+      }
+      
       if (success) {
         addDebugLog("バーコード処理成功");
       } else {
         addDebugLog("バーコード処理失敗、手動入力必要");
       }
     },
-    [parseGS1Barcode, parseLinearBarcode, parseQRCode, addDebugLog]
+    [parseGS1Barcode, parseLinearBarcode, parseQRCode, addDebugLog, departmentName, setValue]
   );
 
   // バーコードスキャンエラー処理
@@ -819,26 +900,26 @@ function ReagentRegistrationContent() {
   // フォーム送信ハンドラ
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    addDebugLog("フォーム送信");
     
-    // 必須項目のバリデーション
+    // 部署情報のチェック
     const formValues = getValues();
-    const missingFields = [];
-    
-    if (!formValues.department) missingFields.push("部署");
-    if (!formValues.reagentName) missingFields.push("試薬名");
-    if (!formValues.lotNo) missingFields.push("ロット番号");
-    if (!formValues.expirationDate) missingFields.push("有効期限");
-    
-    if (missingFields.length > 0) {
-      const errorMsg = `以下の必須項目を入力してください: ${missingFields.join(", ")}`;
-      setError(errorMsg);
-      addDebugLog(`バリデーションエラー: ${errorMsg}`);
+    if (!formValues.department) {
+      setError("部署が未選択です。試薬を登録する部署を選択してください。");
+      toast({
+        title: "部署未選択",
+        description: "試薬を登録する部署を選択してください",
+        variant: "destructive",
+        duration: 5000,
+      });
       return;
     }
     
-    // 試薬登録処理
-    registerReagent(false);
+    // 確認ダイアログを表示
+    const confirmMessage = "試薬を登録します。よろしいですか？";
+    if (window.confirm(confirmMessage)) {
+      // 使用開始する場合は true, しない場合は false
+      registerReagent(false);
+    }
   };
 
   // カメラ操作ボタン
@@ -874,18 +955,33 @@ function ReagentRegistrationContent() {
                 </div>
               </div>
 
-              {/* ユーザー情報表示 - 右詰め */}
-              <div className="flex justify-end gap-2 mt-2">
-                {facilityName && (
-                  <p className="text-sm text-gray-600 bg-white/50 px-3 py-1.5 rounded-full inline-block">
-                    施設「{facilityName}」
-                  </p>
-                )}
-                {currentUserName && (
-                  <p className="text-sm text-gray-600 bg-white/50 px-3 py-1.5 rounded-full inline-block">
-                    {currentUserName}さんがログインしています！
-                  </p>
-                )}
+              {/* ユーザー・部署・施設情報表示 */}
+              <div className="bg-accent/30 border border-border p-4 rounded-lg animate-fadeIn mb-6">
+                <div className="flex flex-col md:flex-row md:items-center justify-between">
+                  <div>
+                    {facilityName && (
+                      <p className="text-sm text-foreground">
+                        <span className="font-semibold">施設「{facilityName}」</span>
+                      </p>
+                    )}
+                    {currentUserName && (
+                      <p className="text-sm text-foreground">
+                        <span className="font-semibold">{currentUserName}さん</span>として登録します
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    {departmentName ? (
+                      <p className="text-sm text-foreground mt-2 md:mt-0">
+                        <span className="font-semibold">部署: {departmentName}</span>
+                      </p>
+                    ) : (
+                      <p className="text-sm text-amber-600 mt-2 md:mt-0">
+                        <span className="font-semibold">⚠️ 部署が選択されていません</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -934,14 +1030,34 @@ function ReagentRegistrationContent() {
                     <form onSubmit={handleSubmit} className="space-y-6">
                       {/* 部署選択 - URLパラメータから自動入力 */}
                       <div className="space-y-2">
-                        <Label htmlFor="department">部署 <span className="text-red-500">*</span></Label>
-                        <Input
-                          id="department"
-                          {...register("department")}
-                          readOnly={!!departmentName}
-                          className={departmentName ? "bg-gray-100" : ""}
-                        />
-                        <input type="hidden" {...register("departmentId")} />
+                        <Label htmlFor="department">部署名 <span className="text-red-500">*</span></Label>
+                        {departmentName ? (
+                          <div className="flex space-x-2">
+                            <Input
+                              id="department"
+                              value={departmentName}
+                              readOnly
+                              className="bg-gray-100"
+                            />
+                            <input type="hidden" {...register("department")} value={departmentName} />
+                          </div>
+                        ) : (
+                          <>
+                            <select
+                              id="department"
+                              {...register("department")}
+                              className="w-full p-2 border border-gray-300 rounded-md"
+                              required
+                            >
+                              <option value="">部署を選択してください</option>
+                              {departments.map(dept => (
+                                <option key={dept.id} value={dept.name}>
+                                  {dept.name}
+                                </option>
+                              ))}
+                            </select>
+                          </>
+                        )}
                       </div>
 
                       {/* JANコード */}

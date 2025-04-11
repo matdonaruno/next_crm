@@ -109,7 +109,14 @@ export function AppHeader({ showBackButton = true, title, onBackClick, icon }: A
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={() => router.push("/user-settings")}>
+                <Button variant="ghost" size="icon" onClick={() => {
+                  // 手動ナビゲーションフラグを設定
+                  if (typeof window !== 'undefined') {
+                    window.isManualNavigation = true;
+                    console.log("手動でユーザー設定ページに移動します");
+                  }
+                  router.push("/user-settings");
+                }}>
                   <User className="h-6 w-6" />
                 </Button>
               </TooltipTrigger>

@@ -6,6 +6,19 @@ import Cookies from 'js-cookie';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 
+// グローバル変数の型宣言を追加
+declare global {
+  interface Window {
+    isManualNavigation: boolean;
+  }
+}
+
+// 手動ナビゲーションを追跡するためのグローバルフラグ
+// このフラグはユーザー設定ボタンがクリックされたときにtrueに設定される
+if (typeof window !== 'undefined') {
+  window.isManualNavigation = window.isManualNavigation || false;
+}
+
 export function ClientTokenCleaner() {
   const pathname = usePathname();
   const router = useRouter();
@@ -159,13 +172,37 @@ export function ClientTokenCleaner() {
     if (pathname !== lastPathRef.current) {
       console.log("ClientTokenCleaner: パスが変更されたためリダイレクトフラグをリセット", {
         oldPath: lastPathRef.current,
-        newPath: pathname
+        newPath: pathname,
+        isManualNavigation: window.isManualNavigation
       });
+      
+      // ロギングを強化して、user-settingsへのリダイレクトかどうかを確認
+      if (pathname === '/user-settings') {
+        console.log("ClientTokenCleaner: user-settingsページへのリダイレクトが検出されました。これは意図したリダイレクトですか？", {
+          isManualNavigation: window.isManualNavigation
+        });
+        
+        // 予期しない自動リダイレクトを検出した場合（手動ナビゲーションでない場合のみブロック）
+        if (lastPathRef.current === '/depart' && !window.isManualNavigation) {
+          console.log("ClientTokenCleaner: /departからの自動リダイレクトを検出。リダイレクトをブロックします。");
+          // 少し遅延してから元のページに戻す
+          setTimeout(() => {
+            router.back();
+          }, 50);
+          return;
+        } else {
+          console.log("ClientTokenCleaner: 手動ナビゲーションによるリダイレクトを許可します。");
+        }
+      }
+      
+      // ナビゲーションフラグをリセット
+      window.isManualNavigation = false;
+      
       redirectedRef.current = false;
       setRedirecting(false);
       lastPathRef.current = pathname;
     }
-  }, [pathname]);
+  }, [pathname, router]);
   
   // このコンポーネントは何も表示しない
   return null;

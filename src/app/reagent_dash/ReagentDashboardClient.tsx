@@ -435,12 +435,20 @@ export default function ReagentDashboardClient() {
         return;
       }
 
-      // 明示的にアクセストークンを設定
-      const { data, error } = await supabase
+      // 試薬データクエリを作成
+      let query = supabase
         .from("reagents")
         .select(`*, registeredBy (fullname), used_by (fullname), ended_by (fullname)`)
-        .eq("facility_id", profile.facility_id)
-        .order("registrationDate", { ascending: false });
+        .eq("facility_id", profile.facility_id);
+        
+      // 部署名が指定されている場合は部署名でフィルタリング
+      if (departmentName) {
+        console.log(`ReagentDash: 部署 "${departmentName}" でフィルタリング`);
+        query = query.eq("department", departmentName);
+      }
+      
+      // 並び順を指定して実行
+      const { data, error } = await query.order("registrationDate", { ascending: false });
 
       // クエリ結果のデバッグログ
       console.log("ReagentDash: Supabaseクエリ実行結果", { 
@@ -859,7 +867,7 @@ export default function ReagentDashboardClient() {
               whileTap={{ scale: 0.98 }}
             >
               <Button 
-                onClick={() => router.push(`/reagent/register-new`)}
+                onClick={() => router.push(`/reagent/register-new?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`)}
                 className="inline-flex items-center justify-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 shadow hover:bg-primary/90 h-9 px-4 w-full bg-gradient-to-r from-pink-300 to-purple-400 hover:from-pink-300 hover:to-purple-400 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
               >
                 <Plus className="mr-2 h-5 w-5" />

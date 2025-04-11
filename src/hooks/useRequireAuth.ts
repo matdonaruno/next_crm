@@ -23,27 +23,20 @@ export function useRequireAuth() {
       return;
     }
 
-    // 現在のパスがユーザー設定ページの場合は、チェックをスキップ
-    if (pathname === "/user-settings") {
-      return;
-    }
+    // リダイレクト機能を一時的に無効化: プロファイルの状態に関わらず処理を続行
+    console.log("useRequireAuth: プロファイルチェックを実行", {
+      hasFullname: !!profile?.fullname,
+      hasFacilityId: !!profile?.facility_id,
+      willContinue: true
+    });
 
-    // フルネームが設定されていない場合はユーザー設定ページにリダイレクト
+    // 以下の条件はログとして残すが、リダイレクトは行わない
     if (!profile?.fullname) {
-      // 既にユーザー設定ページにいる場合はリダイレクトをスキップ
-      if (pathname !== "/user-settings") {
-        router.push("/user-settings");
-      }
-      return;
+      console.log("useRequireAuth: フルネームが設定されていません（リダイレクト無効化中）");
     }
 
-    // 施設IDが設定されていない場合はユーザー設定ページにリダイレクト
     if (!profile?.facility_id) {
-      // 既にユーザー設定ページにいる場合はリダイレクトをスキップ
-      if (pathname !== "/user-settings") {
-        router.push("/user-settings");
-      }
-      return;
+      console.log("useRequireAuth: 施設IDが設定されていません（リダイレクト無効化中）");
     }
   }, [user, profile, loading, router, pathname]);
 }

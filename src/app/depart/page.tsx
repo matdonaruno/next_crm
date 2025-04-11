@@ -81,20 +81,18 @@ export default function Home() {
           return;
         }
 
-        // フルネームまたは施設IDが設定されていない場合はユーザー設定ページにリダイレクト
+        // フルネームまたは施設IDが設定されていない場合は警告を出すだけ（リダイレクトしない）
         if (!profile?.fullname || !profile?.facility_id) {
-          console.log("DepartPage: プロファイル情報が不完全です。ユーザー設定ページへリダイレクト", {
+          console.log("DepartPage: プロファイル情報が不完全ですが、処理を続行します", {
             fullname: profile?.fullname || 'なし',
             facility_id: profile?.facility_id || 'なし'
           });
-          router.push("/user-settings");
-          return;
         }
 
         console.log("DepartPage: 認証チェック完了 - ユーザーは認証済み", {
           userId: user.id,
-          fullname: profile.fullname,
-          facility_id: profile.facility_id
+          fullname: profile?.fullname || 'なし',
+          facility_id: profile?.facility_id || 'なし'
         });
         setIsLoading(false);
       } catch (error) {
