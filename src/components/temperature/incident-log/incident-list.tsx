@@ -271,52 +271,45 @@ export function IncidentList({
   
   return (
     <>
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex justify-between items-center">
-            <div 
-              className="flex items-center cursor-pointer"
-              onClick={() => setIsExpanded(!isExpanded)}
+      <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
+        <div 
+          className="flex justify-between items-center mb-4 cursor-pointer"
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
+          <h3 className="text-lg font-semibold flex items-center">
+            <AlertTriangle className="h-5 w-5 mr-2 text-red-500" />
+            温度異常対応履歴
+          </h3>
+          <div className="flex items-center">
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setEditMode(false);
+                setSelectedIncident(null);
+                setFormOpen(true);
+              }}
             >
-              <AlertTriangle className="h-5 w-5 mr-2 text-red-500" />
-              <CardTitle className="text-lg font-semibold">温度異常対応履歴</CardTitle>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="ml-2"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsExpanded(!isExpanded);
-                }}
-              >
-                {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
-              </Button>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setEditMode(false);
-                  setSelectedIncident(null);
-                  setFormOpen(true);
-                }}
-              >
-                新規対応記録
-                <PlusCircle className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
+              新規対応記録
+              <PlusCircle className="h-4 w-4 ml-1" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="ml-2"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsExpanded(!isExpanded);
+              }}
+            >
+              {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+            </Button>
           </div>
-          {isExpanded && (
-            <CardDescription className="mt-2">
-              温度異常と対応措置の記録を管理します。承認が必要な記録は管理者によって承認されます。
-            </CardDescription>
-          )}
-        </CardHeader>
+        </div>
         
         {isExpanded && (
-          <CardContent>
+          <>
             <div className="flex justify-between items-center mb-4">
               <div className="flex items-center">
                 <Filter className="h-4 w-4 mr-2 text-gray-500" />
@@ -506,9 +499,9 @@ export function IncidentList({
                 </div>
               )}
             </div>
-          </CardContent>
+          </>
         )}
-      </Card>
+      </div>
       
       {/* インシデントログフォーム */}
       <IncidentLogForm

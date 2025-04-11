@@ -120,19 +120,19 @@ export default function ReagentDashboardClient() {
     {
       id: 1,
       type: 'warning',
-      message: '3件の試薬が期限切れ間近です',
+      message: '3件の試薬が期限切れ間近です(デモ用)',
       timestamp: new Date(),
     },
     {
       id: 2,
       type: 'info',
-      message: '試薬在庫状況が更新されました',
+      message: '試薬在庫状況が更新されました(デモ用)',
       timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000), // 1日前
     },
     {
       id: 3,
       type: 'success',
-      message: '新しい試薬管理ガイドラインが公開されました',
+      message: '新しい試薬管理ガイドラインが公開されました(デモ用)',
       timestamp: new Date(Date.now() - 72 * 60 * 60 * 1000), // 3日前
     }
   ]);

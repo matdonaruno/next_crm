@@ -865,15 +865,18 @@ export default function TemperatureManagementClient() {
     const day = String(props.date.getDate()).padStart(2, "0");
     const localDateStr = `${year}-${month}-${day}`;
     const hasData = datesWithData.has(localDateStr);
+    
+    console.log(`Date ${localDateStr}: hasData = ${hasData}`, Array.from(datesWithData));
+    
     return (
       <div className="relative flex items-center justify-center w-full h-full">
-        {hasData && (
+        {hasData ? (
           <div 
             className="absolute w-12 h-12 bg-purple-400/40 rounded-full"
             style={{ filter: "blur(8px)" }}
           />
-        )}
-        <span className="relative z-10 text-base font-medium">{props.date.getDate()}</span>
+        ) : null}
+        <span className={`relative z-10 text-base ${hasData ? "font-semibold" : "font-medium"}`}>{props.date.getDate()}</span>
       </div>
     );
   };
@@ -926,9 +929,9 @@ export default function TemperatureManagementClient() {
           <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
             <Button
               onClick={() => setShowSensorData(!showSensorData)}
-              className="bg-gradient-to-r from-purple-300 to-pink-300 hover:from-purple-400 hover:to-pink-400 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
+              className="bg-gradient-to-r from-blue-300 to-indigo-400 hover:from-blue-400 hover:to-indigo-500 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
             >
-              <ThermometerSnowflake className="h-5 w-5 mr-2" />
+              <ThermometerSnowflake className="h-5 w-5 mr-2 text-blue-100" />
               センサーデータ {showSensorData ? '非表示' : '表示'}
             </Button>
           </motion.div>
@@ -936,9 +939,9 @@ export default function TemperatureManagementClient() {
           <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
             <Button
               onClick={() => router.push(`/temperature/weekly-verification?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}&facilityId=${facilityId}`)}
-              className="bg-gradient-to-r from-green-300 to-blue-300 hover:from-green-400 hover:to-blue-400 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
+              className="bg-gradient-to-r from-indigo-300 to-purple-400 hover:from-indigo-400 hover:to-purple-500 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
             >
-              <FileCheck className="h-5 w-5 mr-2" />
+              <FileCheck className="h-5 w-5 mr-2 text-indigo-100" />
               週次温度確認
             </Button>
           </motion.div>
@@ -950,7 +953,7 @@ export default function TemperatureManagementClient() {
                 onClick={() => router.push(`/temperature/monthly-verification?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}&facilityId=${facilityId}`)}
                 className="bg-gradient-to-r from-orange-300 to-red-300 hover:from-orange-400 hover:to-red-400 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
               >
-                <Calendar className="h-5 w-5 mr-2" />
+                <Calendar className="h-5 w-5 mr-2 text-orange-100" />
                 月次温度確認
               </Button>
             </motion.div>
@@ -959,9 +962,9 @@ export default function TemperatureManagementClient() {
           <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
             <Button
               onClick={() => router.push(`/temperature/sensor-data?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`)}
-              className="bg-gradient-to-r from-blue-300 to-indigo-300 hover:from-blue-400 hover:to-indigo-400 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
+              className="bg-gradient-to-r from-purple-300 to-pink-400 hover:from-purple-400 hover:to-pink-500 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
             >
-              <Activity className="h-5 w-5 mr-2" />
+              <Activity className="h-5 w-5 mr-2 text-purple-100" />
               センサーデータ履歴
             </Button>
           </motion.div>
@@ -969,9 +972,9 @@ export default function TemperatureManagementClient() {
           <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
             <Button
               onClick={() => router.push(`/temperature/record?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`)}
-              className="bg-gradient-to-r from-pink-300 to-rose-300 hover:from-pink-400 hover:to-rose-400 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
+              className="bg-gradient-to-r from-pink-300 to-rose-400 hover:from-pink-400 hover:to-rose-500 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
             >
-              <Plus className="h-5 w-5 mr-2" />
+              <Plus className="h-5 w-5 mr-2 text-pink-100" />
               新規温度記録
             </Button>
           </motion.div>
@@ -1188,8 +1191,8 @@ export default function TemperatureManagementClient() {
                       const rawVal = detail?.value;
                       const isSensorData = detail?.data_source === "sensor";
 
-                      // 例) 検体チェックなど(温度じゃない)
-                      const isCheckItem = item.item_name === "検体チェック"; 
+                      // 検体チェック項目の判定 - 正確なitem_nameを使用
+                      const isCheckItem = item.item_name === "seika_samplecheck"; 
                       
                       return (
                         <td
@@ -1199,9 +1202,15 @@ export default function TemperatureManagementClient() {
                           {rawVal !== undefined && rawVal !== null ? (
                             isCheckItem ? (
                               rawVal === 1 ? (
-                                <Check className="h-5 w-5 mx-auto text-green-600" />
+                                <div className="flex items-center justify-center text-green-600">
+                                  <Check className="h-5 w-5 mr-1" />
+                                  <span>OK</span>
+                                </div>
                               ) : (
-                                <X className="h-5 w-5 mx-auto text-red-600" />
+                                <div className="flex items-center justify-center text-red-600">
+                                  <X className="h-5 w-5 mr-1" />
+                                  <span>NG</span>
+                                </div>
                               )
                             ) : (
                               <span

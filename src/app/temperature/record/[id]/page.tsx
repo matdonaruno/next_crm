@@ -89,13 +89,6 @@ export default function TemperatureRecordDetailPage() {
 
         setRecord(recordData);
 
-        // 編集用の値を初期化
-        const initialValues: {[key: string]: number} = {};
-        recordData.temperature_record_details.forEach((detail: TemperatureRecordDetail) => {
-          initialValues[detail.temperature_item_id] = detail.value;
-        });
-        setEditedValues(initialValues);
-
         // 温度アイテムを取得
         const { data: itemsData, error: itemsError } = await supabase
           .from('temperature_items')
@@ -108,6 +101,20 @@ export default function TemperatureRecordDetailPage() {
         }
 
         setTemperatureItems(itemsData || []);
+
+        // 編集用の値を初期化（デフォルト値も設定）
+        const initialValues: {[key: string]: number} = {};
+        itemsData.forEach((item: TemperatureItem) => {
+          // まず全ての項目にデフォルト値を設定
+          initialValues[item.id] = item.default_value;
+        });
+        
+        // 次に既存のデータで上書き
+        recordData.temperature_record_details.forEach((detail: TemperatureRecordDetail) => {
+          initialValues[detail.temperature_item_id] = detail.value;
+        });
+        
+        setEditedValues(initialValues);
       } catch (error) {
         console.error('データ取得エラー:', error);
         setError('データの取得に失敗しました。');
@@ -137,22 +144,46 @@ export default function TemperatureRecordDetailPage() {
       // 既存のdetailsをIDで取得
       const existingDetails = record?.temperature_record_details || [];
       
-      // 更新PromiseのBatch
-      const updatePromises = Object.entries(editedValues).map(([itemId, value]) => {
+      // 更新と新規追加を分ける
+      const updatePromises: any[] = [];
+      const newDetails: any[] = [];
+      
+      Object.entries(editedValues).forEach(([itemId, value]) => {
         const detailToUpdate = existingDetails.find(d => d.temperature_item_id === itemId);
         
         if (detailToUpdate) {
-          return supabase
-            .from('temperature_record_details')
-            .update({ value })
-            .eq('id', detailToUpdate.id);
+          // 既存データの更新
+          updatePromises.push(
+            supabase
+              .from('temperature_record_details')
+              .update({ value })
+              .eq('id', detailToUpdate.id)
+          );
+        } else {
+          // 新規データの追加
+          newDetails.push({
+            temperature_record_id: recordId,
+            temperature_item_id: itemId,
+            value: value,
+            data_source: 'manual'
+          });
         }
-        
-        return null; // 既存のdetailがない場合はスキップ
-      }).filter(Boolean); // nullを除去
+      });
       
-      // バッチ更新を実行
-      await Promise.all(updatePromises);
+      // 更新を実行
+      for (const updatePromise of updatePromises) {
+        const { error } = await updatePromise;
+        if (error) throw error;
+      }
+      
+      // 新規データがあれば追加
+      if (newDetails.length > 0) {
+        const { error: insertError } = await supabase
+          .from('temperature_record_details')
+          .insert(newDetails);
+          
+        if (insertError) throw new Error(insertError.message);
+      }
       
       // 編集モードを終了
       setIsEditing(false);
@@ -366,7 +397,7 @@ export default function TemperatureRecordDetailPage() {
                               <input
                                 type="number"
                                 step="0.1"
-                                value={editedValues[item.id] !== undefined ? editedValues[item.id] : ''}
+                                value={editedValues[item.id] !== undefined ? editedValues[item.id] : item.default_value}
                                 onChange={(e) => handleValueChange(item.id, parseFloat(e.target.value))}
                                 className="border border-gray-300 p-2 rounded w-24 text-right"
                               />

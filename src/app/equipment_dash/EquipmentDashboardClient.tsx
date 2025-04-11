@@ -18,7 +18,8 @@ import {
   FileText,
   List,
   Grid,
-  TableIcon
+  TableIcon,
+  History
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,7 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { setSessionCheckEnabled } from "@/contexts/AuthContext";
@@ -75,6 +76,7 @@ interface EquipmentCheckItem {
   lastCheckDate?: string | null; // 最終点検日
   lastCheckResult?: boolean | null; // 最終点検結果
   isOverdue?: boolean; // 点検期限超過フラグ
+  isPeriodCompleted?: boolean; // 現在の期間内に点検が完了しているかチェック
 }
 
 // 点検記録
@@ -90,6 +92,13 @@ interface MaintenanceRecord {
   performer_name?: string; // Join時に使用
   check_item_name?: string; // Join時に使用
   equipment_name?: string; // Join時に使用
+  verified_by?: string | null;
+  verified_at?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  status?: string;
+  verifier_name?: string;
+  approver_name?: string;
 }
 
 // モーダルで扱うデータの型
@@ -144,10 +153,52 @@ const isCheckOverdue = (lastCheckDate: string | null, frequency: string): boolea
   }
 };
 
+// 現在の期間内に点検が完了しているかチェック
+const isCurrentPeriodCompleted = (lastCheckDate: string | null, frequency: string): boolean => {
+  if (!lastCheckDate) return false; // 未実施は未完了
+  
+  const now = new Date();
+  const lastCheck = new Date(lastCheckDate);
+  
+  // 基本的にチェックする日付は同じ日の0時0分0秒
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  
+  switch (frequency) {
+    case 'daily':
+      // 今日の日付内（0時以降）のチェックのみ有効
+      return lastCheck >= todayStart;
+      
+    case 'weekly': {
+      // 今週の月曜日の0時を取得
+      const dayOfWeek = now.getDay(); // 0: 日曜日, 1: 月曜日, ..., 6: 土曜日
+      const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // 月曜日からの日数
+      const mondayDate = new Date(todayStart);
+      mondayDate.setDate(mondayDate.getDate() - daysFromMonday);
+      
+      return lastCheck >= mondayDate;
+    }
+    
+    case 'monthly': {
+      // 今月の1日の0時を取得
+      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+      
+      return lastCheck >= firstDayOfMonth;
+    }
+    
+    case 'as_needed':
+      // 必要時は常に最新のチェックを有効とする
+      return true;
+      
+    default:
+      return false;
+  }
+};
+
 // ★ テーブル表示用データの型
 interface TableCellData {
   result: boolean | null; // true: 正常, false: 異常, null: 未実施
   recordId?: string; // 対応する点検記録ID (オプション)
+  comment?: string | null; // 異常時のコメント
 }
 interface TableRowData {
   type: 'equipment' | 'frequency' | 'item';
@@ -170,6 +221,66 @@ const isJapaneseHoliday = (date: Date): boolean => {
 const getHolidayName = (date: Date): string | null => {
   const holiday = holidays.between(date, date)[0];
   return holiday ? holiday.name : null;
+};
+
+// 頻度に応じた現在の期間情報を取得する関数
+const getCurrentPeriodInfo = (frequency: string): { label: string, period: string } => {
+  const now = new Date();
+  const today = format(now, 'yyyy/MM/dd');
+  const todayWeek = format(now, 'E', { locale: ja });
+  
+  switch (frequency) {
+    case 'daily':
+      return {
+        label: '本日',
+        period: `${today} (${todayWeek})`
+      };
+      
+    case 'weekly': {
+      // 今週の月曜日と日曜日を取得
+      const dayOfWeek = now.getDay(); // 0: 日曜日, 1: 月曜日, ..., 6: 土曜日
+      const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // 月曜日からの日数
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - daysFromMonday);
+      
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      
+      const mondayWeek = format(monday, 'E', { locale: ja });
+      const sundayWeek = format(sunday, 'E', { locale: ja });
+      
+      return {
+        label: '今週',
+        period: `${format(monday, 'yyyy/MM/dd')} (${mondayWeek}) 〜 ${format(sunday, 'yyyy/MM/dd')} (${sundayWeek})`
+      };
+    }
+    
+    case 'monthly': {
+      // 今月の初日と末日を取得
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      
+      const firstDayWeek = format(firstDay, 'E', { locale: ja });
+      const lastDayWeek = format(lastDay, 'E', { locale: ja });
+      
+      return {
+        label: '今月',
+        period: `${format(firstDay, 'yyyy/MM/dd')} (${firstDayWeek}) 〜 ${format(lastDay, 'yyyy/MM/dd')} (${lastDayWeek})`
+      };
+    }
+    
+    case 'as_needed':
+      return {
+        label: '必要時',
+        period: '必要に応じて実施'
+      };
+      
+    default:
+      return {
+        label: '',
+        period: ''
+      };
+  }
 };
 
 export default function EquipmentDashboardClient() {
@@ -373,7 +484,9 @@ export default function EquipmentDashboardClient() {
             .from('equipment_maintenance_records')
             .select(`
               *,
-              profiles(fullname)
+              performer:profiles(fullname),
+              verifier:profiles(fullname),
+              approver:profiles(fullname)
             `)
             .in('equipment_id', equipmentIds)
             .order('performed_at', { ascending: false });
@@ -386,7 +499,9 @@ export default function EquipmentDashboardClient() {
           // 点検記録一覧用のデータを設定
           const formattedRecords: MaintenanceRecord[] = recordsData ? recordsData.map(record => ({
             ...record,
-            performer_name: record.profiles?.fullname || '',
+            performer_name: record.performer?.fullname || '',
+            verifier_name: record.verifier?.fullname || '',
+            approver_name: record.approver?.fullname || '',
           })) : [];
           
           setMaintenanceRecords(formattedRecords);
@@ -398,7 +513,8 @@ export default function EquipmentDashboardClient() {
               ...item,
               lastCheckDate: lastRecord?.performed_at || null,
               lastCheckResult: lastRecord ? lastRecord.result : null,
-              isOverdue: isCheckOverdue(lastRecord?.performed_at || null, item.frequency)
+              isOverdue: isCheckOverdue(lastRecord?.performed_at || null, item.frequency),
+              isPeriodCompleted: isCurrentPeriodCompleted(lastRecord?.performed_at || null, item.frequency)
             };
           }) : [];
           
@@ -967,6 +1083,11 @@ export default function EquipmentDashboardClient() {
                     )}
                   </div>
                   <p className="text-sm text-muted-foreground mt-1">{info.description}</p>
+                  <div className="text-sm mt-2 bg-gray-50 p-2 rounded border border-gray-200">
+                    <span className="font-medium">{getCurrentPeriodInfo(frequency).label}の点検期間: </span>
+                    {getCurrentPeriodInfo(frequency).period}
+                    <span className="text-muted-foreground ml-2">（この期間の記録を行います）</span>
+                  </div>
                 </div>
                 <Button
                   variant="ghost"
@@ -1102,7 +1223,9 @@ export default function EquipmentDashboardClient() {
                             <div 
                               key={item.id} 
                               className={`p-2 rounded-md flex justify-between items-center ${
-                                item.isOverdue ? 'bg-amber-50 border border-amber-200' : 'bg-white border'
+                                item.isOverdue ? 'bg-amber-50 border border-amber-200' : 
+                                item.isPeriodCompleted ? 'bg-green-50 border border-green-200' : 
+                                'bg-white border'
                               }`}
                             >
                               <div className="flex items-center space-x-3">
@@ -1119,6 +1242,29 @@ export default function EquipmentDashboardClient() {
                                 <Label htmlFor={`freq-check-${item.id}`} className="flex-grow cursor-pointer">
                                   <div className="flex items-center gap-2">
                                     <span className="font-medium">{item.name}</span>
+                                    <Badge className="text-xs">{frequencyToJapanese(item.frequency)}</Badge>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Badge className="text-xs bg-blue-50 text-blue-700 border-blue-200 cursor-help">
+                                          期間情報
+                                        </Badge>
+                                      </TooltipTrigger>
+                                      <TooltipContent className="bg-white text-black border border-gray-200 p-2 rounded shadow-md">
+                                        <p className="font-medium">{frequencyToJapanese(item.frequency)}点検の現在期間</p>
+                                        <p>{getCurrentPeriodInfo(item.frequency).period}</p>
+                                        <p className="text-xs text-muted-foreground mt-1">この期間内の記録を行います</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                    {item.isPeriodCompleted ? (
+                                      <div className="flex items-center gap-1">
+                                        <Badge variant="outline" className="bg-green-100 text-green-700 border-green-300 text-xs">
+                                          完了済み
+                                        </Badge>
+                                        <Badge variant="outline" className="text-xs">
+                                          追加入力可
+                                        </Badge>
+                                      </div>
+                                    ) : null}
                                   </div>
                                   <div className="text-sm text-muted-foreground mt-1 flex items-center gap-4">
                                     <span className="flex items-center">
@@ -1132,6 +1278,41 @@ export default function EquipmentDashboardClient() {
                                         </span>
                                         結果: {item.lastCheckResult ? '正常' : '異常'}
                                       </span>
+                                    )}
+                                    {maintenanceRecords.some(r => r.check_item_id === item.id) && (
+                                      <TooltipProvider>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <Button variant="ghost" size="icon" className="h-6 w-6 ml-2">
+                                              <History className="h-4 w-4 text-gray-500" />
+                                            </Button>
+                                          </TooltipTrigger>
+                                          <TooltipContent className="max-w-sm p-2 bg-white text-black border border-gray-200 rounded shadow-lg">
+                                            <div className="text-sm font-medium mb-1">点検履歴</div>
+                                            <div className="max-h-40 overflow-y-auto">
+                                              {maintenanceRecords
+                                                .filter(r => r.check_item_id === item.id)
+                                                .slice(0, 5)
+                                                .map((record, idx) => (
+                                                  <div key={idx} className="py-1 border-b last:border-b-0">
+                                                    <div className="flex justify-between">
+                                                      <span>{format(new Date(record.performed_at), 'yyyy/MM/dd HH:mm')}</span>
+                                                      <span className={record.result ? 'text-green-600' : 'text-red-600'}>
+                                                        {record.result ? '正常' : '異常'}
+                                                      </span>
+                                                    </div>
+                                                    {record.comment && (
+                                                      <div className="text-xs text-gray-600 mt-1">{record.comment}</div>
+                                                    )}
+                                                  </div>
+                                              ))}
+                                              {maintenanceRecords.filter(r => r.check_item_id === item.id).length > 5 && (
+                                                <div className="text-xs text-center mt-1 text-blue-500">他にも記録があります</div>
+                                              )}
+                                            </div>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
                                     )}
                                   </div>
                                 </Label>
@@ -1412,7 +1593,16 @@ export default function EquipmentDashboardClient() {
                 {cellData.result === true ? (
                   <Check className="h-4 w-4 text-green-500 inline-block" />
                 ) : cellData.result === false ? (
-                  <X className="h-4 w-4 text-red-500 inline-block" />
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <X className="h-4 w-4 text-red-500 inline-block cursor-pointer" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs p-2 bg-white text-black border border-black rounded shadow-lg">
+                        <p>{cellData.comment || "コメントはありません"}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 ) : (
                   <span className="text-gray-300 text-sm">-</span>
                 )}
@@ -1444,7 +1634,11 @@ export default function EquipmentDashboardClient() {
             const key = `${recordDateStr}_${record.check_item_id}`;
             // 同じ日に複数記録がある場合、最新を優先 (既に降順でソートされている想定)
             if (!recordsMap.has(key)) {
-              recordsMap.set(key, { result: record.result, recordId: record.id });
+              recordsMap.set(key, { 
+                result: record.result, 
+                recordId: record.id,
+                comment: record.comment // コメント情報を追加
+              });
             }
         }
       } catch (e) {
@@ -1563,360 +1757,714 @@ export default function EquipmentDashboardClient() {
     setIsSubmitModalOpen(true);
   };
 
-  return (
-    <div className="min-h-screen bg-white">
-      <AppHeader 
-        title="Equipment Manager" 
-        showBackButton={true}
-        icon={<Wrench className="h-6 w-6 text-emerald-500" />}
-      />
+  // 承認一覧の表示状態
+  const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>({});
+  const [showApprovalSection, setShowApprovalSection] = useState(false);
 
-      <div className="container py-6 max-w-7xl mx-auto px-4">
-        {/* 通知エリア */}
-        {notifications.length > 0 && (
-          <div className="w-full mb-6">
-            <div className="p-4 border border-yellow-300 bg-yellow-50 rounded-md">
-              <h3 className="text-lg font-semibold text-yellow-800 mb-2 text-left">
-                <AlertTriangle className="inline-block mr-2 h-5 w-5" />
-                通知 ({notifications.length}件)
-              </h3>
-              <div className="max-h-40 overflow-y-auto">
-                <ul className="list-disc pl-5 text-left">
-                  {notifications.map((notification) => (
-                    <li key={`notification-${notification.id}`} className="text-sm text-yellow-700 mb-1">
-                      {notification.message}
-                      {isClient && (
-                      <span className="text-xs text-muted-foreground ml-2">
-                          {formatNotificationDate(notification.timestamp)}
-                      </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+  // 承認データを年月ごとにグループ化する
+  const groupedMonthlyRecords = useMemo(() => {
+    const grouped: Record<string, MaintenanceRecord[]> = {};
+    
+    maintenanceRecords.forEach(record => {
+      try {
+        const date = new Date(record.performed_at);
+        const yearMonth = format(date, 'yyyy-MM');
+        
+        if (!grouped[yearMonth]) {
+          grouped[yearMonth] = [];
+        }
+        
+        grouped[yearMonth].push(record);
+      } catch (e) {
+        console.error("Error grouping record by month:", record.performed_at, e);
+      }
+    });
+    
+    // 日付順（降順）でソート
+    return Object.keys(grouped)
+      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
+      .reduce((result, key) => {
+        result[key] = grouped[key];
+        return result;
+      }, {} as Record<string, MaintenanceRecord[]>);
+  }, [maintenanceRecords]);
+
+  // 月の展開/折りたたみを切り替える
+  const toggleMonth = (month: string) => {
+    setExpandedMonths(prev => ({
+      ...prev,
+      [month]: !prev[month]
+    }));
+  };
+
+  // 月別レコードの承認状態
+  const getMonthStatus = (records: MaintenanceRecord[]) => {
+    if (records.length === 0) return { verified: false, approved: false };
+    
+    const allVerified = records.every(r => r.status === 'verified' || r.status === 'approved');
+    const allApproved = records.every(r => r.status === 'approved');
+    
+    return { verified: allVerified, approved: allApproved };
+  };
+
+  // 承認処理
+  const handleVerify = async (month: string) => {
+    if (!user) return;
+    
+    try {
+      const recordsToUpdate = groupedMonthlyRecords[month]
+        .filter(r => r.status === 'pending')
+        .map(r => r.id);
+        
+      if (recordsToUpdate.length === 0) return;
+      
+      const { error } = await supabase
+        .from('equipment_maintenance_records')
+        .update({
+          verified_by: user.id,
+          verified_at: new Date().toISOString(),
+          status: 'verified'
+        })
+        .in('id', recordsToUpdate);
+        
+      if (error) throw error;
+      
+      // 画面を更新
+      window.location.reload();
+    } catch (error) {
+      console.error('確認処理エラー:', error);
+      alert('確認処理に失敗しました');
+    }
+  };
+
+  // 承認処理
+  const handleApprove = async (month: string) => {
+    if (!user) return;
+    
+    try {
+      const recordsToUpdate = groupedMonthlyRecords[month]
+        .filter(r => r.status === 'verified')
+        .map(r => r.id);
+        
+      if (recordsToUpdate.length === 0) return;
+      
+      const { error } = await supabase
+        .from('equipment_maintenance_records')
+        .update({
+          approved_by: user.id,
+          approved_at: new Date().toISOString(),
+          status: 'approved'
+        })
+        .in('id', recordsToUpdate);
+        
+      if (error) throw error;
+      
+      // 画面を更新
+      window.location.reload();
+    } catch (error) {
+      console.error('承認処理エラー:', error);
+      alert('承認処理に失敗しました');
+    }
+  };
+
+  // 承認セクションの表示期間
+  const [approvalMonthsCount, setApprovalMonthsCount] = useState<number>(3);
+
+  return (
+    <TooltipProvider>
+      <div className="min-h-screen bg-white">
+        <AppHeader 
+          title="Equipment Manager" 
+          showBackButton={true}
+          icon={<Wrench className="h-6 w-6 text-emerald-500" />}
+        />
+
+        <div className="container py-6 max-w-7xl mx-auto px-4">
+          {/* 通知エリア */}
+          {notifications.length > 0 && (
+            <div className="w-full mb-6">
+              <div className="p-4 border border-yellow-300 bg-yellow-50 rounded-md">
+                <h3 className="text-lg font-semibold text-yellow-800 mb-2 text-left">
+                  <AlertTriangle className="inline-block mr-2 h-5 w-5" />
+                  通知 ({notifications.length}件)
+                </h3>
+                <div className="max-h-40 overflow-y-auto">
+                  <ul className="list-disc pl-5 text-left">
+                    {notifications.map((notification) => (
+                      <li key={`notification-${notification.id}`} className="text-sm text-yellow-700 mb-1">
+                        {notification.message}
+                        {isClient && (
+                        <span className="text-xs text-muted-foreground ml-2">
+                            {formatNotificationDate(notification.timestamp)}
+                        </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-        
-        {/* ユーザー情報表示 */}
-        <div className="w-full mb-4">
-          <div className="text-right">
-            {facilityName && (
-              <p className="text-sm text-gray-600">
-                施設「{facilityName}」
-              </p>
-            )}
-            {currentUserName && (
-              <p className="text-sm text-gray-600">
-                {currentUserName}さんがログインしています
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* ヘッダー部分 */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-primary mb-2">Equipment Dashboard</h1>
-            <p className="text-muted-foreground">
-              {selectedDepartmentId === 'all' 
-                ? '全部署' 
-                : departments.find(d => d.id === selectedDepartmentId)?.name || departmentName}
-              の機器管理・点検記録
-            </p>
-          </div>
+          )}
           
-          <div className="flex flex-col sm:flex-row gap-2">
-            {/* 手動更新ボタンを追加 */}
-            <Button 
-              variant="outline"
-              onClick={handleManualRefresh}
-              disabled={isLoading}
-              className="mr-2"
-            >
-              <RefreshCw className="mr-2 h-4 w-4" />
-              データ更新
-            </Button>
-            <Button 
-              onClick={() => router.push(`/equipment_dash/new?department=${encodeURIComponent(departmentName)}&departmentId=${encodeURIComponent(selectedDepartmentId !== 'all' ? selectedDepartmentId : departmentId)}`)}
-              className="bg-primary hover:bg-primary/90 text-white"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              新規機器登録
-            </Button>
+          {/* ユーザー情報表示 */}
+          <div className="w-full mb-4">
+            <div className="text-right">
+              {facilityName && (
+                <p className="text-sm text-gray-600">
+                  施設「{facilityName}」
+                </p>
+              )}
+              {currentUserName && (
+                <p className="text-sm text-gray-600">
+                  {currentUserName}さんがログインしています
+                </p>
+              )}
+            </div>
           </div>
-        </div>
-        
-        {/* ★ 表示モード切替タブ (これがメインのタブになる) */}
-        <Tabs defaultValue="table" className="mb-6" value={viewMode} onValueChange={(value) => setViewMode(value as ViewMode)}>
-          <TabsList className="grid w-full grid-cols-3 mb-4">
-            <TabsTrigger value="table" className="text-base py-3">
-              <TableIcon className="mr-2 h-4 w-4" />
-              テーブル表示
-            </TabsTrigger>
-            <TabsTrigger value="equipment" className="text-base py-3">
-              <List className="mr-2 h-4 w-4" />
-              機器別表示
-            </TabsTrigger>
-            <TabsTrigger value="frequency" className="text-base py-3">
-              <Grid className="mr-2 h-4 w-4" />
-              頻度別表示
-            </TabsTrigger>
-          </TabsList>
-          
-          {/* === テーブル表示モード === */}
-          <TabsContent value="table" className="mt-4">
-            {renderTableContent()}
-          </TabsContent>
 
-          {/* === 機器別表示モード === */}
-          <TabsContent value="equipment" className="mt-4">
-            {/* ★★★ 部署全体操作ボタンと展開ボタンをこのタブ内に移動 ★★★ */}
-            <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3">
-              <div className="flex items-center gap-2">
-                {/* 部署の全選択/解除ボタン */} 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleSelectAllDepartmentChecks(true)}
-                  disabled={isLoading || isSubmittingAllDepartment}
-                >
-                  部署の全項目を選択
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleSelectAllDepartmentChecks(false)}
-                  disabled={isLoading || isSubmittingAllDepartment}
-                >
-                  部署の全選択を解除
-                </Button>
-                {/* すべて展開/閉じるボタン */} 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => toggleAllEquipment()}
-                  disabled={isLoading}
-                  className="ml-auto" // 右寄せにする
-                >
-                  {isAllExpanded ? 'すべて閉じる' : 'すべて展開'}
-                </Button>
-              </div>
-              {/* 部署全体の一括実施ボタン */}
-              <Button
-                onClick={() => handleOpenSubmitModal()}
-                disabled={isLoading || isLoadingSubmit || isSubmittingAllDepartment || selectedCheckItemIds.size === 0 || !Array.from(selectedCheckItemIds).some(id => filteredEquipment.some(eq => eq.checkItems?.some(item => item.id === id))) }
-                className="bg-primary hover:bg-primary/90 text-white w-full sm:w-auto"
+          {/* ヘッダー部分 */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+            <div>
+              <h1 className="text-2xl font-bold text-primary mb-2">Equipment Dashboard</h1>
+              <p className="text-muted-foreground">
+                {selectedDepartmentId === 'all' 
+                  ? '全部署' 
+                  : departments.find(d => d.id === selectedDepartmentId)?.name || departmentName}
+                の機器管理・点検記録
+              </p>
+            </div>
+            
+            <div className="flex flex-col sm:flex-row gap-2">
+              {/* 手動更新ボタンを追加 */}
+              <Button 
+                variant="outline"
+                onClick={handleManualRefresh}
+                disabled={isLoading}
+                className="mr-2"
               >
-                {isSubmittingAllDepartment ? '処理中...' : `選択中の全 ${Array.from(selectedCheckItemIds).filter(id => filteredEquipment.some(eq => eq.checkItems?.some(item => item.id === id))).length} 項目を確認/記録`}
+                <RefreshCw className="mr-2 h-4 w-4" />
+                データ更新
+              </Button>
+              <Button 
+                onClick={() => router.push(`/equipment_dash/new?department=${encodeURIComponent(departmentName)}&departmentId=${encodeURIComponent(selectedDepartmentId !== 'all' ? selectedDepartmentId : departmentId)}`)}
+                className="font-semibold bg-gradient-to-r from-pink-200 to-purple-300 hover:from-pink-300 hover:to-purple-400 text-white shadow-md"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                新規機器登録
               </Button>
             </div>
-
-            {isLoading ? (
-              <div className="flex justify-center items-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-              </div>
-            ) : filteredEquipment.length === 0 ? (
-              <div className="bg-white rounded-lg border shadow-sm p-12 text-center">
-                <p className="text-muted-foreground mb-4">検索条件に一致する機器がありません</p>
-                <Button variant="outline" onClick={() => { setSearchQuery(''); setShowOverdueOnly(false); }}>
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  検索条件をリセット
-                </Button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-4">
-                {filteredEquipment.map((equipment) => (
-                  <Card key={equipment.id} className={`overflow-hidden ${equipment.pendingChecks! > 0 ? 'border-amber-300' : ''}`}>
-                    <CardHeader className="bg-white p-4 cursor-pointer" onClick={() => toggleEquipment(equipment.id)}>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Wrench className="h-5 w-5 text-primary" />
-                          <CardTitle className="text-lg font-semibold">{equipment.name}</CardTitle>
-                          {equipment.pendingChecks! > 0 && (
-                            <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300">
-                              期限切れ: {equipment.pendingChecks}項目
-                            </Badge>
-                          )}
-                        </div>
-                        
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm text-muted-foreground">{equipment.department_name}</p>
-                          <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); toggleEquipment(equipment.id); }}>
-                            {expandedEquipment[equipment.id] ? (
-                              <ChevronUp className="h-5 w-5 text-muted-foreground" />
-                            ) : (
-                              <ChevronDown className="h-5 w-5 text-muted-foreground" />
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    
-                    {expandedEquipment[equipment.id] && (
-                      <CardContent className="p-0">
-                        <div className="p-4 bg-gray-50">
-                          {equipment.description && (
-                            <p className="text-sm text-muted-foreground mb-2">{equipment.description}</p>
-                          )}
-                          
-                          <div className="flex justify-between items-center mb-2">
-                            <h3 className="font-medium">点検項目</h3>
-                            {equipment.checkItems && equipment.checkItems.length > 0 && (
-                              <div className="flex gap-2">
+          </div>
+          
+          {/* 承認一覧セクション - 位置を変更 */}
+          <div className="mb-6">
+            <div 
+              className="flex items-center justify-between py-2 px-4 bg-muted rounded-t-lg cursor-pointer"
+              onClick={() => setShowApprovalSection(!showApprovalSection)}
+            >
+              <h3 className="text-lg font-medium">機器メンテナンス確認・承認</h3>
+              <ChevronDown className={`h-5 w-5 transition-transform ${showApprovalSection ? 'transform rotate-180' : ''}`} />
+            </div>
+            
+            {showApprovalSection && (
+              <div className="border border-t-0 rounded-b-lg p-4 bg-background">
+                <div className="flex items-center justify-between mb-4">
+                  <p className="text-sm text-muted-foreground">
+                    月別メンテナンス記録の確認・承認状況を表示しています
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm">表示期間:</span>
+                    <Select 
+                      value={approvalMonthsCount.toString()} 
+                      onValueChange={(value) => setApprovalMonthsCount(parseInt(value))}
+                    >
+                      <SelectTrigger className="w-[120px] h-8">
+                        <SelectValue placeholder="表示期間" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="3">過去3ヶ月</SelectItem>
+                        <SelectItem value="6">過去6ヶ月</SelectItem>
+                        <SelectItem value="12">過去12ヶ月</SelectItem>
+                        <SelectItem value="24">過去24ヶ月</SelectItem>
+                        <SelectItem value="0">全期間</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                
+                {Object.keys(groupedMonthlyRecords).slice(0, approvalMonthsCount || Object.keys(groupedMonthlyRecords).length).length === 0 ? (
+                  <p className="text-center py-4 text-muted-foreground">対象期間に記録がありません</p>
+                ) : (
+                  <div className="space-y-2">
+                    {Object.keys(groupedMonthlyRecords)
+                      .slice(0, approvalMonthsCount || Object.keys(groupedMonthlyRecords).length)
+                      .map(month => {
+                      const records = groupedMonthlyRecords[month];
+                      const { verified, approved } = getMonthStatus(records);
+                      const isExpanded = expandedMonths[month] || false;
+                      
+                      return (
+                        <div key={month} className="border rounded-lg">
+                          <div 
+                            className="flex items-center justify-between p-3 cursor-pointer"
+                            onClick={() => toggleMonth(month)}
+                          >
+                            <div className="flex items-center space-x-2">
+                              <h4 className="font-medium">{format(new Date(month), 'yyyy年M月')}</h4>
+                              <Badge variant={approved ? "default" : verified ? "outline" : "destructive"}>
+                                {approved ? "承認済" : verified ? "確認済" : "未確認"}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center">
+                              {!verified && profile?.role === 'manager' && (
                                 <Button 
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={(e) => { e.stopPropagation(); handleSelectAllChecks(equipment.id, true); }}
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="mr-2"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleVerify(month);
+                                  }}
                                 >
-                                  すべて選択
+                                  確認
                                 </Button>
+                              )}
+                              {verified && !approved && profile?.role === 'admin' && (
                                 <Button 
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={(e) => { e.stopPropagation(); handleSelectAllChecks(equipment.id, false); }}
+                                  variant="default" 
+                                  size="sm" 
+                                  className="mr-2"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleApprove(month);
+                                  }}
                                 >
-                                  すべて解除
+                                  承認
                                 </Button>
-                              </div>
-                            )}
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => router.push(`/equipment_dash/edit/${equipment.id}`)}
-                            >
-                              <Settings className="mr-1 h-4 w-4" />
-                              編集
-                            </Button>
+                              )}
+                              <ChevronDown className={`h-5 w-5 transition-transform ${isExpanded ? 'transform rotate-180' : ''}`} />
+                            </div>
                           </div>
                           
-                          {equipment.checkItems && equipment.checkItems.length > 0 ? (
-                            <div className="space-y-2">
-                              {equipment.checkItems.map((item) => (
-                                <div 
-                                  key={item.id} 
-                                  className={`p-3 rounded-md flex justify-between items-center ${
-                                    item.isOverdue ? 'bg-amber-50 border border-amber-200' : 'bg-white border'
-                                  }`}
-                                >
-                                  <div className="flex items-center space-x-3">
-                                    <Checkbox 
-                                      id={`check-${item.id}`}
-                                      checked={selectedCheckItemIds.has(item.id)}
-                                      onCheckedChange={(checkedState) => {
-                                        if (typeof checkedState === 'boolean') {
-                                          handleCheckboxChange(item.id, checkedState);
-                                        }
-                                      }}
-                                      aria-label={`Select ${item.name}`}
-                                    />
-                                    <Label htmlFor={`check-${item.id}`} className="flex-grow cursor-pointer">
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-medium">{item.name}</span>
-                                        <Badge className="text-xs">{frequencyToJapanese(item.frequency)}</Badge>
-                                      </div>
-                                      <div className="text-sm text-muted-foreground mt-1 flex items-center gap-4">
-                                        <span className="flex items-center">
-                                          <Calendar className="h-3.5 w-3.5 mr-1" />
-                                          最終点検: {formatDateTime(item.lastCheckDate ?? null)}
-                                        </span>
-                                        {item.lastCheckResult !== null && (
-                                          <span className="flex items-center">
-                                            <span className={`mr-1 flex items-center justify-center w-4 h-4 rounded-full ${item.lastCheckResult ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                              {item.lastCheckResult ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
-                                            </span>
-                                            結果: {item.lastCheckResult ? '正常' : '異常'}
-                                          </span>
+                          {isExpanded && (
+                            <div className="p-3 border-t">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>日付</TableHead>
+                                    <TableHead>機器名</TableHead>
+                                    <TableHead>点検項目</TableHead>
+                                    <TableHead>担当者</TableHead>
+                                    <TableHead>結果</TableHead>
+                                    <TableHead>状態</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {records.map(record => (
+                                    <TableRow key={record.id}>
+                                      <TableCell>{format(new Date(record.performed_at), 'yyyy/MM/dd')}</TableCell>
+                                      <TableCell>{record.equipment_name}</TableCell>
+                                      <TableCell>{record.check_item_name}</TableCell>
+                                      <TableCell>{record.performer_name}</TableCell>
+                                      <TableCell>
+                                        {record.result ? (
+                                          <Badge variant="default">OK</Badge>
+                                        ) : (
+                                          <Badge variant="destructive">NG</Badge>
                                         )}
-                                      </div>
-                                    </Label>
-                                  </div>
-                                </div>
-                              ))}
-                              <div className="mt-4 flex justify-end">
-                                <Button
-                                  onClick={(e) => { e.stopPropagation(); handleOpenSubmitModal(equipment.id); }}
-                                  disabled={isLoadingSubmit || !Array.from(selectedCheckItemIds).some(id => equipment.checkItems?.some(item => item.id === id))}
-                                  className="bg-secondary hover:bg-secondary/90 text-secondary-foreground"
-                                  size="sm"
-                                >
-                                  {`この機器で選択した ${Array.from(selectedCheckItemIds).filter(id => equipment.checkItems?.some(item => item.id === id)).length} 項目を確認/記録`}
-                                </Button>
-                              </div>
+                                      </TableCell>
+                                      <TableCell>
+                                        {record.status === 'approved' ? (
+                                          <div className="text-sm">
+                                            <Badge variant="default">承認済</Badge>
+                                            <div className="text-xs text-muted-foreground mt-1">
+                                              {record.approver_name} ({format(new Date(record.approved_at!), 'MM/dd')})
+                                            </div>
+                                          </div>
+                                        ) : record.status === 'verified' ? (
+                                          <div className="text-sm">
+                                            <Badge variant="outline">確認済</Badge>
+                                            <div className="text-xs text-muted-foreground mt-1">
+                                              {record.verifier_name} ({format(new Date(record.verified_at!), 'MM/dd')})
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <Badge variant="outline">未確認</Badge>
+                                        )}
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
                             </div>
-                          ) : (
-                            <p className="text-center text-muted-foreground py-4">
-                              点検項目が登録されていません
-                            </p>
                           )}
                         </div>
-                      </CardContent>
-                    )}
-                  </Card>
-                ))}
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
-          </TabsContent>
+          </div>
           
-          {/* === 頻度別表示モード === */}
-          <TabsContent value="frequency" className="mt-4">
-            {renderFrequencyContent()}
-          </TabsContent>
-        </Tabs>
+          {/* ★ 表示モード切替タブ (これがメインのタブになる) */}
+          <Tabs defaultValue="table" className="mb-6" value={viewMode} onValueChange={(value) => setViewMode(value as ViewMode)}>
+            <TabsList className="grid w-full grid-cols-3 mb-4">
+              <TabsTrigger value="table" className="text-base py-3">
+                <TableIcon className="mr-2 h-4 w-4" />
+                テーブル表示
+              </TabsTrigger>
+              <TabsTrigger value="equipment" className="text-base py-3">
+                <List className="mr-2 h-4 w-4" />
+                機器別表示
+              </TabsTrigger>
+              <TabsTrigger value="frequency" className="text-base py-3">
+                <Grid className="mr-2 h-4 w-4" />
+                頻度別表示
+              </TabsTrigger>
+            </TabsList>
+            
+            {/* === テーブル表示モード === */}
+            <TabsContent value="table" className="mt-4">
+              {renderTableContent()}
+            </TabsContent>
 
-        {/* ★ 点検結果確認モーダル */} 
-        <Dialog open={isSubmitModalOpen} onOpenChange={setIsSubmitModalOpen}>
-          <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
-            <DialogHeader>
-              <DialogTitle>点検結果の確認・記録</DialogTitle>
-            </DialogHeader>
-            <div className="flex-grow overflow-y-auto pr-6 space-y-4">
-              {modalData.map((item) => (
-                <div key={item.id} className="p-4 border rounded-md bg-white">
-                  <p className="font-medium mb-2">{item.name} <span className="text-sm text-muted-foreground">({frequencyToJapanese(item.frequency)})</span></p>
-                  <RadioGroup 
-                    defaultValue="true" 
-                    value={item.submitResult.toString()} 
-                    onValueChange={(value: string) => handleModalDataChange(item.id, 'submitResult', value === 'true')}
-                    className="flex gap-4 mb-2"
+            {/* === 機器別表示モード === */}
+            <TabsContent value="equipment" className="mt-4">
+              {/* ★★★ 部署全体操作ボタンと展開ボタンをこのタブ内に移動 ★★★ */}
+              <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-3">
+                <div className="flex items-center gap-2">
+                  {/* 部署の全選択/解除ボタン */} 
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleSelectAllDepartmentChecks(true)}
+                    disabled={isLoading || isSubmittingAllDepartment}
                   >
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="true" id={`result-ok-${item.id}`} />
-                      <Label htmlFor={`result-ok-${item.id}`} className="text-green-700">正常</Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="false" id={`result-ng-${item.id}`} />
-                      <Label htmlFor={`result-ng-${item.id}`} className="text-red-700">異常</Label>
-                    </div>
-                  </RadioGroup>
-                  {item.submitResult === false && (
-                    <Textarea 
-                      placeholder="異常内容や対応を入力してください" 
-                      value={item.submitComment || ''}
-                      onChange={(e) => handleModalDataChange(item.id, 'submitComment', e.target.value)}
-                      className="mt-2"
-                      rows={3}
-                    />
-                  )}
+                    部署の全項目を選択
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleSelectAllDepartmentChecks(false)}
+                    disabled={isLoading || isSubmittingAllDepartment}
+                  >
+                    部署の全選択を解除
+                  </Button>
+                  {/* すべて展開/閉じるボタン */} 
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => toggleAllEquipment()}
+                    disabled={isLoading}
+                    className="ml-auto" // 右寄せにする
+                  >
+                    {isAllExpanded ? 'すべて閉じる' : 'すべて展開'}
+                  </Button>
                 </div>
-              ))}
-            </div>
-            <DialogFooter className="mt-4">
-              <DialogClose asChild>
-                <Button variant="outline">キャンセル</Button>
-              </DialogClose>
-              <Button 
-                onClick={handleSubmitFromModal}
-                disabled={isLoadingSubmit || isSubmittingAllDepartment}
-                className="bg-primary hover:bg-primary/90 text-white"
-              >
-                {isSubmittingAllDepartment ? '処理中...' : `${modalData.length}件の記録を実行`}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+                {/* 部署全体の一括実施ボタン */}
+                <Button
+                  onClick={() => handleOpenSubmitModal()}
+                  disabled={isLoading || isLoadingSubmit || isSubmittingAllDepartment || selectedCheckItemIds.size === 0 || !Array.from(selectedCheckItemIds).some(id => filteredEquipment.some(eq => eq.checkItems?.some(item => item.id === id))) }
+                  className="bg-primary hover:bg-primary/90 text-white w-full sm:w-auto"
+                >
+                  {isSubmittingAllDepartment ? '処理中...' : `選択中の全 ${Array.from(selectedCheckItemIds).filter(id => filteredEquipment.some(eq => eq.checkItems?.some(item => item.id === id))).length} 項目を確認/記録`}
+                </Button>
+              </div>
 
+              {isLoading ? (
+                <div className="flex justify-center items-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+                </div>
+              ) : filteredEquipment.length === 0 ? (
+                <div className="bg-white rounded-lg border shadow-sm p-12 text-center">
+                  <p className="text-muted-foreground mb-4">検索条件に一致する機器がありません</p>
+                  <Button variant="outline" onClick={() => { setSearchQuery(''); setShowOverdueOnly(false); }}>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    検索条件をリセット
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4">
+                  {filteredEquipment.map((equipment) => (
+                    <Card key={equipment.id} className={`overflow-hidden ${equipment.pendingChecks! > 0 ? 'border-amber-300' : ''}`}>
+                      <CardHeader className="bg-white p-4 cursor-pointer" onClick={() => toggleEquipment(equipment.id)}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Wrench className="h-5 w-5 text-primary" />
+                            <CardTitle className="text-lg font-semibold">{equipment.name}</CardTitle>
+                            {equipment.pendingChecks! > 0 && (
+                              <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300">
+                                期限切れ: {equipment.pendingChecks}項目
+                              </Badge>
+                            )}
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm text-muted-foreground">{equipment.department_name}</p>
+                            <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); toggleEquipment(equipment.id); }}>
+                              {expandedEquipment[equipment.id] ? (
+                                <ChevronUp className="h-5 w-5 text-muted-foreground" />
+                              ) : (
+                                <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      
+                      {expandedEquipment[equipment.id] && (
+                        <CardContent className="p-0">
+                          <div className="p-4 bg-gray-50">
+                            {equipment.description && (
+                              <p className="text-sm text-muted-foreground mb-2">{equipment.description}</p>
+                            )}
+                            
+                            {/* 頻度ごとの期間情報表示 */}
+                            {equipment.checkItems && equipment.checkItems.length > 0 && (
+                              <div className="mb-4 p-3 bg-white rounded border border-gray-200">
+                                <h4 className="font-medium mb-2">点検期間情報</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                  {Object.entries(groupCheckItemsByFrequency(equipment.checkItems)).map(([freq, items]) => (
+                                    <div key={freq} className="text-sm bg-gray-50 p-2 rounded border border-gray-200">
+                                      <span className="font-medium">{frequencyToJapanese(freq)}点検: </span>
+                                      <span className="text-blue-600">{getCurrentPeriodInfo(freq).period}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            
+                            <div className="flex justify-between items-center mb-2">
+                              <h3 className="font-medium">点検項目</h3>
+                              {equipment.checkItems && equipment.checkItems.length > 0 && (
+                                <div className="flex gap-2">
+                                  <Button 
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={(e) => { e.stopPropagation(); handleSelectAllChecks(equipment.id, true); }}
+                                  >
+                                    すべて選択
+                                  </Button>
+                                  <Button 
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={(e) => { e.stopPropagation(); handleSelectAllChecks(equipment.id, false); }}
+                                  >
+                                    すべて解除
+                                  </Button>
+                                </div>
+                              )}
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => router.push(`/equipment_dash/edit/${equipment.id}`)}
+                              >
+                                <Settings className="mr-1 h-4 w-4" />
+                                編集
+                              </Button>
+                            </div>
+                            
+                            {equipment.checkItems && equipment.checkItems.length > 0 ? (
+                              <div className="space-y-2">
+                                {equipment.checkItems.map((item) => (
+                                  <div 
+                                    key={item.id} 
+                                    className={`p-3 rounded-md flex justify-between items-center ${
+                                      item.isOverdue ? 'bg-amber-50 border border-amber-200' : 
+                                      item.isPeriodCompleted ? 'bg-green-50 border border-green-200' : 
+                                      'bg-white border'
+                                    }`}
+                                  >
+                                    <div className="flex items-center space-x-3">
+                                      <Checkbox 
+                                        id={`check-${item.id}`}
+                                        checked={selectedCheckItemIds.has(item.id)}
+                                        onCheckedChange={(checkedState) => {
+                                          if (typeof checkedState === 'boolean') {
+                                            handleCheckboxChange(item.id, checkedState);
+                                          }
+                                        }}
+                                        aria-label={`Select ${item.name}`}
+                                      />
+                                      <Label htmlFor={`check-${item.id}`} className="flex-grow cursor-pointer">
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-medium">{item.name}</span>
+                                          <Badge className="text-xs">{frequencyToJapanese(item.frequency)}</Badge>
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <Badge className="text-xs bg-blue-50 text-blue-700 border-blue-200 cursor-help">
+                                                期間情報
+                                              </Badge>
+                                            </TooltipTrigger>
+                                            <TooltipContent className="bg-white text-black border border-gray-200 p-2 rounded shadow-md">
+                                              <p className="font-medium">{frequencyToJapanese(item.frequency)}点検の現在期間</p>
+                                              <p>{getCurrentPeriodInfo(item.frequency).period}</p>
+                                              <p className="text-xs text-muted-foreground mt-1">この期間内の記録を行います</p>
+                                            </TooltipContent>
+                                          </Tooltip>
+                                          {item.isPeriodCompleted ? (
+                                            <div className="flex items-center gap-1">
+                                              <Badge variant="outline" className="bg-green-100 text-green-700 border-green-300 text-xs">
+                                                完了済み
+                                              </Badge>
+                                              <Badge variant="outline" className="text-xs">
+                                                追加入力可
+                                              </Badge>
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                        <div className="text-sm text-muted-foreground mt-1 flex items-center gap-4">
+                                          <span className="flex items-center">
+                                            <Calendar className="h-3.5 w-3.5 mr-1" />
+                                            最終点検: {formatDateTime(item.lastCheckDate ?? null)}
+                                          </span>
+                                          {item.lastCheckResult !== null && (
+                                            <span className="flex items-center">
+                                              <span className={`mr-1 flex items-center justify-center w-4 h-4 rounded-full ${item.lastCheckResult ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                {item.lastCheckResult ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                                              </span>
+                                              結果: {item.lastCheckResult ? '正常' : '異常'}
+                                            </span>
+                                          )}
+                                          {maintenanceRecords.some(r => r.check_item_id === item.id) && (
+                                            <TooltipProvider>
+                                              <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                  <Button variant="ghost" size="icon" className="h-6 w-6 ml-2">
+                                                    <History className="h-4 w-4 text-gray-500" />
+                                                  </Button>
+                                                </TooltipTrigger>
+                                                <TooltipContent className="max-w-sm p-2 bg-white text-black border border-gray-200 rounded shadow-lg">
+                                                  <div className="text-sm font-medium mb-1">点検履歴</div>
+                                                  <div className="max-h-40 overflow-y-auto">
+                                                    {maintenanceRecords
+                                                      .filter(r => r.check_item_id === item.id)
+                                                      .slice(0, 5)
+                                                      .map((record, idx) => (
+                                                        <div key={idx} className="py-1 border-b last:border-b-0">
+                                                          <div className="flex justify-between">
+                                                            <span>{format(new Date(record.performed_at), 'yyyy/MM/dd HH:mm')}</span>
+                                                            <span className={record.result ? 'text-green-600' : 'text-red-600'}>
+                                                              {record.result ? '正常' : '異常'}
+                                                            </span>
+                                                          </div>
+                                                          {record.comment && (
+                                                            <div className="text-xs text-gray-600 mt-1">{record.comment}</div>
+                                                          )}
+                                                        </div>
+                                                    ))}
+                                                    {maintenanceRecords.filter(r => r.check_item_id === item.id).length > 5 && (
+                                                      <div className="text-xs text-center mt-1 text-blue-500">他にも記録があります</div>
+                                                    )}
+                                                  </div>
+                                                </TooltipContent>
+                                              </Tooltip>
+                                            </TooltipProvider>
+                                          )}
+                                        </div>
+                                      </Label>
+                                    </div>
+                                  </div>
+                                ))}
+                                <div className="mt-4 flex justify-end">
+                                  <Button
+                                    onClick={(e) => { e.stopPropagation(); handleOpenSubmitModal(equipment.id); }}
+                                    disabled={isLoadingSubmit || !Array.from(selectedCheckItemIds).some(id => equipment.checkItems?.some(item => item.id === id))}
+                                    className="bg-secondary hover:bg-secondary/90 text-secondary-foreground"
+                                    size="sm"
+                                  >
+                                    {`この機器で選択した ${Array.from(selectedCheckItemIds).filter(id => equipment.checkItems?.some(item => item.id === id)).length} 項目を確認/記録`}
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="text-center text-muted-foreground py-4">
+                                点検項目が登録されていません
+                              </p>
+                            )}
+                          </div>
+                        </CardContent>
+                      )}
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+            
+            {/* === 頻度別表示モード === */}
+            <TabsContent value="frequency" className="mt-4">
+              {renderFrequencyContent()}
+            </TabsContent>
+          </Tabs>
+
+          {/* ★ 点検結果確認モーダル */} 
+          <Dialog open={isSubmitModalOpen} onOpenChange={setIsSubmitModalOpen}>
+            <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
+              <DialogHeader>
+                <DialogTitle>点検結果の確認・記録</DialogTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  同じ期間内でも複数回の入力が可能です。必要に応じて追加入力してください。
+                </p>
+              </DialogHeader>
+              <div className="flex-grow overflow-y-auto pr-6 space-y-4">
+                {modalData.map((item) => (
+                  <div key={item.id} className="p-4 border rounded-md bg-white">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <p className="font-medium">{item.name} <span className="text-sm text-muted-foreground">({frequencyToJapanese(item.frequency)})</span></p>
+                        <p className="text-xs text-blue-600 mt-1">
+                          {getCurrentPeriodInfo(item.frequency).label}の点検：{getCurrentPeriodInfo(item.frequency).period}
+                        </p>
+                      </div>
+                      {item.isPeriodCompleted && (
+                        <Badge variant="outline" className="bg-green-100 text-green-700 border-green-300 text-xs">
+                          期間内に入力済み
+                        </Badge>
+                      )}
+                    </div>
+                    <RadioGroup 
+                      defaultValue="true" 
+                      value={item.submitResult.toString()} 
+                      onValueChange={(value: string) => handleModalDataChange(item.id, 'submitResult', value === 'true')}
+                      className="flex gap-4 mb-2"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="true" id={`result-ok-${item.id}`} />
+                        <Label htmlFor={`result-ok-${item.id}`} className="text-green-700">正常</Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="false" id={`result-ng-${item.id}`} />
+                        <Label htmlFor={`result-ng-${item.id}`} className="text-red-700">異常</Label>
+                      </div>
+                    </RadioGroup>
+                    {item.submitResult === false && (
+                      <Textarea 
+                        placeholder="異常内容や対応を入力してください" 
+                        value={item.submitComment || ''}
+                        onChange={(e) => handleModalDataChange(item.id, 'submitComment', e.target.value)}
+                        className="mt-2"
+                        rows={3}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+              <DialogFooter className="mt-4">
+                <DialogClose asChild>
+                  <Button variant="outline">キャンセル</Button>
+                </DialogClose>
+                <Button 
+                  onClick={handleSubmitFromModal}
+                  disabled={isLoadingSubmit || isSubmittingAllDepartment}
+                  className="bg-primary hover:bg-primary/90 text-white"
+                >
+                  {isSubmittingAllDepartment ? '処理中...' : `${modalData.length}件の記録を実行`}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   );
 } 
