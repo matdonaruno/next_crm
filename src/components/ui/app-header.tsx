@@ -80,7 +80,7 @@ export function AppHeader({ showBackButton = true, title, onBackClick, icon }: A
         
         {/* タイトル - 中央に配置 */}
         <div className="flex-1 text-center flex items-center justify-center">
-          {icon && <span className="mr-4">{icon}</span>}
+          {icon && <span className="mr-2">{icon}</span>}
           {title && <h1 className="text-xl font-bold">{title}</h1>}
         </div>
         

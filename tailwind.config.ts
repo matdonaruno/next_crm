@@ -8,21 +8,21 @@ export default {
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
-    container: {
-      center: true,
-      padding: "2rem",
-      screens: {
-        "2xl": "1400px",
-      },
-    },
+  	container: {
+  		center: true,
+  		padding: '2rem',
+  		screens: {
+  			'2xl': '1400px'
+  		}
+  	},
   	extend: {
-      screens: {
-        xs: "320px", // モバイル対応
-        sm: "640px",
-        md: "768px",
-        lg: "1024px",
-        xl: "1280px",
-      },
+  		screens: {
+  			xs: '320px',
+  			sm: '640px',
+  			md: '768px',
+  			lg: '1024px',
+  			xl: '1280px'
+  		},
   		colors: {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
@@ -64,37 +64,69 @@ export default {
   				'4': 'hsl(var(--chart-4))',
   				'5': 'hsl(var(--chart-5))'
   			},
-        dashboard: {
-          pink: "#ffd6e6",
-          purple: "#e5deff",
-          hover: "#f8f7ff",
-        },
+  			dashboard: {
+  				pink: '#ffd6e6',
+  				purple: '#e5deff',
+  				hover: '#f8f7ff'
+  			}
   		},
   		borderRadius: {
   			lg: 'var(--radius)',
   			md: 'calc(var(--radius) - 2px)',
   			sm: 'calc(var(--radius) - 4px)'
   		},
-      keyframes: {
-        "accordion-down": {
-          from: { height: "0" },
-          to: { height: "var(--radix-accordion-content-height)" },
-        },
-        "accordion-up": {
-          from: { height: "var(--radix-accordion-content-height)" },
-          to: { height: "0" },
-        },
-        "card-hover": {
-          "0%": { transform: "translateY(0)" },
-          "50%": { transform: "translateY(-5px)" },
-          "100%": { transform: "translateY(0)" },
-        },
-      },
-      animation: {
-        "accordion-down": "accordion-down 0.2s ease-out",
-        "accordion-up": "accordion-up 0.2s ease-out",
-        "card-hover": "card-hover 0.3s ease-in-out",
-      },
+  		keyframes: {
+  			'accordion-down': {
+  				from: {
+  					height: '0'
+  				},
+  				to: {
+  					height: 'var(--radix-accordion-content-height)'
+  				}
+  			},
+  			'accordion-up': {
+  				from: {
+  					height: 'var(--radix-accordion-content-height)'
+  				},
+  				to: {
+  					height: '0'
+  				}
+  			},
+  			'card-hover': {
+  				'0%': {
+  					transform: 'translateY(0)'
+  				},
+  				'50%': {
+  					transform: 'translateY(-5px)'
+  				},
+  				'100%': {
+  					transform: 'translateY(0)'
+  				}
+  			},
+  			'accordion-down': {
+  				from: {
+  					height: '0'
+  				},
+  				to: {
+  					height: 'var(--radix-accordion-content-height)'
+  				}
+  			},
+  			'accordion-up': {
+  				from: {
+  					height: 'var(--radix-accordion-content-height)'
+  				},
+  				to: {
+  					height: '0'
+  				}
+  			}
+  		},
+  		animation: {
+  			'accordion-down': 'accordion-down 0.2s ease-out',
+  			'accordion-up': 'accordion-up 0.2s ease-out',
+  			'card-hover': 'card-hover 0.3s ease-in-out',
+  			'accordion-down': 'accordion-down 0.2s ease-out',
+  			'accordion-up': 'accordion-up 0.2s ease-out'
+  		}
   	}
   },
   plugins: [require("tailwindcss-animate")],

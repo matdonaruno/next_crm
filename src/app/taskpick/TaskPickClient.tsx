@@ -44,7 +44,7 @@ const menuItems = [
     title: 'Quality Control Management',
     description: 'Manage quality control processes',
     icon: ChartLine,
-    path: '/quality',
+    path: '/precision-management',
     color: 'bg-dashboard-pink',
     tooltip: '品質管理プロセス'
   },
