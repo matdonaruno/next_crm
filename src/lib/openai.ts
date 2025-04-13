@@ -1,7 +1,7 @@
 import { ChatMessage, TranscriptionResult } from '@/types/meeting-minutes';
 
-// 環境変数からAPIキーを取得
-const API_KEY = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+// OpenAIのAPIキーを取得
+const API_KEY = process.env.OPENAI_API_KEY;
 const API_URL = 'https://api.openai.com/v1';
 
 /**

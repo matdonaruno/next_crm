@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 
 // OpenAI クライアントの初期化
 const openai = new OpenAI({
-  apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY
+  apiKey: process.env.OPENAI_API_KEY
 });
 
 // ベクトル埋め込みを生成する関数

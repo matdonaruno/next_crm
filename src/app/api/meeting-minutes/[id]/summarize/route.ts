@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 
 // OpenAIクライアントの初期化
 const openai = new OpenAI({
-  apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 // 会議議事録の要約生成API
@@ -15,6 +15,14 @@ export async function POST(
 ) {
   try {
     const id = await params.id;
+    
+    // APIキーが設定されているか確認
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('API: OpenAIのAPIキーが設定されていません');
+      return NextResponse.json({ 
+        error: 'OpenAI APIキーが設定されていません。サーバー環境変数OPENAI_API_KEYを確認してください。' 
+      }, { status: 500 });
+    }
     
     // Supabaseクライアントの初期化
     const cookieStore = cookies();
@@ -80,7 +88,7 @@ export async function POST(
     // OpenAI APIキーが設定されていない場合のエラーメッセージ
     if (error instanceof Error && error.message.includes('API key')) {
       return NextResponse.json({ 
-        error: 'OpenAI APIキーが設定されていません。環境変数NEXT_PUBLIC_OPENAI_API_KEYを確認してください。' 
+        error: 'OpenAI APIキーが設定されていません。環境変数OPENAI_API_KEYを確認してください。' 
       }, { status: 500 });
     }
     
