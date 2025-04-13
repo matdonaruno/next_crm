@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { 
   Card, 
@@ -14,7 +14,8 @@ import { Department, MissingRecord } from '@/types/precision-management';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
 
-export default function PrecisionManagementPage() {
+// 検索パラメータを使用するコンポーネントを分離
+function PrecisionManagementContent() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [missingRecords, setMissingRecords] = useState<MissingRecord[]>([]);
@@ -188,5 +189,29 @@ export default function PrecisionManagementPage() {
         </>
       )}
     </div>
+  );
+}
+
+// メインコンポーネントはSuspenseを使用して非同期操作を処理
+export default function PrecisionManagementPage() {
+  return (
+    <Suspense fallback={<div className="container mx-auto p-4">
+      <h1 className="text-3xl font-bold mb-8">精度管理記録システム</h1>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {[...Array(6)].map((_, i) => (
+          <Card key={i}>
+            <CardHeader>
+              <Skeleton className="h-6 w-3/4" />
+              <Skeleton className="h-4 w-1/2" />
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="h-10 w-full" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>}>
+      <PrecisionManagementContent />
+    </Suspense>
   );
 } 
