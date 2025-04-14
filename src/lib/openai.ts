@@ -1,8 +1,5 @@
 import { ChatMessage, TranscriptionResult } from '@/types/meeting-minutes';
-
-// OpenAIのAPIキーを取得
-const API_KEY = process.env.OPENAI_API_KEY;
-const API_URL = 'https://api.openai.com/v1';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 /**
  * 音声ファイルを文字起こしする関数
@@ -10,26 +7,32 @@ const API_URL = 'https://api.openai.com/v1';
  * @returns 文字起こしされたテキスト
  */
 export async function transcribeAudio(audioFile: File): Promise<string> {
-  if (!API_KEY) {
-    throw new Error('OpenAI API key is not set');
-  }
-
+  // サーバーサイドAPIを使用
   const formData = new FormData();
   formData.append('file', audioFile);
-  formData.append('model', 'whisper-1');
-  formData.append('language', 'ja');
 
-  const response = await fetch(`${API_URL}/audio/transcriptions`, {
+  // Supabaseクライアントの初期化
+  const supabase = createClientComponentClient();
+  
+  // セッションからトークンを取得
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token || '';
+  
+  if (!token) {
+    throw new Error('認証トークンが取得できません。ログインしてください。');
+  }
+  
+  const response = await fetch('/api/meeting-minutes/transcribe', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${API_KEY}`
+      'Authorization': `Bearer ${token}`
     },
     body: formData
   });
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(`OpenAI API error: ${error.error?.message || 'Unknown error'}`);
+    throw new Error(`API error: ${error.error || error.message || 'Unknown error'}`);
   }
 
   const data = await response.json();
@@ -42,43 +45,33 @@ export async function transcribeAudio(audioFile: File): Promise<string> {
  * @returns 要約とキーワード
  */
 export async function summarizeText(text: string): Promise<TranscriptionResult> {
-  if (!API_KEY) {
-    throw new Error('OpenAI API key is not set');
+  // サーバーサイドAPIを使用
+  // Supabaseクライアントの初期化
+  const supabase = createClientComponentClient();
+  
+  // セッションからトークンを取得
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token || '';
+  
+  if (!token) {
+    throw new Error('認証トークンが取得できません。ログインしてください。');
   }
 
-  const messages: ChatMessage[] = [
-    {
-      role: 'system',
-      content: '会議議事録の内容を要約し、重要なキーワードを抽出してください。要約は300文字以内で、キーワードは10個程度抽出してください。JSONフォーマットで返してください。'
-    },
-    {
-      role: 'user',
-      content: text
-    }
-  ];
-
-  const response = await fetch(`${API_URL}/chat/completions`, {
+  const response = await fetch('/api/meeting-minutes/summarize', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${API_KEY}`
+      'Authorization': `Bearer ${token}`
     },
-    body: JSON.stringify({
-      model: 'gpt-4o',
-      messages,
-      temperature: 0.3,
-      max_tokens: 1000,
-      response_format: { type: 'json_object' }
-    })
+    body: JSON.stringify({ text })
   });
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(`OpenAI API error: ${error.error?.message || 'Unknown error'}`);
+    throw new Error(`API error: ${error.error || error.message || 'Unknown error'}`);
   }
 
-  const data = await response.json();
-  const result = JSON.parse(data.choices[0].message.content);
+  const result = await response.json();
 
   return {
     text,
@@ -94,40 +87,34 @@ export async function summarizeText(text: string): Promise<TranscriptionResult> 
  * @returns AIの回答
  */
 export async function searchMeetings(prompt: string, context?: string): Promise<string> {
-  if (!API_KEY) {
-    throw new Error('OpenAI API key is not set');
+  // Supabaseクライアントの初期化
+  const supabase = createClientComponentClient();
+  
+  // セッションからトークンを取得
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token || '';
+  
+  if (!token) {
+    throw new Error('認証トークンが取得できません。ログインしてください。');
   }
 
-  const messages: ChatMessage[] = [
-    {
-      role: 'system',
-      content: '会議議事録データを検索して、関連する情報を提供してください。具体的な日付や会議名、議題などを含めて回答してください。'
-    },
-    {
-      role: 'user',
-      content: `検索クエリ: ${prompt}\n${context ? `コンテキスト: ${context}` : ''}`
-    }
-  ];
-
-  const response = await fetch(`${API_URL}/chat/completions`, {
+  const response = await fetch('/api/meeting-minutes/search', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${API_KEY}`
+      'Authorization': `Bearer ${token}`
     },
     body: JSON.stringify({
-      model: 'gpt-4o',
-      messages,
-      temperature: 0.5,
-      max_tokens: 1000
+      query: prompt,
+      context
     })
   });
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(`OpenAI API error: ${error.error?.message || 'Unknown error'}`);
+    throw new Error(`API error: ${error.error || error.message || 'Unknown error'}`);
   }
 
   const data = await response.json();
-  return data.choices[0].message.content;
+  return data.results ? JSON.stringify(data.results) : '';
 } 
