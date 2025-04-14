@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
+  console.log('音声アップロードAPI呼び出し');
+  
   try {
     // Supabaseクライアントの初期化
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     
     // セッションの確認（認証済みかチェック）
     const { data: { session } } = await supabase.auth.getSession();
@@ -15,22 +17,21 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // FormDataからファイルを取得
     const formData = await request.formData();
-    const file = formData.get('file') as File;
+    const audioFile = formData.get('audio') as File;
+    const fileName = formData.get('fileName') as string;
     
-    if (!file) {
-      return NextResponse.json(
-        { error: 'ファイルが見つかりません' },
-        { status: 400 }
-      );
+    if (!audioFile || !fileName) {
+      return NextResponse.json({ success: false, error: '音声ファイルまたはファイル名が提供されていません' }, { status: 400 });
     }
+    
+    console.log(`アップロード処理: ファイル名=${fileName}, サイズ=${audioFile.size}バイト`);
     
     // ファイル情報をログ出力
     console.log('アップロードファイル情報:', {
-      name: file.name,
-      type: file.type,
-      size: file.size,
+      name: audioFile.name,
+      type: audioFile.type,
+      size: audioFile.size,
     });
     
     // バケットの存在確認
@@ -44,54 +45,40 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    const bucketExists = buckets?.some(bucket => bucket.name === 'minutesaudio');
+    const minutesAudioBucketExists = buckets?.some((bucket) => bucket.name === 'minutesaudio');
     
     // バケットが存在しない場合はエラーを返す
-    if (!bucketExists) {
-      console.error('必要なストレージバケットが存在しません');
+    if (!minutesAudioBucketExists) {
+      console.error('必要なストレージバケット(minutesaudio)が存在しません');
       return NextResponse.json(
         { error: 'ストレージの設定が完了していません。管理者に連絡してください。' },
         { status: 400 }
       );
     }
     
-    // ファイル名の生成（一意性を確保）
-    const fileExt = file.name.split('.').pop();
-    const filePath = `meeting_recordings/${Date.now()}.${fileExt}`;
-    
-    // ファイルをArrayBufferに変換
-    const arrayBuffer = await file.arrayBuffer();
-    
-    // Supabaseストレージにアップロード
-    const { error: uploadError } = await supabase.storage
+    // Supabaseのバケットにファイルをアップロード
+    const { data, error: uploadError } = await supabase.storage
       .from('minutesaudio')
-      .upload(filePath, arrayBuffer, {
-        contentType: file.type,
+      .upload(fileName, audioFile, {
+        contentType: audioFile.type,
         cacheControl: '3600',
       });
     
     if (uploadError) {
-      console.error('Supabaseアップロードエラー:', uploadError);
-      
-      // エラーの種類に応じてメッセージを変更
-      if (uploadError.message.includes('security policy')) {
-        return NextResponse.json(
-          { error: 'アップロード権限がありません' },
-          { status: 403 }
-        );
-      }
-      
+      console.error('ファイルアップロードエラー:', uploadError);
       return NextResponse.json(
-        { error: `ファイルのアップロードに失敗しました: ${uploadError.message}` },
+        { error: 'ファイルのアップロードに失敗しました: ' + uploadError.message },
         { status: 500 }
       );
     }
     
-    // 成功レスポンス
+    // アップロード成功
+    console.log('ファイルアップロード成功:', data.path);
+    
     return NextResponse.json({
       success: true,
-      path: filePath,
-      message: 'ファイルが正常にアップロードされました'
+      path: data.path,
+      url: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/minutesaudio/${data.path}`
     });
   } catch (error) {
     console.error('音声ファイルアップロードエラー:', error);

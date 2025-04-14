@@ -26,12 +26,13 @@ import {
   Settings,
   MessageSquare,
   Loader,
-  Check
+  Check,
+  FileText
 } from 'lucide-react';
 import { AppHeader } from '@/components/ui/app-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
@@ -140,20 +141,22 @@ export default function MeetingMinuteDetailClient({ meetingMinuteId }: { meeting
       if (data.audio_file_path) {
         // 既に完全なURLの場合はそのまま使用、そうでなければURLを構築
         if (!data.audio_file_path.startsWith('http')) {
-          // パスからファイル名部分を抽出（バケット名は含めない）
-          const fileName = data.audio_file_path.split('/').pop();
-          
-          if (fileName) {
-            try {
-              // バケットがパブリックに設定されているため直接アクセス
-              const directUrl = `https://bsgvaomswzkywbiubtjg.supabase.co/storage/v1/object/public/meeting_minutes/meeting_recordings/${fileName}`;
-              data.audio_file_path = directUrl;
-            } catch (urlError) {
-              console.error('URLの生成中にエラーが発生:', urlError);
+          try {
+            // ファイル名を取得
+            const fileName = data.audio_file_path.split('/').pop();
+            
+            if (fileName) {
+              // 新しいバケット「minutesaudio」を使用
+              const apiUrl = `/api/meeting-minutes/audio/${encodeURIComponent(fileName)}`;
+              data.audio_file_path = apiUrl;
+              
+              console.log('音声ファイルURL:', apiUrl);
+            } else {
+              console.error('ファイル名を抽出できませんでした');
               data.audio_file_path = '';
             }
-          } else {
-            console.error('ファイル名を抽出できませんでした');
+          } catch (urlError) {
+            console.error('URLの生成中にエラーが発生:', urlError);
             data.audio_file_path = '';
           }
         }
@@ -471,6 +474,270 @@ ${meetingMinute.content || '議事内容はありません'}
     });
   };
 
+  // 音声プレーヤーコンポーネント
+  const AudioPlayer = ({ audioFilePath }: { audioFilePath: string }) => {
+    // ファイル名のみを抽出（パスを含む場合は除去）
+    const fileName = audioFilePath.split('/').pop() || audioFilePath;
+    
+    // 新しいバケット「minutesaudio」を使用
+    const apiUrl = `/api/meeting-minutes/audio/${encodeURIComponent(fileName)}`;
+    
+    // タイムスタンプ付きのフォールバックURL（キャッシュ回避用）
+    const apiUrlWithTimestamp = `${apiUrl}?t=${Date.now()}`;
+    
+    // 複数のURLフォールバック - 両方ともファイル名のみを使用
+    const audioUrls = [
+      apiUrl,                   // 基本URL
+      apiUrlWithTimestamp,      // タイムスタンプ付き
+    ];
+    
+    const [currentUrlIndex, setCurrentUrlIndex] = useState(0);
+    const [isLoading, setIsLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [retryCount, setRetryCount] = useState(0);
+    const maxRetries = audioUrls.length * 2; // 各URLを複数回試行
+    
+    // ロード完了時
+    const handleLoadSuccess = () => {
+      setIsLoading(false);
+      setLoadError(null);
+      console.log('音声ファイルの読み込みに成功しました');
+    };
+    
+    // ロードエラー時
+    const handleLoadError = async (e: React.SyntheticEvent<HTMLAudioElement, Event>) => {
+      console.error('音声ファイル読み込みエラー:', e);
+      
+      // 最大再試行回数を超えていない場合は次のURLを試す
+      if (retryCount < maxRetries) {
+        const nextIndex = (currentUrlIndex + 1) % audioUrls.length;
+        console.log(`音声URL再試行: ${retryCount + 1}/${maxRetries}`, { 
+          currentUrl: audioUrls[currentUrlIndex],
+          nextUrl: audioUrls[nextIndex]
+        });
+        
+        setRetryCount(prev => prev + 1);
+        setCurrentUrlIndex(nextIndex);
+        setIsLoading(true);
+      } else {
+        setIsLoading(false);
+        setLoadError('音声ファイルの読み込みに失敗しました。');
+        console.log('再試行回数上限に達しました');
+      }
+    };
+    
+    // 再試行ボタンでリフレッシュ
+    const handleRetry = async () => {
+      setIsLoading(true);
+      setLoadError(null);
+      setRetryCount(0);
+      setCurrentUrlIndex(0);
+      
+      // 強制的にキャッシュを削除するためにタイムスタンプを追加
+      const timestamp = Date.now();
+      audioUrls[0] = apiUrl;
+      audioUrls[1] = `${apiUrl}?t=${timestamp}`;
+      
+      console.log('音声URLリフレッシュ:', audioUrls);
+    };
+    
+    return (
+      <div className="mt-2">
+        {isLoading && (
+          <div className="flex items-center justify-center py-2">
+            <div className="animate-spin h-4 w-4 mr-2 border-2 border-purple-500 border-t-transparent rounded-full" />
+            <span className="text-xs text-purple-700">読み込み中...</span>
+          </div>
+        )}
+        
+        {loadError && (
+          <div className="flex flex-col items-center justify-center py-2">
+            <p className="text-xs text-red-500">{loadError}</p>
+            <div className="text-xs text-gray-500 mt-1 mb-1">
+              ファイル: {fileName}
+            </div>
+            <button 
+              onClick={handleRetry}
+              className="text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 py-1 px-2 mt-1 rounded-full"
+            >
+              再試行
+            </button>
+          </div>
+        )}
+        
+        <audio 
+          className="w-full" 
+          controls 
+          src={audioUrls[currentUrlIndex]}
+          onError={handleLoadError}
+          onLoadedData={handleLoadSuccess}
+        />
+        
+        <div className="mt-1 text-xs text-gray-500">
+          {audioFilePath.split('/').pop() || '音声データ'}
+        </div>
+      </div>
+    );
+  };
+
+  // 会議議事録の表示
+  if (meetingMinute) {
+    const {
+      title,
+      meeting_date,
+      content,
+      summary,
+      keywords,
+      audio_file_path,
+      speakers,
+      segments,
+      meeting_type,
+      recorded_by_user,
+      attendees
+    } = meetingMinute;
+    
+    // キーワードの配列化
+    const keywordsArray = Array.isArray(keywords) ? keywords : [];
+    
+    // 話者データの解析
+    let speakersData = [];
+    try {
+      speakersData = typeof speakers === 'string' ? JSON.parse(speakers) : speakers || [];
+    } catch (error) {
+      console.error('話者データの解析エラー:', error);
+    }
+    
+    // セグメントデータの解析
+    let segmentsData = [];
+    try {
+      segmentsData = typeof segments === 'string' ? JSON.parse(segments) : segments || [];
+    } catch (error) {
+      console.error('セグメントデータの解析エラー:', error);
+    }
+    
+    // 日付のフォーマット
+    const formattedDate = meeting_date ? format(new Date(meeting_date), 'yyyy年MM月dd日 HH:mm', { locale: ja }) : '';
+    
+    // 参加者のフォーマット
+    const attendeesList = Array.isArray(attendees) ? attendees.join(', ') : attendees || '';
+    
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50">
+        {/* ヘッダー部分 */}
+        <AppHeader
+          title="会議議事録詳細"
+          icon={<FileText className="h-5 w-5 text-purple-500" />}
+          onBackClick={() => router.push('/meeting-minutes')}
+        />
+        
+        <div className="container mx-auto px-4 py-6 max-w-4xl">
+          <Card className="overflow-hidden bg-white/80 backdrop-blur-sm border-purple-100">
+            <CardHeader className="bg-gradient-to-r from-purple-100/80 to-pink-100/80 border-b border-purple-100 px-6 py-4">
+              <CardTitle className="text-2xl font-bold text-purple-900">{title}</CardTitle>
+              <div className="flex flex-wrap gap-3 mt-2">
+                <div className="text-sm bg-white/60 text-purple-700 px-3 py-1 rounded-full border border-purple-200">
+                  <Calendar className="inline-block h-4 w-4 mr-1 relative -top-[1px]" /> {formattedDate}
+                </div>
+                {meeting_type?.name && (
+                  <div className="text-sm bg-white/60 text-purple-700 px-3 py-1 rounded-full border border-purple-200">
+                    <Users className="inline-block h-4 w-4 mr-1 relative -top-[1px]" /> {meeting_type.name}
+                  </div>
+                )}
+                {recorded_by_user?.email && (
+                  <div className="text-sm bg-white/60 text-purple-700 px-3 py-1 rounded-full border border-purple-200">
+                    <UserCircle className="inline-block h-4 w-4 mr-1 relative -top-[1px]" /> {recorded_by_user.email}
+                  </div>
+                )}
+              </div>
+            </CardHeader>
+            
+            <CardContent className="p-6">
+              {attendeesList && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-purple-900 mb-2">参加者</h3>
+                  <div className="text-sm text-gray-700 bg-white/60 p-3 rounded-lg border border-purple-100">
+                    {attendeesList}
+                  </div>
+                </div>
+              )}
+              
+              {summary && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-purple-900 mb-2">要約</h3>
+                  <div className="whitespace-pre-wrap text-gray-700 bg-white/60 p-4 rounded-lg border border-purple-100">
+                    {summary}
+                  </div>
+                </div>
+              )}
+              
+              {keywordsArray.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-purple-900 mb-2">キーワード</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {keywordsArray.map((keyword, idx) => (
+                      <div key={idx} className="text-sm bg-gradient-to-r from-purple-50 to-pink-50 text-purple-700 px-3 py-1 rounded-full border border-purple-100">
+                        {keyword}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* 音声プレーヤー */}
+              {audio_file_path && (
+                <div className="mb-4 flex items-center space-x-2 text-md">
+                  <div className="min-w-[100px] font-semibold">録音:</div>
+                  <div className="flex-1">
+                    <AudioPlayer audioFilePath={audio_file_path} />
+                  </div>
+                </div>
+              )}
+              
+              {/* 本文表示（話者データがある場合はセグメント表示） */}
+              {speakersData.length > 0 && segmentsData.length > 0 ? (
+                <div className="mt-6">
+                  <h3 className="text-lg font-semibold text-purple-900 mb-2">会議内容</h3>
+                  <div className="space-y-4">
+                    {segmentsData.map((segment, index) => {
+                      const speaker = speakersData.find(s => s.id === segment.speakerId) || { name: '話者不明', color: '#666666' };
+                      return (
+                        <div 
+                          key={index} 
+                          className="rounded-lg p-4 bg-white/80 border border-purple-100"
+                          style={{ borderLeft: `4px solid ${speaker.color}` }}
+                        >
+                          <div className="font-semibold text-purple-800 mb-1">{speaker.name}</div>
+                          <div className="text-gray-700 whitespace-pre-wrap">{segment.text}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : content ? (
+                <div className="mt-6">
+                  <h3 className="text-lg font-semibold text-purple-900 mb-2">会議内容</h3>
+                  <div className="whitespace-pre-wrap text-gray-700 bg-white/60 p-4 rounded-lg border border-purple-100">
+                    {content}
+                  </div>
+                </div>
+              ) : null}
+              
+              <div className="mt-8 flex justify-center">
+                <Button
+                  variant="outline"
+                  className="rounded-full px-6 py-2 border-purple-300 text-purple-700 hover:bg-purple-50"
+                  onClick={() => router.push('/meeting-minutes')}
+                >
+                  <ArrowLeft className="mr-2 h-4 w-4" /> 一覧に戻る
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-slate-50 overflow-hidden">
       {/* ヘッダー - モバイルアプリ風 */}
@@ -596,46 +863,37 @@ ${meetingMinute.content || '議事内容はありません'}
                             return;
                           }
                           
-                          // ファイル名の抽出
-                          let fileName = '';
+                          // オーディオ要素の取得
+                          const audioElement = audioRef.current;
+                          if (!audioElement) {
+                            handleFailure('オーディオ要素が見つかりません');
+                            return;
+                          }
+                          
                           try {
-                            if (meetingMinute?.audio_file_path) {
-                              fileName = meetingMinute.audio_file_path.split('/').pop() || '';
-                            } else {
-                              const currentSrc = audioRef.current?.src || '';
-                              fileName = currentSrc.split('/').pop() || '';
-                            }
+                            // 現在のソースURLを確認
+                            const currentSrc = audioElement.src || '';
+                            
+                            // ファイル名抽出 - パスは無視
+                            const fileName = meetingMinute?.audio_file_path?.split('/').pop() || 
+                                            currentSrc.split('/').pop()?.split('?')[0] || '';
                             
                             if (!fileName) {
-                              handleFailure('音声ファイル名を取得できませんでした');
+                              handleFailure('音声ファイル名が取得できません');
                               return;
                             }
                             
-                            // オーディオ要素の取得
-                            const audioElement = audioRef.current;
-                            if (!audioElement) {
-                              handleFailure('オーディオ要素が見つかりません');
-                              return;
-                            }
+                            // 新しいバケット「minutesaudio」を使用
+                            const newUrl = `/api/meeting-minutes/audio/${encodeURIComponent(fileName)}?t=${Date.now()}`;
+                            console.log('音声ファイルの再試行URL:', newUrl);
                             
-                            // 再生方法の切り替え
-                            const currentSrc = audioElement.src || '';
-                            const isApiUrl = currentSrc.includes('/api/meeting-minutes/audio/');
+                            // 新しいURLをセット
+                            audioElement.src = newUrl;
+                            audioElement.load();
                             
-                            if (isApiUrl) {
-                              // APIからの取得に失敗した場合、直接URLを試す
-                              const directUrl = `https://bsgvaomswzkywbiubtjg.supabase.co/storage/v1/object/public/meeting_minutes/meeting_recordings/${fileName}`;
-                              audioElement.src = directUrl;
-                              audioElement.load();
-                            } else {
-                              // 直接URLからの取得に失敗した場合、APIを試す
-                              const apiUrl = `/api/meeting-minutes/audio/${fileName}`;
-                              audioElement.src = apiUrl;
-                              audioElement.load();
-                            }
                           } catch (error) {
-                            console.error('音声ファイル再試行エラー:', error);
-                            handleFailure();
+                            console.error('音声URL構築エラー:', error);
+                            handleFailure('音声ファイルのURLを構築できませんでした');
                           }
                         }}
                       />

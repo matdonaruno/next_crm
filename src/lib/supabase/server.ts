@@ -5,8 +5,8 @@ import { cookies } from 'next/headers';
  * サーバーサイドでSupabaseクライアントを作成するユーティリティ関数
  * Next.js App Routerのサーバーコンポーネントやルートハンドラーで使用します
  */
-export function createServerSupabaseClient() {
-  const cookieStore = cookies();
+export async function createServerSupabaseClient() {
+  const cookieStore = await cookies();
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -24,7 +24,7 @@ export function createServerSupabaseClient() {
   
   // クライアントの初期化
   const supabase = createServerComponentClient({
-    cookies: () => cookieStore,
+    cookies,
   });
   
   console.log('Supabaseクライアントを初期化しました', {
