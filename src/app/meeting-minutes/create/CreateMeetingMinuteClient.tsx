@@ -33,6 +33,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabaseClient';
 import { transcribeAudio, summarizeText } from '@/lib/openai';
 import { MeetingType, AudioRecordingData } from '@/types/meeting-minutes';
+import { ja } from 'date-fns/locale';
 
 // 話者の型定義
 interface Speaker {
@@ -123,6 +124,11 @@ export default function CreateMeetingMinuteClient() {
   const [keywords, setKeywords] = useState<string[]>([]);
   const [currentStep, setCurrentStep] = useState<'info' | 'record' | 'transcript' | 'edit'>('info');
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [audioFilePath, setAudioFilePath] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   
   // 話者関連の状態
   const [speakers, setSpeakers] = useState<Speaker[]>([
@@ -325,7 +331,56 @@ export default function CreateMeetingMinuteClient() {
   // 初期データ読み込み
   useEffect(() => {
     fetchMeetingTypes();
-  }, [fetchMeetingTypes]);
+    
+    // 会議名の初期設定
+    if (!title) {
+      // 現在日付と「会議」で仮タイトルを設定
+      const today = new Date();
+      const formattedDate = format(today, 'yyyy年MM月dd日', { locale: ja });
+      setTitle(`${formattedDate} 会議`);
+    }
+  }, [fetchMeetingTypes, title]);
+
+  // 会議種類が変更された時にタイトルを自動生成
+  useEffect(() => {
+    // 会議種類が選択されたとき
+    if (meetingTypeId) {
+      const selectedType = meetingTypes.find(type => type.id === meetingTypeId);
+      if (selectedType) {
+        // 日付と会議種類を組み合わせてタイトルを生成
+        const meetingDateObj = new Date(meetingDate);
+        const formattedDate = format(meetingDateObj, 'yyyy年MM月dd日', { locale: ja });
+        
+        // タイトルが初期値のまま、または未設定の場合のみ自動設定
+        if (!title || title === `${format(new Date(), 'yyyy年MM月dd日', { locale: ja })} 会議`) {
+          setTitle(`${formattedDate} ${selectedType.name}`);
+        }
+      }
+    }
+  }, [meetingTypeId, meetingTypes, meetingDate, title]);
+  
+  // 会議日時が変更された時もタイトルを更新
+  const handleMeetingDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newDate = e.target.value;
+    setMeetingDate(newDate);
+    
+    // 既に会議種類が選択されている場合は、タイトルも更新
+    if (meetingTypeId) {
+      const selectedType = meetingTypes.find(type => type.id === meetingTypeId);
+      if (selectedType) {
+        const meetingDateObj = new Date(newDate);
+        const formattedDate = format(meetingDateObj, 'yyyy年MM月dd日', { locale: ja });
+        
+        // タイトルが自動生成されたものである場合のみ更新
+        const oldDate = format(new Date(meetingDate), 'yyyy年MM月dd日', { locale: ja });
+        const currentTypeTitle = `${oldDate} ${selectedType.name}`;
+        
+        if (title === currentTypeTitle || !title || title === `${format(new Date(), 'yyyy年MM月dd日', { locale: ja })} 会議`) {
+          setTitle(`${formattedDate} ${selectedType.name}`);
+        }
+      }
+    }
+  };
 
   // タイマー処理用のエフェクト
   useEffect(() => {
@@ -347,10 +402,49 @@ export default function CreateMeetingMinuteClient() {
   // 録音開始
   const startRecording = async () => {
     try {
+      // すでにファイルが選択されている場合はクリア
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+        setAudioUrl(null);
+      }
+      
+      // ストレージに保存済みの場合は削除
+      if (audioFilePath) {
+        try {
+          const { error } = await supabase.storage
+            .from('meeting_minutes')
+            .remove([audioFilePath]);
+            
+          if (error) {
+            console.error('音声ファイルの削除エラー:', error);
+          }
+        } catch (error) {
+          console.error('音声ファイル削除中のエラー:', error);
+        }
+        
+        setAudioFilePath(null);
+      }
+      
+      // 音声APIが利用可能か確認
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('お使いのブラウザは音声録音をサポートしていません');
+      }
+      
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
+
+      // データ取得時のエラーハンドリング追加
+      mediaRecorder.onerror = (event) => {
+        console.error('MediaRecorder エラー:', event);
+        toast({
+          title: 'エラー',
+          description: '録音中にエラーが発生しました',
+          variant: 'destructive',
+        });
+        setIsRecording(false);
+      };
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -359,36 +453,69 @@ export default function CreateMeetingMinuteClient() {
       };
 
       mediaRecorder.onstop = () => {
-        // 録音データの準備
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-        // この時点でのrecordingTimeを使用
-        const currentDuration = recordingTime;
-        
-        console.log('MediaRecorder onstop - 録音時間:', currentDuration);
-        
-        setAudioRecording({
-          audioBlob,
-          duration: currentDuration,
-          filename: `meeting_recording_${new Date().getTime()}.wav`
-        });
-        
-        // ストリームのトラックを停止
-        stream.getTracks().forEach(track => track.stop());
+        try {
+          // 録音データの準備
+          if (audioChunksRef.current.length === 0) {
+            throw new Error('録音データが取得できませんでした');
+          }
+          
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+          // この時点でのrecordingTimeを使用
+          const currentDuration = recordingTime;
+          
+          console.log('MediaRecorder onstop - 録音時間:', currentDuration);
+          
+          // 音声の再生用URL作成
+          try {
+            const newAudioUrl = URL.createObjectURL(audioBlob);
+            setAudioUrl(newAudioUrl);
+          } catch (urlError) {
+            console.error('音声URL作成エラー:', urlError);
+          }
+          
+          setAudioRecording({
+            audioBlob,
+            duration: currentDuration,
+            filename: `meeting_recording_${new Date().getTime()}.wav`
+          });
+          
+          toast({
+            title: '録音完了',
+            description: `録音時間: ${formatTime(currentDuration)}`,
+          });
+        } catch (error) {
+          console.error('録音処理エラー:', error);
+          toast({
+            title: 'エラー',
+            description: error instanceof Error ? error.message : '録音処理中にエラーが発生しました',
+            variant: 'destructive',
+          });
+        } finally {
+          // ストリームのトラックを停止
+          stream.getTracks().forEach(track => track.stop());
+        }
       };
 
-      mediaRecorder.start();
-      setIsRecording(true);
-      setRecordingTime(0);
-      
-      toast({
-        title: '録音開始',
-        description: '会議の録音を開始しました',
-      });
+      // 録音開始
+      try {
+        mediaRecorder.start();
+        setIsRecording(true);
+        setRecordingTime(0);
+        setAudioRecording(null);
+        
+        toast({
+          title: '録音開始',
+          description: '会議の録音を開始しました',
+        });
+      } catch (startError) {
+        console.error('録音開始エラー:', startError);
+        throw new Error('録音の開始に失敗しました');
+      }
     } catch (error) {
       console.error('録音の開始に失敗しました:', error);
       toast({
         title: 'エラー',
-        description: '録音の開始に失敗しました',
+        description: error instanceof Error ? error.message : '録音の開始に失敗しました',
         variant: 'destructive',
       });
     }
@@ -407,6 +534,9 @@ export default function CreateMeetingMinuteClient() {
       setTimeout(() => {
         if (!audioRecording) {
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+          const newAudioUrl = URL.createObjectURL(audioBlob);
+          setAudioUrl(newAudioUrl);
+          
           setAudioRecording({
             audioBlob,
             duration: finalRecordingTime,
@@ -424,8 +554,123 @@ export default function CreateMeetingMinuteClient() {
     }
   };
 
+  // ストレージから録音ファイルを取得する関数
+  const fetchAudioFromStorage = async (filePath: string) => {
+    try {
+      const { data, error } = await supabase.storage
+        .from('meeting_minutes')
+        .download(filePath);
+        
+      if (error) {
+        console.error('音声ファイルの取得エラー:', error);
+        throw new Error('録音データの取得に失敗しました');
+      }
+      
+      if (data) {
+        // Blobを作成し、再生用のURLを生成
+        const blob = new Blob([data], { type: 'audio/wav' });
+        const url = URL.createObjectURL(blob);
+        setAudioUrl(url);
+        
+        console.log('ストレージから音声ファイルを取得しました');
+        return url;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('音声ファイル取得エラー:', error);
+      toast({
+        title: 'エラー',
+        description: '録音データの取得に失敗しました',
+        variant: 'destructive',
+      });
+      return null;
+    }
+  };
+
+  // 音声ファイルをストレージに保存する
+  const saveAudioToStorage = async (): Promise<string | null> => {
+    if (!audioRecording) return null;
+    
+    // 既にアップロード済みの場合は再アップロードしない
+    if (audioFilePath) return audioFilePath;
+    
+    setIsUploading(true);
+    
+    try {
+      toast({
+        title: '保存中',
+        description: '録音データを保存しています...',
+        duration: 3000,
+      });
+      
+      const fileExt = audioRecording.filename.split('.').pop();
+      const filePath = `meeting_recordings/${Date.now()}.${fileExt}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from('meeting_minutes')
+        .upload(filePath, audioRecording.audioBlob);
+        
+      if (uploadError) {
+        console.error('音声ファイルのアップロードエラー:', uploadError);
+        toast({
+          title: 'エラー',
+          description: '音声ファイルの保存に失敗しました',
+          variant: 'destructive',
+          duration: 5000,
+        });
+        return null;
+      }
+      
+      // 成功したらパスを保存
+      setAudioFilePath(filePath);
+      
+      toast({
+        title: '保存完了',
+        description: '録音データを安全に保存しました',
+      });
+      
+      console.log('音声ファイルのアップロード成功:', filePath);
+      return filePath;
+    } catch (error) {
+      console.error('音声ファイル保存エラー:', error);
+      toast({
+        title: 'エラー',
+        description: '音声ファイルの保存中にエラーが発生しました',
+        variant: 'destructive',
+        duration: 5000,
+      });
+      return null;
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   // 録音削除
-  const deleteRecording = () => {
+  const deleteRecording = async () => {
+    // オーディオURLのリリース
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrl(null);
+    }
+    
+    // ストレージに保存済みの場合は削除
+    if (audioFilePath) {
+      try {
+        const { error } = await supabase.storage
+          .from('meeting_minutes')
+          .remove([audioFilePath]);
+          
+        if (error) {
+          console.error('音声ファイルの削除エラー:', error);
+        }
+      } catch (error) {
+        console.error('音声ファイル削除中のエラー:', error);
+      }
+      
+      setAudioFilePath(null);
+    }
+    
     setAudioRecording(null);
     setTranscriptionText('');
     setSummary('');
@@ -456,6 +701,20 @@ export default function CreateMeetingMinuteClient() {
     setIsProcessing(true);
     
     try {
+      // まだストレージに保存されていない場合は保存
+      if (!audioFilePath) {
+        const savedPath = await saveAudioToStorage();
+        if (!savedPath) {
+          throw new Error('音声ファイルの保存に失敗しました');
+        }
+      }
+      
+      // ストレージからファイルを読み込む場合（URLがない場合）
+      let audioFileToProcess;
+      if (!audioUrl && audioFilePath) {
+        await fetchAudioFromStorage(audioFilePath);
+      }
+      
       // 音声ファイルの作成
       const audioFile = new File(
         [audioRecording.audioBlob], 
@@ -505,7 +764,7 @@ export default function CreateMeetingMinuteClient() {
       console.error('音声処理エラー:', error);
       toast({
         title: 'エラー',
-        description: '音声の処理中にエラーが発生しました',
+        description: error instanceof Error ? error.message : '音声の処理中にエラーが発生しました',
         variant: 'destructive',
       });
     } finally {
@@ -643,23 +902,10 @@ export default function CreateMeetingMinuteClient() {
     });
     
     try {
-      // 音声ファイルのアップロード
-      let audioFilePath = null;
-      if (audioRecording) {
-        const fileExt = audioRecording.filename.split('.').pop();
-        const filePath = `meeting_recordings/${Date.now()}.${fileExt}`;
-        
-        const { error: uploadError } = await supabase.storage
-          .from('meeting_minutes')
-          .upload(filePath, audioRecording.audioBlob);
-          
-        if (uploadError) {
-          console.error('音声ファイルのアップロードエラー:', uploadError);
-          throw new Error('音声ファイルのアップロードに失敗しました');
-        }
-        
-        audioFilePath = filePath;
-        console.log('音声ファイルのアップロード成功:', audioFilePath);
+      // 音声ファイルのアップロード（まだアップロードされていない場合）
+      let finalAudioFilePath = audioFilePath;
+      if (!finalAudioFilePath && audioRecording) {
+        finalAudioFilePath = await saveAudioToStorage();
       }
       
       // 参加者の処理
@@ -693,7 +939,7 @@ export default function CreateMeetingMinuteClient() {
           content: fullText,
           summary,
           keywords,
-          audio_file_path: audioFilePath,
+          audio_file_path: finalAudioFilePath,
           is_transcribed: !!transcriptionText,
           speakers: speakersData,
           segments: segmentsData
@@ -770,10 +1016,23 @@ export default function CreateMeetingMinuteClient() {
   };
 
   // 次のステップへ進む
-  const nextStep = () => {
+  const nextStep = async () => {
     if (currentStep === 'info') {
       setCurrentStep('record');
     } else if (currentStep === 'record' && audioRecording) {
+      // 録音ステップから次へ進む前に音声ファイルを保存
+      if (!audioFilePath && audioRecording) {
+        const savedPath = await saveAudioToStorage();
+        if (!savedPath) {
+          toast({
+            title: '警告',
+            description: '録音データの保存に失敗しました。再試行してください。',
+            variant: 'destructive',
+            duration: 5000,
+          });
+          return;
+        }
+      }
       setCurrentStep('transcript');
     }
   };
@@ -788,6 +1047,47 @@ export default function CreateMeetingMinuteClient() {
       setCurrentStep('transcript');
     }
   };
+
+  // 録音データを再生するための関数
+  const playAudio = () => {
+    if (!audioUrl) return;
+    
+    if (isPlaying) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        setIsPlaying(false);
+      }
+    } else {
+      if (audioRef.current) {
+        audioRef.current.play().catch(error => {
+          console.error('音声再生エラー:', error);
+          toast({
+            title: 'エラー',
+            description: '音声の再生に失敗しました',
+            variant: 'destructive',
+          });
+        });
+        setIsPlaying(true);
+      }
+    }
+  };
+
+  // オーディオ再生終了時の処理
+  useEffect(() => {
+    const handleEnded = () => {
+      setIsPlaying(false);
+    };
+    
+    if (audioRef.current) {
+      audioRef.current.addEventListener('ended', handleEnded);
+    }
+    
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.removeEventListener('ended', handleEnded);
+      }
+    };
+  }, [audioRef.current]);
 
   // ステップ表示
   const renderStep = () => {
@@ -840,7 +1140,7 @@ export default function CreateMeetingMinuteClient() {
                     id="meeting-date"
                     type="datetime-local"
                     value={meetingDate}
-                    onChange={(e) => setMeetingDate(e.target.value)}
+                    onChange={handleMeetingDateChange}
                     className="mt-1 h-12 text-base rounded-xl border-pink-200 focus:border-purple-400 focus:ring-purple-300"
                     disabled={isLoading}
                   />
@@ -902,6 +1202,11 @@ export default function CreateMeetingMinuteClient() {
                         <span className="text-3xl font-mono text-red-600">{formatTime(recordingTime)}</span>
                       </div>
                       <Waveform isRecording={true} />
+                      <div className="absolute bottom-0 left-0 right-0 flex justify-center">
+                        <div className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded-full animate-pulse">
+                          録音中...
+                        </div>
+                      </div>
                     </div>
                     
                     <div className="flex items-center justify-center w-full">
@@ -929,6 +1234,9 @@ export default function CreateMeetingMinuteClient() {
                           <p className="text-base text-gray-600">
                             長さ: {audioRecording?.duration ? formatTime(audioRecording.duration) : "00:00"}
                           </p>
+                          <span className="text-xs text-gray-400">
+                            ({audioRecording ? (audioRecording.audioBlob.size / (1024 * 1024)).toFixed(2) : 0} MB)
+                          </span>
                         </div>
                       </div>
                       
@@ -938,12 +1246,73 @@ export default function CreateMeetingMinuteClient() {
                         <Button
                           variant="outline"
                           onClick={deleteRecording}
-                          disabled={isLoading}
+                          disabled={isLoading || isUploading}
                           className="rounded-xl px-6 py-2 text-sm border-red-200 text-red-600 hover:bg-red-50 w-full"
                         >
                           <Trash className="mr-2 h-4 w-4" /> 削除
                         </Button>
                       </div>
+
+                      {/* 録音完了後の音声プレイヤー */}
+                      <div className="flex justify-center w-full mt-4">
+                        <audio ref={audioRef} className="hidden" src={audioUrl || undefined} />
+                        
+                        <Button
+                          variant="outline"
+                          onClick={playAudio}
+                          disabled={!audioUrl}
+                          className="rounded-xl px-6 py-2 text-sm border-blue-200 text-blue-600 hover:bg-blue-50 w-full"
+                        >
+                          {isPlaying ? (
+                            <>
+                              <Pause className="mr-2 h-4 w-4" /> 一時停止
+                            </>
+                          ) : (
+                            <>
+                              <Play className="mr-2 h-4 w-4" /> 再生
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                      
+                      {/* 録音を保存するボタン */}
+                      {!audioFilePath && (
+                        <div className="flex justify-center w-full mt-4">
+                          <Button
+                            variant="outline"
+                            onClick={saveAudioToStorage}
+                            disabled={isUploading}
+                            className="rounded-xl px-6 py-2 text-sm border-green-200 text-green-600 hover:bg-green-50 w-full"
+                          >
+                            {isUploading ? (
+                              <>
+                                <div className="animate-spin h-4 w-4 mr-2 border-2 border-green-600 border-t-transparent rounded-full" />
+                                保存中...
+                              </>
+                            ) : (
+                              <>
+                                <Save className="mr-2 h-4 w-4" /> 録音を保存
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      )}
+                      
+                      {audioFilePath && (
+                        <div className="flex items-center justify-center mt-4 text-green-600 text-sm font-medium">
+                          <div className="h-2 w-2 bg-green-600 rounded-full mr-2 animate-pulse" />
+                          録音データはストレージに保存されています
+                          {!audioUrl && audioFilePath && (
+                            <Button
+                              variant="link"
+                              onClick={() => fetchAudioFromStorage(audioFilePath)}
+                              className="ml-2 p-0 h-auto text-sm text-blue-600"
+                            >
+                              読み込む
+                            </Button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -979,9 +1348,19 @@ export default function CreateMeetingMinuteClient() {
               {audioRecording && (
                 <Button
                   onClick={nextStep}
+                  disabled={isUploading}
                   className="rounded-xl h-14 text-base bg-gradient-to-r from-pink-400 to-purple-500 hover:from-pink-500 hover:to-purple-600 text-white shadow-md hover:shadow-lg transition-all"
                 >
-                  次へ <ArrowRight className="ml-2 h-5 w-5" />
+                  {isUploading ? (
+                    <>
+                      <div className="animate-spin h-5 w-5 mr-2 border-2 border-white border-t-transparent rounded-full" />
+                      音声保存中...
+                    </>
+                  ) : (
+                    <>
+                      次へ <ArrowRight className="ml-2 h-5 w-5" />
+                    </>
+                  )}
                 </Button>
               )}
             </div>
