@@ -18,6 +18,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error("Supabase環境変数が設定されていません");
 }
 
+// 環境変数の確認
+const isProduction = process.env.NODE_ENV === 'production';
+
 // クッキーベースのストレージアダプタ
 const cookieStorage = {
   getItem: (key: string) => {
@@ -92,88 +95,56 @@ const initStorage = () => {
   return cookieStorage;
 };
 
-// Supabaseクライアントの設定
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+// クライアントを作成
+const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    persistSession: true,
-    storageKey: storageKey,
-    storage: initStorage(),
+    persistSession: true, // デフォルトでtrue
+    storageKey: storageKey, // デフォルトのキー名を使用
+    storage: cookieStorage,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
-    flowType: 'pkce', // PKCEフローを使用（より安全）
-    debug: process.env.NODE_ENV === 'development' // 開発環境のみデバッグ有効
+    debug: !isProduction,
+    flowType: 'pkce',
   },
   global: {
-    // リクエストのタイムアウト設定（8秒に延長）
-    fetch: (url, options) => {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8秒タイムアウト
-      
-      return fetch(url, {
-        ...options,
-        signal: controller.signal
-      }).finally(() => clearTimeout(timeoutId));
-    }
+    fetch: fetch.bind(globalThis),
   },
-  realtime: {
-    // リアルタイム更新設定
-    params: {
-      eventsPerSecond: 1 // イベントレートを下げる
-    }
-  },
-  db: {
-    schema: 'public'
-  }
 });
 
-// デバッグ用：Supabaseクライアントの初期化確認
-console.log("Supabaseクライアントを初期化しました", { 
-  storageKey,
-  timeout: "8秒",
-  flowType: "pkce",
-  storage: "cookie-based"
-});
+console.log("Supabaseクライアント初期化完了 - storageKey:", storageKey, 
+  "timeout:", 5000, "flowType:", 'pkce');
 
-// セッションの確認
-if (typeof window !== 'undefined') {
-  setTimeout(async () => {
-    try {
-      const { data, error } = await supabase.auth.getSession();
-      console.log("現在のセッション状態:", { 
-        session: data.session ? "あり" : "なし", 
-        error: error?.message || "なし",
-        userId: data.session?.user?.id || "なし",
-        cookieExists: !!Cookies.get(storageKey)
-      });
-    } catch (e) {
-      console.error("セッション確認エラー:", e);
-    }
-  }, 1000);
-}
+// セッションチェック
+setTimeout(() => {
+  supabaseClient.auth.getSession().then(({ data, error }) => {
+    console.log("セッションチェック - セッション存在:", !!data.session, 
+      "エラー:", error ? error.message : "なし", 
+      "ユーザーID:", data.session?.user?.id ?? "なし");
+  });
+}, 1000);
 
-// visibilitychange時の自動更新を無効化
+// visibility changeイベントリスナーを無効化
+// Supabaseが自動的にトークンを更新するためのリスナーをdelete documentで一度削除してから
+// ダミーのリスナーを追加して別のリスナーが追加されないようにする
 if (typeof window !== 'undefined') {
-  // 既存のvisibilitychangeイベントリスナーを上書き
-  const originalAddEventListener = window.document.addEventListener;
-  window.document.addEventListener = function(
-    type: string, 
-    listener: EventListenerOrEventListenerObject, 
-    options?: boolean | AddEventListenerOptions
-  ) {
-    if (type === 'visibilitychange' && typeof listener === 'function') {
-      // Supabaseの自動更新リスナーと思われるものをブロック
-      const listenerStr = listener.toString();
-      if (listenerStr.includes('autoRefreshToken') || listenerStr.includes('_onVisibilityChanged')) {
-        console.log('Suppressing Supabase visibilitychange auto-refresh listener');
-        // 代わりにダミーリスナーを登録
-        return originalAddEventListener.call(
-          this,
-          type,
-          () => console.log('Ignored visibilitychange event for Supabase auto-refresh'),
-          options
-        );
+  try {
+    const orgAddEventListener = window.document.addEventListener;
+    window.document.addEventListener = function(
+      event: string, 
+      fn: EventListenerOrEventListenerObject, 
+      ...args: any[]
+    ) {
+      if (event === 'visibilitychange') {
+        console.log("visibilitychangeイベントリスナー追加をブロックしました");
+        // 呼び出しをブロック
+        return orgAddEventListener.call(this, 'DummyVisibilityEvent', function() {}, ...args);
       }
-    }
-    return originalAddEventListener.call(this, type, listener, options);
-  };
+      return orgAddEventListener.call(this, event, fn, ...args);
+    };
+  } catch (e) {
+    console.error("visibilitychangeイベントリスナーのオーバーライドに失敗:", e);
+  }
 }
+
+// デフォルトエクスポートを追加
+export default supabaseClient;
+export { supabaseClient };

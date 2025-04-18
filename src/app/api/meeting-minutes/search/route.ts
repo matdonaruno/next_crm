@@ -39,6 +39,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '検索クエリが必要です' }, { status: 400 });
     }
 
+    if (!facilityId) {
+      console.error('API: 施設IDがリクエストにありません');
+      return NextResponse.json({ error: '施設IDが必要です' }, { status: 400 });
+    }
+
     // クエリのベクトル埋め込みを生成
     console.log('クエリからベクトル埋め込みを生成:', query);
     const embedding = await createEmbedding(query);
@@ -53,13 +58,34 @@ export async function POST(request: NextRequest) {
       console.error('API: セッション取得エラー:', sessionError);
       return NextResponse.json({ error: '認証セッションが無効です' }, { status: 401 });
     }
+    
+    // ユーザーの施設IDを確認
+    const { data: profileData, error: profileError } = await supabase
+      .from('profiles')
+      .select('facility_id')
+      .eq('id', session.user.id)
+      .single();
+      
+    if (profileError || !profileData?.facility_id) {
+      console.error('API: ユーザープロファイル取得エラー:', profileError);
+      return NextResponse.json({ error: 'ユーザープロファイルが見つかりません' }, { status: 404 });
+    }
+    
+    // リクエストの施設IDとユーザーの施設IDが一致することを確認
+    if (profileData.facility_id !== facilityId) {
+      console.error('API: 施設IDの不一致:', { 
+        requestFacilityId: facilityId, 
+        userFacilityId: profileData.facility_id 
+      });
+      return NextResponse.json({ error: '指定された施設IDにアクセスする権限がありません' }, { status: 403 });
+    }
 
     // 会議議事録データを取得
     // 注意: 実際のSemantic Searchを行うためには、以下のいずれかが必要:
     // 1. Supabaseのpgvectorエクステンションを有効にし、テーブルにベクトル列を追加
     // 2. または、代替としてすべての議事録を取得し、JavaScriptでコサイン類似度を計算
     
-    console.log('会議議事録データを取得');
+    console.log('会議議事録データを取得 - 施設ID:', facilityId);
     const { data: meetingMinutes, error: dataError } = await supabase
       .from('meeting_minutes')
       .select(`

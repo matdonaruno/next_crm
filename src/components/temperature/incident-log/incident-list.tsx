@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { ja } from 'date-fns/locale';
-import { supabase } from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import {

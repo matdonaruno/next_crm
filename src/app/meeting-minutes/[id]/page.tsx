@@ -1,5 +1,3 @@
-'use client';
-
 import MeetingMinuteDetailClient from './MeetingMinuteDetailClient';
 
 interface MeetingMinuteDetailPageProps {
@@ -8,6 +6,6 @@ interface MeetingMinuteDetailPageProps {
   };
 }
 
-export default function MeetingMinuteDetailPage({ params }: MeetingMinuteDetailPageProps) {
+export default async function MeetingMinuteDetailPage({ params }: MeetingMinuteDetailPageProps) {
   return <MeetingMinuteDetailClient meetingMinuteId={params.id} />;
 } 

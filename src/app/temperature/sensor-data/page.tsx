@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ChevronLeft, Home, Bell, Activity, Calendar, Download, Filter, RefreshCw, ArrowLeft } from 'lucide-react';
-import { supabase } from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseClient';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,

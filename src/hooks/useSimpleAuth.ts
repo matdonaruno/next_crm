@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseClient';
 
 // シンプルな認証フック（定期的なセッション確認なし）
 export function useSimpleAuth() {

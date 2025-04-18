@@ -32,7 +32,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { supabase } from "@/lib/supabaseClient";
+import supabase from "@/lib/supabaseClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { setSessionCheckEnabled } from "@/contexts/AuthContext";
 import { AppHeader } from "@/components/ui/app-header";

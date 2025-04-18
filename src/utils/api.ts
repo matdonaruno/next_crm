@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseClient';
 
 interface ApiOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';

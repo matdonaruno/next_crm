@@ -3,11 +3,18 @@
 import Link from 'next/link';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabaseClient'; 
+import supabaseClient from '@/lib/supabaseClient'; 
 import { useAuth } from '@/contexts/AuthContext';
 import { AppHeader } from '@/components/ui/app-header';
 import { cacheDepartments, getCachedDepartments } from '@/lib/departmentCache';
 import { setSessionCheckEnabled } from '@/contexts/AuthContext';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Mic } from 'lucide-react';
+
+// カスタムツールチップスタイル
+const tooltipContentClass = "bg-primary border-primary";
+const tooltipStyle = { backgroundColor: '#8167a9', color: 'white', border: '1px solid #8167a9' };
+const tooltipTextStyle = { color: 'white' };
 
 interface Department {
     id: string;
@@ -49,7 +56,7 @@ export default function Home() {
         }
 
         // セッションを明示的に確認
-        const { data: sessionData } = await supabase.auth.getSession();
+        const { data: sessionData } = await supabaseClient.auth.getSession();
         console.log("DepartPage: セッション確認結果", { 
           hasSession: !!sessionData.session,
           sessionUserId: sessionData.session?.user?.id || 'なし',
@@ -60,7 +67,7 @@ export default function Home() {
         // テーブル構造を確認
         try {
           console.log("DepartPage: テーブル構造を確認します");
-          const { data: tableData, error: tableError } = await supabase
+          const { data: tableData, error: tableError } = await supabaseClient
             .from('departments')
             .select('*')
             .limit(1);
@@ -127,7 +134,7 @@ export default function Home() {
       // まず、すべての部署を取得してみる（デバッグ用）
       console.log("デバッグ: すべての部署データを取得します");
       try {
-        const { data: allDepts, error: allError } = await supabase
+        const { data: allDepts, error: allError } = await supabaseClient
           .from("departments")
           .select('*')
           .limit(20);
@@ -144,7 +151,7 @@ export default function Home() {
       
       // 施設IDに基づいて部署を取得（直接クエリ）
       console.log("Supabaseクエリを実行: departments.select().eq('facility_id', '" + cleanFacilityId + "')");
-      const { data, error } = await supabase
+      const { data, error } = await supabaseClient
         .from("departments")
         .select('*')
         .eq('facility_id', cleanFacilityId);
@@ -176,7 +183,7 @@ export default function Home() {
         console.log("施設IDに一致する部署が見つかりません。すべての部署を取得します。");
         // バックアップとして、すべての部署を試す
         console.log("Supabaseクエリを実行: departments.select('*')");
-        const { data: allDepts, error: allError } = await supabase
+        const { data: allDepts, error: allError } = await supabaseClient
           .from("departments")
           .select('*');
           
@@ -241,7 +248,7 @@ export default function Home() {
       
       // 施設情報を取得
       if (profile?.facility_id) {
-        const { data: facilityData, error: facilityError } = await supabase
+        const { data: facilityData, error: facilityError } = await supabaseClient
           .from("facilities")
           .select("name")
           .eq("id", profile.facility_id)
@@ -457,6 +464,26 @@ export default function Home() {
             </ul>
           </div>
         </div>
+      </div>
+
+      {/* フローティング会議議事録アイコン */}
+      <div className="fixed right-6 top-1/2 -translate-y-1/2 z-50">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => router.push('/meeting-minutes')}
+                className="flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-r from-purple-500 to-indigo-500 shadow-lg hover:shadow-xl transition-shadow duration-300 text-white"
+                aria-label="会議議事録"
+              >
+                <Mic className="h-6 w-6" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
+              <p style={tooltipTextStyle}>会議議事録</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
 
       {/* ===================== メインコンテンツ ===================== */}

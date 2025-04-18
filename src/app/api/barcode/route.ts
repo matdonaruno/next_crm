@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseClient';
 import { getJstTimestamp } from '@/lib/utils';
 
 export async function POST(request: Request) {

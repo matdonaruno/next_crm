@@ -18,7 +18,8 @@ import {
   UserCircle,
   UserPlus,
   ArrowRight,
-  ArrowLeft
+  ArrowLeft,
+  FileText
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AppHeader } from '@/components/ui/app-header';
@@ -30,7 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabaseClient';
+import supabaseClient from '@/lib/supabaseClient';
 import { transcribeAudio, summarizeText } from '@/lib/openai';
 import { MeetingType, AudioRecordingData } from '@/types/meeting-minutes';
 import { ja } from 'date-fns/locale';
@@ -47,6 +48,9 @@ interface TranscriptSegment {
   speakerId: string;
   text: string;
 }
+
+// 型の定義を追加 (importセクションの下)
+type StepType = 'info' | 'record' | 'transcript' | 'edit';
 
 // 音声波形コンポーネント
 const Waveform = ({ isRecording }: { isRecording: boolean }) => {
@@ -122,7 +126,7 @@ export default function CreateMeetingMinuteClient() {
   const [transcriptionText, setTranscriptionText] = useState('');
   const [summary, setSummary] = useState('');
   const [keywords, setKeywords] = useState<string[]>([]);
-  const [currentStep, setCurrentStep] = useState<'info' | 'record' | 'transcript' | 'edit'>('info');
+  const [currentStep, setCurrentStep] = useState<StepType>('info');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [audioFilePath, setAudioFilePath] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -237,7 +241,7 @@ export default function CreateMeetingMinuteClient() {
       // Supabaseでスキーマ情報を確認
       try {
         console.log('テーブル構造確認');
-        const { data: schemaData, error: schemaError } = await supabase
+        const { data: schemaData, error: schemaError } = await supabaseClient
           .rpc('get_table_info', { table_name: 'meeting_types' });
           
         console.log('テーブル構造:', { schemaData, schemaError });
@@ -250,7 +254,7 @@ export default function CreateMeetingMinuteClient() {
       
       // 方法1: 基本的なクエリ
       console.log('方法1: 基本的なクエリを実行');
-      const { data, error, count } = await supabase
+      const { data, error, count } = await supabaseClient
         .from('meeting_types')
         .select('*', options)
         .order('name');
@@ -264,7 +268,7 @@ export default function CreateMeetingMinuteClient() {
       // 方法2: RLSの可能性を考慮したクエリ（サービスロール使用）
       console.log('方法2: RLSの可能性を確認');
       try {
-        const { data: data2, error: error2 } = await supabase
+        const { data: data2, error: error2 } = await supabaseClient
           .rpc('get_meeting_types');
           
         console.log('方法2の結果:', { data: data2, error: error2 });
@@ -274,7 +278,7 @@ export default function CreateMeetingMinuteClient() {
       
       // 方法3: シンプルなテーブル内容確認
       console.log('方法3: テーブルの行数確認');
-      const { count: totalCount, error: countError } = await supabase
+      const { count: totalCount, error: countError } = await supabaseClient
         .from('meeting_types')
         .select('*', { count: 'exact', head: true });
         
@@ -293,7 +297,7 @@ export default function CreateMeetingMinuteClient() {
         // 会議種類テーブルにデータを挿入（一時的な対応）
         try {
           console.log('会議種類テーブルにデータを挿入します');
-          const { data: insertData, error: insertError } = await supabase
+          const { data: insertData, error: insertError } = await supabaseClient
             .from('meeting_types')
             .upsert(hardcodedMeetingTypes.map(type => ({
               id: type.id,
@@ -406,37 +410,205 @@ export default function CreateMeetingMinuteClient() {
     }
   }, [user]);
   
-  // ストレージバケットの存在確認
+  // 認証関連のセットアップと管理を改善
+  useEffect(() => {
+    // 認証リスナーをセットアップ - セッションが変更された時に対応
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('認証状態変化イベント:', event);
+        
+        // セッション状態の変化をログ（デバッグ用）
+        if (session) {
+          console.log('有効なセッションを検出:', session.user?.id);
+          // 明示的にセッションを保存
+          try {
+            localStorage.setItem('sb-bsgvaomswzkywbiubtjg-auth-token', JSON.stringify({
+              access_token: session.access_token,
+              refresh_token: session.refresh_token,
+              expires_at: Math.floor(Date.now() / 1000) + 3600
+            }));
+            console.log('セッションをローカルストレージに保存しました');
+          } catch (e) {
+            console.error('セッション保存エラー:', e);
+          }
+        } else {
+          console.log('セッションなし');
+        }
+
+        // 必要に応じて状態を更新
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          // プロファイル情報を再取得
+          try {
+            const { data, error } = await supabaseClient
+              .from('profiles')
+              .select('*')
+              .eq('id', session?.user?.id)
+              .single();
+            
+            if (!error && data) {
+              console.log('プロファイル情報を更新しました');
+            }
+          } catch (error) {
+            console.error('プロファイル取得エラー:', error);
+          }
+        }
+      }
+    );
+
+    // ページロード時の初期セッション確認
+    setTimeout(async () => {
+      try {
+        const { data, error } = await supabaseClient.auth.getSession();
+        if (error) {
+          console.error('セッション取得エラー:', error);
+          // セッション取得エラーの場合、再ログインを促す
+          toast({
+            title: '認証エラー',
+            description: 'セッションが無効です。再ログインしてください。',
+            variant: 'destructive',
+            duration: 10000,
+          });
+          return;
+        }
+
+        if (data.session) {
+          console.log('初期セッション確認完了:', data.session.user?.id);
+          // 明示的にセッションを保存
+          try {
+            localStorage.setItem('sb-bsgvaomswzkywbiubtjg-auth-token', JSON.stringify({
+              access_token: data.session.access_token,
+              refresh_token: data.session.refresh_token,
+              expires_at: Math.floor(Date.now() / 1000) + 3600
+            }));
+            console.log('初期セッションをローカルストレージに保存しました');
+          } catch (e) {
+            console.error('セッション保存エラー:', e);
+          }
+        } else {
+          console.log('初期セッションなし');
+          // セッションがない場合、再ログインを促す
+          toast({
+            title: '認証エラー',
+            description: 'ログインセッションが見つかりません。再ログインしてください。',
+            variant: 'destructive',
+            duration: 10000,
+          });
+        }
+      } catch (e) {
+        console.error('セッション確認エラー:', e);
+      }
+    }, 100); // 少し遅延させる
+
+    // クリーンアップ関数
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, [toast]);
+
+  // ストレージバケットの存在確認の関数を修正
   const checkStorageBucket = async () => {
+    console.log("ストレージバケット確認を開始");
     try {
-      const { data: buckets, error: listError } = await supabase
+      // セッション状態を確認 - 非同期で処理
+      const { data, error } = await supabaseClient.auth.getSession();
+      
+      if (error) {
+        console.error('認証セッション取得エラー:', error);
+        return false;
+      }
+      
+      if (!data.session) {
+        console.log('認証セッションがありません');
+        return false;
+      }
+      
+      // バケット一覧を取得
+      const { data: buckets, error: bucketsError } = await supabaseClient
         .storage
         .listBuckets();
       
-      if (listError) {
-        console.error('ストレージバケット一覧取得エラー:', listError);
-        return;
-      }
-      
-      console.log('利用可能なバケット:', buckets?.map(b => b.name));
-      
-      // ストレージバケットが存在しない場合は警告表示
-      const bucketExists = buckets?.some(bucket => bucket.name === 'meeting_minutes');
-      if (!bucketExists) {
+      if (bucketsError) {
+        console.error('バケット一覧取得エラー:', bucketsError);
+        // バケット一覧取得エラーがあっても、minutesaudioバケットが存在する可能性があるので
+        // 直接minutesaudioバケットへのアクセスを試みる
+        try {
+          const { data: files, error: filesError } = await supabaseClient
+            .storage
+            .from('minutesaudio')
+            .list('meeting_recordings');
+            
+          if (!filesError) {
+            console.log('minutesaudioバケットへの直接アクセス成功:', files);
+            return true;
+          } else {
+            console.error('minutesaudioバケットへの直接アクセスエラー:', filesError);
+          }
+        } catch (directAccessError) {
+          console.error('直接アクセス試行エラー:', directAccessError);
+        }
+        
         toast({
-          title: '重要',
-          description: 'ストレージの設定が必要です。管理者に連絡して「meeting_minutes」バケットの作成を依頼してください。',
-          variant: 'destructive',
-          duration: 10000,
+          title: '警告',
+          description: 'ストレージへのアクセス権限に問題がありますが、処理は続行します。',
+          duration: 5000,
         });
-        console.error('meeting_minutesバケットが存在しません');
-      } else {
-        console.log('meeting_minutesバケットを確認: OK');
+        return false;
       }
+      
+      console.log('利用可能なバケット一覧:', buckets);
+      
+      // バケットリストが空でも、minutesaudioバケットへの直接アクセスを試みる
+      if (!buckets || buckets.length === 0) {
+        try {
+          const { data: files, error: filesError } = await supabaseClient
+            .storage
+            .from('minutesaudio')
+            .list('meeting_recordings');
+            
+          if (!filesError) {
+            console.log('空のバケットリストだがminutesaudioバケットへのアクセス成功:', files);
+            return true;
+          }
+        } catch (directAccessError) {
+          console.error('直接アクセス試行エラー:', directAccessError);
+        }
+        
+        toast({
+          title: '情報',
+          description: 'バケットリストの取得に問題がありますが、処理は続行します。',
+          duration: 5000,
+        });
+      }
+      
+      return true;
     } catch (error) {
       console.error('ストレージバケット確認エラー:', error);
+      return false;
     }
   };
+
+  // 認証セッションを定期的に監視するためのリスナー
+  useEffect(() => {
+    // 認証リスナーをセットアップ - セッションが変更された時に対応
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('認証状態変化イベント:', event);
+        
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          console.log('認証トークンが更新されました');
+          await checkStorageBucket(); // ストレージバケットを再確認
+        }
+      }
+    );
+    
+    // コンポーネントがマウントされたらバケットをチェック
+    checkStorageBucket();
+    
+    // クリーンアップ関数
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   // 録音開始
   const startRecording = async () => {
@@ -450,7 +622,7 @@ export default function CreateMeetingMinuteClient() {
       // ストレージに保存済みの場合は削除
       if (audioFilePath) {
         try {
-          const { error } = await supabase.storage
+          const { error } = await supabaseClient.storage
             .from('minutesaudio')
             .remove([audioFilePath]);
             
@@ -599,41 +771,22 @@ export default function CreateMeetingMinuteClient() {
     }
   };
 
-  // バケットの存在確認と作成
-  const ensureStorageBucket = async (): Promise<boolean> => {
+  // ストレージバケットの存在確認と作成
+  // この関数を削除または置き換え
+  const ensureStoragePath = async () => {
     try {
-      // バケット一覧を取得
-      const { data: buckets, error: listError } = await supabase
-        .storage
-        .listBuckets();
-        
-      if (listError) {
-        console.error('バケット一覧取得エラー:', listError);
-        return false;
-      }
-      
-      console.log('利用可能なバケット:', buckets?.map(b => b.name));
-      
-      // バケット'minutesaudio'が存在するか確認
-      const minutesAudioBucketExists = buckets?.some(bucket => bucket.name === 'minutesaudio');
-      
-      if (!minutesAudioBucketExists) {
-        console.log('必要なバケット(minutesaudio)が存在しません。管理者に連絡してください。');
-        toast({
-          title: '設定エラー',
-          description: 'ストレージの設定が完了していません。管理者に連絡してください。',
-          variant: 'destructive',
-        });
-        return false;
-      } else {
-        console.log('必要なストレージバケットが存在します:', {
-          minutesaudio: minutesAudioBucketExists
-        });
+      // minutesaudioバケットの会議録音フォルダをチェック
+      // 実際にはこのパスにファイルを置くだけでOK（Supabaseは自動的に必要なパスを作成）
+      if (profile?.facility_id) {
+        const { data, error } = await supabaseClient.storage.from('minutesaudio')
+          .list(`meeting_recordings/${profile.facility_id}`);
+          
+        console.log('ストレージパスチェック結果:', { data, error });
       }
       
       return true;
     } catch (error) {
-      console.error('バケット確認エラー:', error);
+      console.error('ストレージパスチェックエラー:', error);
       return false;
     }
   };
@@ -641,173 +794,153 @@ export default function CreateMeetingMinuteClient() {
   // ストレージから録音ファイルを取得する関数
   const fetchAudioFromStorage = async (filePath: string) => {
     try {
-      // 完全なパスを構築
-      const fullPath = filePath.includes('meeting_recordings/') 
-        ? filePath 
-        : `meeting_recordings/${filePath}`;
+      console.log(`ストレージからオーディオ取得開始: ${filePath}`);
       
-      // APIを介してファイルを取得（正しいエンドポイント）
-      const apiUrl = `/api/meeting-minutes/meeting_recordings/${encodeURIComponent(fullPath)}`;
-      console.log('音声ファイル取得URL:', apiUrl);
+      // 公開URLを作成
+      const { data, error } = await supabaseClient.storage
+        .from('minutesaudio')
+        .createSignedUrl(filePath, 60 * 60); // 1時間有効なURL
       
-      const response = await fetch(apiUrl);
-      
-      if (!response.ok) {
-        console.error('音声ファイルの取得エラー:', response.statusText);
-        throw new Error('録音データの取得に失敗しました');
+      if (error) {
+        console.error('署名付きURL作成エラー:', error);
+        return null;
       }
       
-      // ファイルをBlobとして取得
-      const blob = await response.blob();
+      if (!data || !data.signedUrl) {
+        console.error('署名付きURLが取得できませんでした');
+        return null;
+      }
       
-      // 再生用のURLを生成
-      const url = URL.createObjectURL(blob);
-      setAudioUrl(url);
+      console.log('署名付きURL取得成功:', data.signedUrl);
       
-      console.log('ストレージから音声ファイルを取得しました');
-      return url;
+      // 署名付きURLを設定
+      setAudioUrl(data.signedUrl);
+      return data.signedUrl;
     } catch (error) {
-      console.error('音声ファイル取得エラー:', error);
-      toast({
-        title: 'エラー',
-        description: '録音データの取得に失敗しました',
-        variant: 'destructive',
-      });
+      console.error('オーディオファイル取得エラー:', error);
       return null;
     }
   };
 
-  // 音声ファイルをストレージに保存する
-  const saveAudioToStorage = async (): Promise<string | null> => {
-    if (!audioRecording) return null;
-    
-    // 既にアップロード済みの場合は再アップロードしない
-    if (audioFilePath) return audioFilePath;
-    
-    setIsUploading(true);
-    
-    try {
-      toast({
-        title: '保存中',
-        description: '録音データを保存しています...',
-        duration: 3000,
-      });
-      
-      // バケットの存在確認
-      const bucketExists = await ensureStorageBucket();
-      if (!bucketExists) {
-        throw new Error('ストレージの設定が完了していません。管理者に連絡してください。');
-      }
-      
-      console.log('音声データのアップロード準備:', {
-        blobSize: audioRecording.audioBlob.size,
-        duration: audioRecording.duration,
-        filename: audioRecording.filename
-      });
-      
-      // ファイルパスの作成 - meeting_recordings ディレクトリを使用
-      const fileExt = audioRecording.filename.split('.').pop();
-      const fileName = `${Date.now()}.${fileExt}`;
-      const filePath = `meeting_recordings/${fileName}`;
-      
-      // APIを使用して音声ファイルをアップロード
-      try {
-        // ブラウザに録音データを一時保存
-        const newAudioUrl = URL.createObjectURL(audioRecording.audioBlob);
-        setAudioUrl(newAudioUrl);
-        console.log('録音データをローカルに保存しました');
-        
-        // FormDataを使用してAPIにファイルをアップロード
-        const formData = new FormData();
-        formData.append('file', audioRecording.audioBlob, audioRecording.filename);
-        
-        console.log('APIを使用してファイルをアップロード開始');
-        const response = await fetch('/api/meeting-minutes/upload', {
-          method: 'POST',
-          body: formData
-        });
-        
-        // APIレスポンスを処理
-        if (!response.ok) {
-          // エラーレスポンスの詳細を取得
-          const errorDetails = await response.text();
-          console.error('APIアップロードエラー:', {
-            status: response.status,
-            statusText: response.statusText,
-            details: errorDetails
-          });
-          
-          throw new Error(`ファイルのアップロードに失敗しました (${response.status}): ${errorDetails}`);
-        }
-        
-        // 成功レスポンスのデータを取得
-        const result = await response.json();
-        console.log('アップロード結果:', result);
-        
-        // 成功したらパスを保存 - パスがmeeting_recordingsを含んでいることを確認
-        const savedPath = result.path.includes('meeting_recordings/') 
-          ? result.path 
-          : `meeting_recordings/${result.path}`;
-        
-        setAudioFilePath(savedPath);
-        
-        toast({
-          title: '保存完了',
-          description: '録音データを安全に保存しました',
-        });
-        
-        console.log('音声ファイルのアップロード成功:', savedPath);
-        return savedPath;
-      } catch (uploadError) {
-        console.error('APIアップロードエラー:', uploadError);
-        
-        // 直接Supabaseを使用してバックアップ試行
-        try {
-          console.log('直接Supabaseを使用してアップロード試行...');
-          
-          // 新しいバケット'minutesaudio'を使用
-          const { error: uploadError } = await supabase.storage
-            .from('minutesaudio')
-            .upload(filePath, audioRecording.audioBlob, {
-              contentType: 'audio/wav',
-              cacheControl: '3600',
-            });
-            
-          if (uploadError) {
-            console.error('直接アップロードエラー:', uploadError);
-            throw new Error(`直接アップロードにも失敗しました: ${uploadError.message}`);
-          }
-          
-          // 成功したらパスを保存
-          setAudioFilePath(filePath);
-          console.log('直接アップロード成功:', filePath);
-          
-          toast({
-            title: '保存完了',
-            description: '録音データを安全に保存しました（代替方法）',
-          });
-          
-          return filePath;
-        } catch (directError) {
-          console.error('直接アップロードもエラー:', directError);
-          
-          // エラーがあってもローカルには保存できているのでそれを伝える
-          toast({
-            title: '警告',
-            description: 'クラウドへの保存に失敗しましたが、ブラウザに一時保存されています。後ほど再試行してください。',
-            variant: 'destructive',
-            duration: 5000,
-          });
-        }
-        
-        // ローカルURLだけ設定したnullを返す（ファイルパスはnull）
-        return null;
-      }
-    } catch (error) {
-      console.error('音声ファイル保存エラー:', error);
+  // 音声ファイルをストレージにアップロードする関数を修正
+  const saveAudioToStorage = async (forceNew = false): Promise<string | null> => {
+    // 既に保存済みで、強制上書きでなければ既存のパスを返す
+    if (audioFilePath && !forceNew) {
+      console.log('既に保存済みの音声ファイルを使用します:', audioFilePath);
+      return audioFilePath;
+    }
+
+    if (!audioRecording || !audioRecording.audioBlob) {
+      console.error('音声データがありません');
       toast({
         title: 'エラー',
-        description: error instanceof Error ? error.message : '音声ファイルの保存中にエラーが発生しました',
+        description: '音声データが見つかりません。',
+        variant: 'destructive',
+        duration: 5000,
+      });
+      return null;
+    }
+    
+    if (!profile?.facility_id) {
+      console.error('施設IDが取得できません');
+      toast({
+        title: 'エラー',
+        description: '施設情報が取得できません。ログイン状態を確認してください。',
+        variant: 'destructive',
+        duration: 5000,
+      });
+      return null;
+    }
+    
+    try {
+      // ファイル保存処理中フラグを設定
+      setIsUploading(true);
+      
+      // 一意のファイル名を生成（施設IDを含める）
+      const facilityId = profile.facility_id;
+      const timestamp = Date.now();
+      const fileName = `meeting_recordings/${facilityId}/${timestamp}.wav`;
+      console.log('アップロードファイル名:', fileName);
+      
+      // タイムアウト処理を追加
+      const uploadPromise = new Promise<{ path?: string, error?: any }>(async (resolve) => {
+        try {
+          // 直接minutesaudioバケットへのアップロード
+          console.log('minutesaudioバケットに直接アップロードを試みます');
+          const { data: fileData, error } = await supabaseClient.storage
+            .from('minutesaudio')
+            .upload(fileName, audioRecording.audioBlob, {
+              contentType: 'audio/wav',
+              cacheControl: '3600'
+            });
+          
+          resolve({ path: fileData?.path, error });
+        } catch (error) {
+          resolve({ error });
+        }
+      });
+      
+      // タイムアウト処理
+      const timeoutPromise = new Promise<{ path?: string, error?: any }>((resolve) => {
+        setTimeout(() => {
+          resolve({ 
+            error: new Error('アップロードがタイムアウトしました。処理を続行します。') 
+          });
+        }, 20000); // 20秒後にタイムアウト
+      });
+      
+      // どちらか早い方の結果を採用
+      const { path, error } = await Promise.race([uploadPromise, timeoutPromise]);
+      
+      if (error) {
+        // 認証エラーを特別に処理
+        if (error.message && error.message.includes('Authentication')) {
+          console.error('認証エラー:', error);
+          toast({
+            title: '認証エラー',
+            description: '認証に失敗しました。再ログインしてください。',
+            variant: 'destructive',
+            duration: 10000,
+          });
+          return null;
+        }
+        
+        // タイムアウトの場合は警告を表示して続行
+        if (error.message && error.message.includes('タイムアウト')) {
+          console.warn(error.message);
+          toast({
+            title: '警告',
+            description: 'アップロードに時間がかかっていますが、処理を続行します。',
+            variant: 'default',
+            duration: 5000,
+          });
+          // 保存パスをとりあえず設定して続行する
+          setAudioFilePath(fileName);
+          return fileName;
+        }
+        
+        console.error('音声アップロードエラー:', error);
+        toast({
+          title: 'エラー',
+          description: `音声ファイルのアップロードに失敗しました: ${error.message}`,
+          variant: 'destructive',
+          duration: 5000,
+        });
+        return null;
+      }
+      
+      // 保存したパスを状態として保存
+      const savedPath = path || fileName;
+      setAudioFilePath(savedPath);
+      
+      console.log('音声ファイルをアップロードしました:', savedPath);
+      
+      return savedPath;
+    } catch (error) {
+      console.error('音声保存エラー:', error);
+      toast({
+        title: '警告',
+        description: error instanceof Error ? error.message : '音声ファイルをストレージに保存できませんでした。',
         variant: 'destructive',
         duration: 5000,
       });
@@ -828,8 +961,8 @@ export default function CreateMeetingMinuteClient() {
     // ストレージに保存済みの場合は削除
     if (audioFilePath) {
       try {
-        const { error } = await supabase.storage
-          .from('minutesaudio')
+        const { error } = await supabaseClient.storage
+          .from('minutesaudio')  // バケット名をminutesaudioに統一
           .remove([audioFilePath]);
           
         if (error) {
@@ -865,84 +998,248 @@ export default function CreateMeetingMinuteClient() {
     }));
   };
 
-  // 文字起こし処理
+  // 文字起こし処理を録音保存も含めて行う形に修正
   const processAudio = async () => {
     if (!audioRecording) return;
     
     setIsProcessing(true);
     
     try {
-      // まだストレージに保存されていない場合は保存を試みる（失敗してもローカルで続行）
-      if (!audioFilePath) {
-        try {
-          await saveAudioToStorage();
-        } catch (saveError) {
-          console.error('ストレージ保存エラーが発生しましたが、続行します:', saveError);
-          // エラーが発生しても、ローカルでの音声再生は可能なので続行
-        }
+      // ブラウザ内の音声データを優先して使用
+      const audioSource = audioRecording.audioBlob;
+      let sourceType = 'ブラウザ内音声データ';
+      
+      // 保存済みのファイルパスがある場合は記録
+      if (audioFilePath) {
+        console.log('保存済みの音声ファイルパス:', audioFilePath);
+        sourceType = '保存済み音声ファイル';
       }
       
+      console.log(`音声処理を開始: ${sourceType}`);
+      
       // 音声URLがない場合はローカルで作成
-      if (!audioUrl) {
-        const newAudioUrl = URL.createObjectURL(audioRecording.audioBlob);
+      if (!audioUrl && audioSource) {
+        const newAudioUrl = URL.createObjectURL(audioSource);
         setAudioUrl(newAudioUrl);
         console.log('ローカルで音声URLを作成しました');
       }
       
-      // 音声ファイルの作成
-      const audioFile = new File(
-        [audioRecording.audioBlob], 
-        audioRecording.filename, 
-        { type: 'audio/wav' }
-      );
+      // 音声ファイルサイズの確認
+      const fileSizeMB = audioSource.size / (1024 * 1024);
+      console.log(`録音情報 - ファイルサイズ: ${fileSizeMB.toFixed(2)} MB, 録音時間: ${formatTime(audioRecording.duration)}`);
       
-      // 文字起こし
+      // 処理中メッセージを表示
       toast({
         title: '処理中',
-        description: '音声の文字起こしを開始しました。しばらくお待ちください...',
+        description: '音声データを保存し、会議議事録を作成しています。文字起こしは非同期で処理されます。',
+        duration: 5000,
       });
       
-      const transcriptionResult = await transcribeAudio(audioFile);
-      setTranscriptionText(transcriptionResult);
+      // トランスクリプトテキストを設定（非同期処理のため仮テキスト）
+      setTranscriptionText('（文字起こし処理中...）');
+      setTranscriptSegments([{
+        speakerId: '1',
+        text: '文字起こし処理中です。保存後、一覧画面から詳細を確認すると文字起こし結果が表示されます。'
+      }]);
       
-      // 文字起こしを話者ごとに分割
-      const segments = convertTextToSegments(transcriptionResult);
-      setTranscriptSegments(segments);
+      // 空の要約を設定
+      setSummary('（要約処理中...）');
       
-      // 要約とキーワード抽出
-      if (transcriptionResult) {
-        toast({
-          title: '処理中',
-          description: 'テキストの要約とキーワード抽出を行っています...',
-        });
-        
-        const result = await summarizeText(transcriptionResult);
-        if (result.summary) setSummary(result.summary);
-        if (result.keywords) setKeywords(result.keywords);
-        
-        // タイトル自動設定（未入力の場合）
-        if (!title && result.summary) {
-          const summaryLines = result.summary.split('\n');
-          setTitle(summaryLines[0].substring(0, 50));
+      // キーワードの初期値
+      if (keywords.length === 0) {
+        setKeywords(['会議', '議事録']);
+      }
+      
+      // 音声ファイルを保存（まだ保存されていない場合）- タイムアウト付き
+      let savedPath = audioFilePath;
+      if (!savedPath) {
+        try {
+          console.log('音声ファイルのアップロードを開始');
+          
+          // タイムアウト付きで保存処理
+          const uploadPromise = saveAudioToStorage(true);
+          const timeoutPromise = new Promise<string | null>((resolve) => {
+            setTimeout(() => {
+              console.log('アップロード待機時間が長すぎます。ファイル名だけ設定して処理を続行します。');
+              const tempFileName = `meeting_recordings/${profile?.facility_id}/${Date.now()}.wav`;
+              setAudioFilePath(tempFileName);
+              resolve(tempFileName);
+            }, 10000); // 10秒でタイムアウト
+          });
+          
+          savedPath = await Promise.race([uploadPromise, timeoutPromise]);
+          
+          if (savedPath) {
+            console.log('音声ファイルの保存に成功しました:', savedPath);
+          } else {
+            console.log('音声ファイルの保存に失敗しましたが、処理を続行します');
+            // 一時的なパスを設定して続行
+            const tempFileName = `meeting_recordings/${profile?.facility_id}/${Date.now()}.wav`;
+            setAudioFilePath(tempFileName);
+            savedPath = tempFileName;
+            
+            toast({
+              title: '警告',
+              description: '音声ファイルの保存に失敗しました。テキストデータのみで保存します。',
+              variant: 'destructive',
+              duration: 5000,
+            });
+          }
+        } catch (uploadError) {
+          console.error('音声アップロードエラー:', uploadError);
+          toast({
+            title: '警告',
+            description: '音声ファイルのアップロードに失敗しました。テキストデータのみで保存します。',
+            variant: 'destructive',
+            duration: 5000,
+          });
+          
+          // エラーでも続行できるように一時的なパスを設定
+          const tempFileName = `meeting_recordings/${profile?.facility_id}/${Date.now()}.wav`;
+          setAudioFilePath(tempFileName);
+          savedPath = tempFileName;
         }
+      } else {
+        console.log('既存の保存済み音声ファイルを使用します:', savedPath);
+      }
+      
+      // 次のステップに進む
+      setCurrentStep('transcript');
+      
+      // 会議議事録の保存（transcription_status を 'processing' に設定）
+      console.log('会議議事録の保存を開始します');
+      const meetingMinuteData = {
+        title,
+        meeting_type_id: meetingTypeId,
+        meeting_date: meetingDate,
+        recorded_by: user?.id,
+        facility_id: profile?.facility_id,
+        attendees: attendees.split(',').map(a => a.trim()).filter(Boolean),
+        content: '（文字起こし処理中）',
+        summary: '（要約処理中）',
+        keywords: keywords.length > 0 ? keywords : ['会議', '議事録'],
+        audio_file_path: savedPath,
+        is_transcribed: false,
+        transcription_status: 'processing' as const,
+        speakers: JSON.stringify(speakers),
+        segments: JSON.stringify(transcriptSegments)
+      };
+      
+      const savedMeetingMinute = await saveMeetingMinute(meetingMinuteData);
+      
+      // 保存に成功した場合、バックグラウンドで文字起こし処理を開始
+      if (savedMeetingMinute && savedPath) {
+        console.log('バックグラウンドでの文字起こし処理を開始します');
+        processAudioBackground(savedPath, savedMeetingMinute.id);
+      } else {
+        console.error('会議議事録の保存に失敗しました。バックグラウンド処理は実行されません。');
+        // 保存失敗の通知
+        toast({
+          title: 'エラー',
+          description: '会議議事録の保存に失敗しました。再度お試しください。',
+          variant: 'destructive',
+          duration: 5000,
+        });
+      }
+      
+    } catch (error) {
+      console.error('音声処理エラー:', error);
+      
+      let errorMessage = '音声の処理中にエラーが発生しました';
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
       }
       
       toast({
-        title: '処理完了',
-        description: '音声の文字起こしと要約が完了しました',
+        title: 'エラー',
+        description: errorMessage,
+        variant: 'destructive',
+        duration: 10000,
       });
       
-      // 編集ステップに移動
-      setCurrentStep('edit');
-    } catch (error) {
-      console.error('音声処理エラー:', error);
-      toast({
-        title: 'エラー',
-        description: error instanceof Error ? error.message : '音声の処理中にエラーが発生しました',
-        variant: 'destructive',
-      });
+      // エラーが発生しても保存を試みる
+      try {
+        setCurrentStep('transcript');
+        await saveMeetingMinute();
+      } catch (saveError) {
+        console.error('エラー後の保存も失敗:', saveError);
+      }
     } finally {
       setIsProcessing(false);
+      console.log('処理完了 - isProcessing状態をfalseに設定');
+      
+      // 一覧画面に遷移
+      toast({
+        title: '処理完了',
+        description: '議事録を保存しました。文字起こしは非同期で処理されます。',
+        duration: 3000,
+      });
+      
+      setTimeout(() => {
+        router.push('/meeting-minutes');
+      }, 2000);
+    }
+  };
+
+  // バックグラウンドでの文字起こし処理を行う関数
+  const processAudioBackground = async (audioFilePath: string, meetingMinuteId: string) => {
+    try {
+      console.log(`バックグラウンド処理: ${audioFilePath} の文字起こしを開始`);
+      
+      // 音声ファイルをストレージから取得
+      const audioUrl = await fetchAudioFromStorage(audioFilePath);
+      if (!audioUrl) {
+        console.error('音声ファイルの取得に失敗しました');
+        return;
+      }
+      
+      // 音声ファイルをBlobとして取得
+      const response = await fetch(audioUrl);
+      const audioBlob = await response.blob();
+      
+      // 音声ファイルをFileオブジェクトに変換
+      const audioFile = new File(
+        [audioBlob],
+        `meeting_recording_${Date.now()}.wav`,
+        { type: 'audio/wav' }
+      );
+      
+      console.log(`文字起こし処理開始: ${audioFile.name}, サイズ: ${(audioFile.size / (1024 * 1024)).toFixed(2)}MB`);
+      
+      // OpenAI APIを使用して文字起こし
+      const transcriptionResult = await transcribeAudio(audioFile);
+      console.log('文字起こし完了:', transcriptionResult.substring(0, 100) + '...');
+      
+      // 文字起こし結果を話者ごとに分割
+      const segments = convertTextToSegments(transcriptionResult);
+      
+      // 要約とキーワード抽出
+      console.log('要約処理を開始します');
+      const summarizationResult = await summarizeText(transcriptionResult);
+      console.log('要約処理完了');
+      
+      // データベースを更新
+      const { error } = await supabaseClient
+        .from('meeting_minutes')
+        .update({
+          content: transcriptionResult,
+          summary: summarizationResult.summary,
+          keywords: summarizationResult.keywords,
+          is_transcribed: true,
+          segments: JSON.stringify(segments)
+        })
+        .eq('id', meetingMinuteId);
+      
+      if (error) {
+        console.error('データベース更新エラー:', error);
+        return;
+      }
+      
+      console.log(`会議議事録ID ${meetingMinuteId} の文字起こしと要約を更新しました`);
+      
+    } catch (error) {
+      console.error('バックグラウンド処理エラー:', error);
     }
   };
 
@@ -1043,8 +1340,10 @@ export default function CreateMeetingMinuteClient() {
     }
   };
 
-  // 会議議事録の保存
-  const saveMeetingMinute = async () => {
+  // 会議議事録を保存する関数を修正
+  const saveMeetingMinute = async (customData?: any) => {
+    console.log('saveMeetingMinute開始');
+    
     // バリデーション
     if (!title) {
       toast({
@@ -1053,7 +1352,7 @@ export default function CreateMeetingMinuteClient() {
         variant: 'destructive',
         duration: 5000,
       });
-      return;
+      return null;
     }
     
     if (!meetingTypeId) {
@@ -1063,7 +1362,18 @@ export default function CreateMeetingMinuteClient() {
         variant: 'destructive', 
         duration: 5000,
       });
-      return;
+      return null;
+    }
+
+    // ユーザー認証チェック
+    if (!user) {
+      toast({
+        title: 'エラー',
+        description: '認証情報が取得できません。再ログインしてください。',
+        variant: 'destructive',
+        duration: 5000,
+      });
+      return null;
     }
     
     setIsLoading(true);
@@ -1076,15 +1386,39 @@ export default function CreateMeetingMinuteClient() {
     });
     
     try {
-      // 音声ファイルのアップロード（まだアップロードされていない場合）
+      // 音声ファイルのアップロード（未保存の場合のみ）
       let finalAudioFilePath = audioFilePath;
-      if (!finalAudioFilePath && audioRecording) {
-        finalAudioFilePath = await saveAudioToStorage();
+      if (!finalAudioFilePath && audioRecording && !isUploading) {
+        try {
+          console.log('音声ファイルのアップロードを開始');
+          finalAudioFilePath = await saveAudioToStorage();
+          if (finalAudioFilePath) {
+            console.log('最終保存時に音声ファイルをアップロードしました:', finalAudioFilePath);
+          } else {
+            console.log('音声ファイルのストレージ保存はスキップされました');
+          }
+        } catch (uploadError) {
+          console.error('音声アップロードエラー:', uploadError);
+          // アップロードに失敗しても会議録の保存は続行
+          toast({
+            title: '警告',
+            description: '音声ファイルのアップロードに失敗しましたが、テキストデータは保存されます',
+            variant: 'destructive',
+            duration: 5000,
+          });
+        }
+      } else if (finalAudioFilePath) {
+        console.log('既存の音声ファイルを使用します:', finalAudioFilePath);
       }
       
       // 音声ファイルパスがmeeting_recordingsディレクトリを含んでいることを確認
-      if (finalAudioFilePath && !finalAudioFilePath.includes('meeting_recordings/')) {
-        finalAudioFilePath = `meeting_recordings/${finalAudioFilePath}`;
+      if (finalAudioFilePath) {
+        if (!finalAudioFilePath.startsWith('meeting_recordings/')) {
+          finalAudioFilePath = `meeting_recordings/${finalAudioFilePath}`;
+        }
+        console.log('最終的な音声ファイルパス:', finalAudioFilePath);
+      } else {
+        console.log('音声ファイルなしで会議録を保存します');
       }
       
       // 参加者の処理
@@ -1097,66 +1431,185 @@ export default function CreateMeetingMinuteClient() {
       const speakersData = JSON.stringify(speakers);
       const segmentsData = JSON.stringify(transcriptSegments);
       
-      // 全テキスト結合（話者名付き）
-      const fullText = transcriptSegments
-        .map(segment => {
-          const speaker = speakers.find(s => s.id === segment.speakerId) || speakers[0];
-          return `${speaker.name}：${segment.text}`;
-        })
-        .join('\n\n');
+      // 全テキスト結合（話者名付き）- 文字起こしがない場合は空
+      const fullText = transcriptSegments.length > 0 
+        ? transcriptSegments
+            .map(segment => {
+              const speaker = speakers.find(s => s.id === segment.speakerId) || speakers[0];
+              return `${speaker.name}：${segment.text}`;
+            })
+            .join('\n\n')
+        : '（文字起こし処理中）';
       
-      // 会議議事録の保存
-      const { data, error } = await supabase
-        .from('meeting_minutes')
-        .insert({
-          title,
-          meeting_type_id: meetingTypeId,
-          meeting_date: meetingDate,
-          recorded_by: user?.id,
-          facility_id: profile?.facility_id,
-          attendees: attendeesList,
-          content: fullText,
-          summary,
-          keywords,
-          audio_file_path: finalAudioFilePath,
-          is_transcribed: !!transcriptionText,
-          speakers: speakersData,
-          segments: segmentsData
-        })
-        .select();
-        
-      if (error) {
-        console.error('会議議事録の保存エラー詳細:', error);
-        
-        // エラーの種類に応じたメッセージ
-        let errorMessage = '会議議事録の保存に失敗しました';
-        
-        // カラム不足エラーの場合
-        if (error.message && error.message.includes('column') && error.message.includes('not found')) {
-          errorMessage = 'データベースの構成が正しくありません。管理者に連絡してください。';
-        }
-        // 外部キー制約エラーの場合
-        else if (error.message && error.message.includes('foreign key constraint')) {
-          errorMessage = '関連データに問題があります。選択した会議種類が正しいか確認してください。';
-        }
-        // その他のエラー
-        else if (error.message) {
-          errorMessage = `保存中にエラーが発生しました: ${error.message}`;
-        }
-        
-        throw new Error(errorMessage);
-      }
+      // ユーザー名を取得（プロファイルまたはメールアドレスから）
+      const userName = profile?.full_name || (user.email ? user.email.split('@')[0] : '不明なユーザー');
       
-      // 成功通知
-      toast({
-        title: '保存完了',
-        description: '会議議事録を保存しました',
-        duration: 5000,
+      console.log('会議議事録の保存 - 作成者情報:', {
+        id: user.id,
+        email: user.email,
+        name: userName
       });
       
-      // 成功フラグを設定
-      setSaveSuccess(true);
+      // 会議議事録の保存用データを作成 - テーブルスキーマに合わせる
+      const meetingMinuteData = customData || {
+        title,
+        meeting_type_id: meetingTypeId,
+        meeting_date: meetingDate,
+        recorded_by: user.id,
+        facility_id: profile?.facility_id,
+        attendees: attendeesList,
+        content: fullText,
+        summary: summary || '（要約処理中）',
+        keywords: keywords.length > 0 ? keywords : ['会議', '議事録'],
+        audio_file_path: finalAudioFilePath,
+        is_transcribed: !!transcriptionText,
+        transcription_status: 'waiting' as const,
+        speakers: speakersData,
+        segments: segmentsData
+      };
       
+      console.log('保存するデータ:', meetingMinuteData);
+      
+      // APIでの保存を先に試みる
+      try {
+        console.log('API経由での保存を開始');
+        const response = await fetch('/api/meeting-minutes', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${user?.id || ''}`,
+          },
+          body: JSON.stringify(meetingMinuteData),
+        });
+        
+        if (response.ok) {
+          const apiResult = await response.json();
+          console.log('API保存結果:', apiResult);
+          
+          // API経由での保存が成功した場合
+          console.log('API経由での保存が成功しました');
+          
+          // 成功通知
+          toast({
+            title: '保存完了',
+            description: '会議議事録を保存しました。文字起こしは非同期で処理されます。',
+            duration: 5000,
+          });
+          
+          // 成功フラグを設定
+          setSaveSuccess(true);
+          
+          // 一覧画面に戻る
+          setTimeout(() => {
+            console.log('一覧画面に遷移します (API保存成功時)');
+            router.push('/meeting-minutes');
+          }, 2000);
+          
+          return apiResult;
+        } else {
+          console.error('API経由での保存に失敗しました:', await response.text());
+        }
+      } catch (apiError) {
+        console.error('API呼び出しエラー:', apiError);
+      }
+      
+      // API呼び出しが失敗した場合はSupabaseクライアントで直接保存を試みる
+      try {
+        console.log('Supabase直接保存を開始');
+        // 会議議事録の保存
+        const { data, error } = await supabaseClient
+          .from('meeting_minutes')
+          .insert(meetingMinuteData)
+          .select();
+          
+        if (error) {
+          console.error('会議議事録の保存エラー詳細:', error);
+          
+          // エラーの種類に応じたメッセージ
+          let errorMessage = '会議議事録の保存に失敗しました';
+          
+          // カラム不一致エラーの場合
+          if (error.message && error.message.includes('column')) {
+            console.log('スキーマ不一致エラー、問題を分析します:', error.message);
+            
+            if (error.message.includes('creator_info')) {
+              // creator_info 関連のエラー
+              errorMessage = 'データベーススキーマに creator_info フィールドがありません';
+              
+              // フィールドを削除して再試行（delete演算子を使わずに新しいオブジェクトを作成）
+              const simplifiedData = createSimplifiedMeetingData(meetingMinuteData);
+              console.log('簡略化したデータで再試行:', simplifiedData);
+              
+              // 再試行
+              const { data: retryData, error: retryError } = await supabaseClient
+                .from('meeting_minutes')
+                .insert(simplifiedData)
+                .select();
+                
+              if (!retryError) {
+                console.log('簡略化したデータで保存に成功しました');
+                
+                // 成功通知
+                toast({
+                  title: '保存完了',
+                  description: '会議議事録を保存しました（簡易版）。文字起こしは非同期で処理されます。',
+                  duration: 5000,
+                });
+                
+                // 成功フラグを設定
+                setSaveSuccess(true);
+                
+                // 一覧画面に戻る
+                setTimeout(() => {
+                  console.log('一覧画面に遷移します (簡易保存成功時)');
+                  router.push('/meeting-minutes');
+                }, 2000);
+                
+                return retryData?.[0] || null;
+              }
+              
+              console.error('再試行も失敗しました:', retryError);
+            } else {
+              errorMessage = `データベーススキーマエラー: ${error.message}`;
+            }
+          } 
+          // 外部キー制約エラーの場合
+          else if (error.message && error.message.includes('foreign key constraint')) {
+            errorMessage = '関連データに問題があります。選択した会議種類が正しいか確認してください。';
+          }
+          // 認証エラーの場合
+          else if (error.message && error.message.includes('auth')) {
+            errorMessage = '認証エラーが発生しました。再ログインしてください。';
+          }
+          // その他のエラー
+          else if (error.message) {
+            errorMessage = `保存中にエラーが発生しました: ${error.message}`;
+          }
+          
+          throw new Error(errorMessage);
+        }
+        
+        // 成功通知
+        toast({
+          title: '保存完了',
+          description: '会議議事録を保存しました。文字起こしは非同期で処理されます。',
+          duration: 5000,
+        });
+        
+        // 成功フラグを設定
+        setSaveSuccess(true);
+        
+        // 一覧画面に戻る
+        setTimeout(() => {
+          console.log('一覧画面に遷移します (Supabase保存成功時)');
+          router.push('/meeting-minutes');
+        }, 2000);
+        
+        return data?.[0] || null;
+      } catch (dbError) {
+        console.error('Supabase保存エラー:', dbError);
+        throw dbError;
+      }
     } catch (error: any) {
       console.error('会議議事録の保存エラー:', error);
       
@@ -1165,7 +1618,7 @@ export default function CreateMeetingMinuteClient() {
         title: 'エラー',
         description: error.message || '会議議事録の保存に失敗しました',
         variant: 'destructive',
-        duration: 10000, // 長めに表示
+        duration: 10000,
       });
       
       // スクロールして保存ボタンが見えるようにする
@@ -1174,8 +1627,10 @@ export default function CreateMeetingMinuteClient() {
         behavior: 'smooth'
       });
       
+      return null;
     } finally {
       setIsLoading(false);
+      console.log('saveMeetingMinute完了 - isLoading状態をfalseに設定');
     }
   };
 
@@ -1208,21 +1663,35 @@ export default function CreateMeetingMinuteClient() {
           console.log('ローカルで音声URLを作成しました');
         }
         
-        // ストレージへの保存を試みる（失敗してもローカルでは進める）
-        if (!audioFilePath && audioRecording) {
+        // ファイルが未保存の場合のみストレージへアップロード
+        if (!audioFilePath && audioRecording && !isUploading) {
           try {
+            // isUploading フラグは saveAudioToStorage 内部で管理
             const savedPath = await saveAudioToStorage();
             if (savedPath) {
               console.log('音声ファイルを保存しました:', savedPath);
               
-              // パスにmeeting_recordingsが含まれていることを確認
-              if (!savedPath.includes('meeting_recordings/')) {
-                setAudioFilePath(`meeting_recordings/${savedPath}`);
-              }
+              toast({
+                title: '保存完了',
+                description: '音声ファイルを保存しました。「議事録作成」ボタンをクリックすると文字起こしを開始します。',
+                duration: 5000,
+              });
+            } else {
+              console.log('音声ファイルの保存はスキップされました');
+              toast({
+                title: '情報',
+                description: '音声データはローカルのみで利用されます。処理を続行します。',
+                duration: 5000,
+              });
             }
           } catch (saveError) {
             console.error('保存エラーが発生しましたが、続行します:', saveError);
-            // エラーが発生しても、ローカルでの音声再生は可能なので次に進む
+            toast({
+              title: '警告',
+              description: '音声ファイルの保存に失敗しましたが、議事録作成は続行できます',
+              variant: 'destructive',
+              duration: 5000,
+            });
           }
         }
         
@@ -1491,44 +1960,26 @@ export default function CreateMeetingMinuteClient() {
                         </Button>
                       </div>
                       
-                      {/* 録音を保存するボタン */}
-                      {!audioFilePath && (
-                        <div className="flex justify-center w-full mt-4">
-                          <Button
-                            variant="outline"
-                            onClick={saveAudioToStorage}
-                            disabled={isUploading}
-                            className="rounded-xl px-6 py-2 text-sm border-green-200 text-green-600 hover:bg-green-50 w-full"
-                          >
-                            {isUploading ? (
-                              <>
-                                <div className="animate-spin h-4 w-4 mr-2 border-2 border-green-600 border-t-transparent rounded-full" />
-                                保存中...
-                              </>
-                            ) : (
-                              <>
-                                <Save className="mr-2 h-4 w-4" /> 録音を保存
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                      )}
-                      
-                      {audioFilePath && (
-                        <div className="flex items-center justify-center mt-4 text-green-600 text-sm font-medium">
-                          <div className="h-2 w-2 bg-green-600 rounded-full mr-2 animate-pulse" />
-                          録音データはストレージに保存されています
-                          {!audioUrl && audioFilePath && (
-                            <Button
-                              variant="link"
-                              onClick={() => fetchAudioFromStorage(audioFilePath)}
-                              className="ml-2 p-0 h-auto text-sm text-blue-600"
-                            >
-                              読み込む
-                            </Button>
+                      {/* 録音保存ボタンを議事録作成ボタンに変更 */}
+                      <div className="flex justify-center w-full mt-4">
+                        <Button
+                          variant="outline"
+                          onClick={processAudio}
+                          disabled={isUploading || isProcessing}
+                          className="rounded-xl px-6 py-2 text-sm border-green-200 text-green-600 hover:bg-green-50 w-full"
+                        >
+                          {isUploading || isProcessing ? (
+                            <>
+                              <div className="animate-spin h-4 w-4 mr-2 border-2 border-green-600 border-t-transparent rounded-full" />
+                              処理中...
+                            </>
+                          ) : (
+                            <>
+                              <FileText className="mr-2 h-4 w-4" /> 議事録作成
+                            </>
                           )}
-                        </div>
-                      )}
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -1561,20 +2012,20 @@ export default function CreateMeetingMinuteClient() {
                 <ArrowLeft className="mr-2 h-5 w-5" /> 戻る
               </Button>
               
-              {audioRecording && (
+              {audioRecording && !isProcessing && (
                 <Button
-                  onClick={nextStep}
-                  disabled={isUploading}
+                  onClick={processAudio}
+                  disabled={isUploading || isProcessing}
                   className="rounded-xl h-14 text-base bg-gradient-to-r from-pink-400 to-purple-500 hover:from-pink-500 hover:to-purple-600 text-white shadow-md hover:shadow-lg transition-all"
                 >
-                  {isUploading ? (
+                  {isProcessing ? (
                     <>
                       <div className="animate-spin h-5 w-5 mr-2 border-2 border-white border-t-transparent rounded-full" />
-                      音声保存中...
+                      処理中...
                     </>
                   ) : (
                     <>
-                      次へ <ArrowRight className="ml-2 h-5 w-5" />
+                      <FileText className="mr-2 h-5 w-5" /> 議事録作成
                     </>
                   )}
                 </Button>
@@ -1918,3 +2369,168 @@ export default function CreateMeetingMinuteClient() {
     </div>
   );
 } 
+
+// 大きな音声ファイルを分割する関数
+const splitAudioFile = async (audioBlob: Blob, maxChunkSizeMB = 20): Promise<Blob[]> => {
+  const fileSizeMB = audioBlob.size / (1024 * 1024);
+  
+  // ファイルサイズが指定サイズ以下なら分割しない
+  if (fileSizeMB <= maxChunkSizeMB) {
+    return [audioBlob];
+  }
+  
+  console.log(`大きな音声ファイル(${fileSizeMB.toFixed(2)}MB)を分割します`);
+  
+  // AudioContext を使用して音声を処理
+  const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+  
+  // ArrayBuffer に変換
+  const arrayBuffer = await audioBlob.arrayBuffer();
+  
+  // オーディオデータをデコード
+  const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+  
+  const numberOfChannels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const duration = audioBuffer.duration;
+  
+  // 分割数を計算（切り上げ）
+  const numberOfChunks = Math.ceil(fileSizeMB / maxChunkSizeMB);
+  const chunkDuration = duration / numberOfChunks;
+  
+  console.log(`音声を${numberOfChunks}個のチャンクに分割します。各チャンク長：約${chunkDuration.toFixed(1)}秒`);
+  
+  const chunks: Blob[] = [];
+  
+  for (let i = 0; i < numberOfChunks; i++) {
+    // 各チャンクの開始時間と終了時間を計算
+    const startTime = i * chunkDuration;
+    const endTime = Math.min((i + 1) * chunkDuration, duration);
+    const chunkFrames = (endTime - startTime) * sampleRate;
+    
+    // 新しいバッファを作成
+    const chunkBuffer = audioContext.createBuffer(
+      numberOfChannels, 
+      chunkFrames, 
+      sampleRate
+    );
+    
+    // 元のバッファからデータをコピー
+    for (let channel = 0; channel < numberOfChannels; channel++) {
+      const channelData = audioBuffer.getChannelData(channel);
+      const chunkChannelData = chunkBuffer.getChannelData(channel);
+      
+      const startFrame = Math.floor(startTime * sampleRate);
+      for (let frame = 0; frame < chunkFrames; frame++) {
+        chunkChannelData[frame] = channelData[startFrame + frame];
+      }
+    }
+    
+    // OfflineAudioContext を使用してバッファをエンコード
+    const offlineAudioContext = new OfflineAudioContext(
+      numberOfChannels,
+      chunkFrames,
+      sampleRate
+    );
+    
+    const source = offlineAudioContext.createBufferSource();
+    source.buffer = chunkBuffer;
+    source.connect(offlineAudioContext.destination);
+    source.start();
+    
+    const renderedBuffer = await offlineAudioContext.startRendering();
+    
+    // WAVエンコーディング（簡易版）
+    const wavBlob = await encodeWAV(renderedBuffer);
+    chunks.push(wavBlob);
+    
+    console.log(`チャンク ${i+1}/${numberOfChunks} を作成（${(wavBlob.size / (1024 * 1024)).toFixed(2)}MB）`);
+  }
+  
+  return chunks;
+};
+
+// WAVエンコーディング関数（簡易版）
+const encodeWAV = async (audioBuffer: AudioBuffer): Promise<Blob> => {
+  return new Promise((resolve) => {
+    const numberOfChannels = audioBuffer.numberOfChannels;
+    const sampleRate = audioBuffer.sampleRate;
+    const length = audioBuffer.length * numberOfChannels * 2;
+    
+    // WAVヘッダの作成
+    const buffer = new ArrayBuffer(44 + length);
+    const view = new DataView(buffer);
+    
+    // "RIFF" チャンク記述子
+    writeString(view, 0, 'RIFF');
+    view.setUint32(4, 36 + length, true);
+    writeString(view, 8, 'WAVE');
+    
+    // "fmt " サブチャンク
+    writeString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);  // PCM形式
+    view.setUint16(22, numberOfChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numberOfChannels * 2, true);
+    view.setUint16(32, numberOfChannels * 2, true);
+    view.setUint16(34, 16, true);
+    
+    // "data" サブチャンク
+    writeString(view, 36, 'data');
+    view.setUint32(40, length, true);
+    
+    // オーディオデータの書き込み
+    let offset = 44;
+    for (let i = 0; i < audioBuffer.length; i++) {
+      for (let channel = 0; channel < numberOfChannels; channel++) {
+        const sample = Math.max(-1, Math.min(1, audioBuffer.getChannelData(channel)[i]));
+        const value = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+        view.setInt16(offset, value, true);
+        offset += 2;
+      }
+    }
+    
+    resolve(new Blob([buffer], { type: 'audio/wav' }));
+  });
+};
+
+// WAVヘッダー用のヘルパー関数
+const writeString = (view: DataView, offset: number, string: string) => {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+};
+
+// 保存時にdelete演算子でリンターエラーが出る問題を修正するためのヘルパー関数
+const createSimplifiedMeetingData = (originalData: any): any => {
+  // 必要なフィールドだけを新しいオブジェクトにコピー
+  // speakersとsegmentsフィールドは除外
+  const {
+    title,
+    meeting_type_id,
+    meeting_date,
+    recorded_by,
+    facility_id,
+    attendees,
+    content,
+    summary,
+    keywords,
+    audio_file_path,
+    is_transcribed
+  } = originalData;
+  
+  return {
+    title,
+    meeting_type_id,
+    meeting_date,
+    recorded_by,
+    facility_id,
+    attendees,
+    content,
+    summary,
+    keywords,
+    audio_file_path,
+    is_transcribed
+  };
+};

@@ -43,7 +43,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useFacility } from '@/hooks/use-facility';
 import { useAuth } from '@/hooks/use-auth';
-import { MeetingMinute } from '@/types/meeting-minutes';
+import { MeetingMinute, MeetingType } from '@/types/meeting-minutes';
 import { supabase } from '@/lib/supabaseClient';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
@@ -122,6 +122,7 @@ export default function MeetingMinuteDetailClient({ meetingMinuteId }: { meeting
   const [isResummarizing, setIsResummarizing] = useState(false);
   const [focusedSegmentId, setFocusedSegmentId] = useState<string | null>(null);
   const [playbackRate, setPlaybackRate] = useState(1.0);
+  const [audioSrc, setAudioSrc] = useState('');
 
   // 議事録データの取得
   const fetchMeetingMinute = useCallback(async () => {
@@ -142,19 +143,14 @@ export default function MeetingMinuteDetailClient({ meetingMinuteId }: { meeting
         // 既に完全なURLの場合はそのまま使用、そうでなければURLを構築
         if (!data.audio_file_path.startsWith('http')) {
           try {
-            // ファイル名を取得
-            const fileName = data.audio_file_path.split('/').pop();
+            // ファイル名のみを抽出（パスを含む場合は除去）
+            const fileName = data.audio_file_path.split('/').pop() || data.audio_file_path;
             
-            if (fileName) {
-              // 新しいバケット「minutesaudio」を使用
-              const apiUrl = `/api/meeting-minutes/audio/${encodeURIComponent(fileName)}`;
-              data.audio_file_path = apiUrl;
-              
-              console.log('音声ファイルURL:', apiUrl);
-            } else {
-              console.error('ファイル名を抽出できませんでした');
-              data.audio_file_path = '';
-            }
+            // APIのURLを構築
+            const apiUrl = `/api/meeting-minutes/audio/${encodeURIComponent(fileName)}`;
+            data.audio_file_path = apiUrl;
+            
+            console.log('音声ファイルURL:', apiUrl);
           } catch (urlError) {
             console.error('URLの生成中にエラーが発生:', urlError);
             data.audio_file_path = '';
@@ -168,6 +164,19 @@ export default function MeetingMinuteDetailClient({ meetingMinuteId }: { meeting
       // 話者と発言セグメントのデータを初期化
       if (data.is_transcribed && data.content) {
         initializeTranscriptData(data.content);
+      }
+
+      const audioPath = data.audio_file_path;
+      
+      if (audioPath) {
+        // ファイル名のみを抽出（プレフィックス除去なし）
+        const fileName = audioPath;
+        
+        console.log(`Audio file path: ${audioPath}`);
+        console.log(`File name for API: ${fileName}`);
+        
+        // 現在時刻をクエリパラメータとして追加してキャッシュを防止
+        setAudioSrc(`/api/meeting-minutes/audio/${encodeURIComponent(fileName)}?t=${Date.now()}`);
       }
     } catch (error) {
       console.error('議事録取得エラー:', error);
@@ -392,10 +401,11 @@ export default function MeetingMinuteDetailClient({ meetingMinuteId }: { meeting
   const addNewSpeaker = () => {
     if (!newSpeakerName.trim()) return;
     
+    const colorIndex = speakers.length % SPEAKER_COLORS.length;
     const newSpeaker: Speaker = {
       id: `speaker-${Date.now()}`,
-      name: newSpeakerName.trim(),
-      color: SPEAKER_COLORS[speakers.length % SPEAKER_COLORS.length],
+      name: newSpeakerName,
+      color: SPEAKER_COLORS[colorIndex],
     };
     
     setSpeakers([...speakers, newSpeaker]);
@@ -404,74 +414,65 @@ export default function MeetingMinuteDetailClient({ meetingMinuteId }: { meeting
 
   // セグメントの話者変更
   const changeSpeakerForSegment = (segmentId: string, speakerId: string) => {
-    setSegments(segments.map(segment => 
-      segment.id === segmentId ? { ...segment, speakerId } : segment
-    ));
+    setSegments(prevSegments => 
+      prevSegments.map(segment => 
+        segment.id === segmentId ? { ...segment, speakerId } : segment
+      )
+    );
   };
 
   // セグメントのテキスト編集
   const updateSegmentText = (segmentId: string, text: string) => {
-    setSegments(segments.map(segment => 
-      segment.id === segmentId ? { ...segment, text } : segment
-    ));
+    setSegments(prevSegments => 
+      prevSegments.map(segment => 
+        segment.id === segmentId ? { ...segment, text } : segment
+      )
+    );
   };
 
   // セグメント編集の開始/終了
   const toggleSegmentEditing = (segmentId: string) => {
-    setSegments(segments.map(segment => 
-      segment.id === segmentId 
-        ? { ...segment, isEditing: !segment.isEditing } 
-        : { ...segment, isEditing: false }
-    ));
+    setSegments(prevSegments => 
+      prevSegments.map(segment => 
+        segment.id === segmentId ? { ...segment, isEditing: !segment.isEditing } : segment
+      )
+    );
   };
 
   // ダウンロードボタンのハンドラ
   const handleDownload = () => {
-    if (!meetingMinute) return;
-    
-    const fileName = `${meetingMinute.title}_${format(new Date(meetingMinute.meeting_date), 'yyyyMMdd')}.txt`;
-    const content = `
-${meetingMinute.title}
-日時: ${format(new Date(meetingMinute.meeting_date), 'yyyy年MM月dd日', { locale: ja })}
-出席者: ${meetingMinute.attendees?.join(', ') || ''}
+    if (!meetingMinute?.audio_file_path) {
+      toast({
+        title: 'エラー',
+        description: 'ダウンロード可能なファイルがありません',
+        variant: 'destructive',
+      });
+      return;
+    }
 
-【要約】
-${meetingMinute.summary || '要約はありません'}
-
-【議事内容】
-${meetingMinute.content || '議事内容はありません'}
-    `.trim();
+    // ファイル名の取得
+    const fileName = meetingMinute.audio_file_path.split('/').pop() || 'meeting_recording.wav';
     
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // ファイルのURLを使用してダウンロード
+    const anchor = document.createElement('a');
+    anchor.href = audioSrc;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
   };
 
   // 再生速度の変更
   const changePlaybackRate = () => {
-    if (!audioRef.current) return;
-    
-    // 再生速度を順番に切り替え (1.0 -> 1.25 -> 1.5 -> 1.75 -> 2.0 -> 0.75 -> 1.0)
-    const speeds = [1.0, 1.25, 1.5, 1.75, 2.0, 0.75];
-    const currentIndex = speeds.indexOf(playbackRate);
-    const nextIndex = (currentIndex + 1) % speeds.length;
-    const newRate = speeds[nextIndex];
-    
-    audioRef.current.playbackRate = newRate;
-    setPlaybackRate(newRate);
-    
-    // 変更を通知
-    toast({
-      title: '再生速度変更',
-      description: `${newRate}倍速`,
-      duration: 2000,
-    });
+    // 1.0, 1.25, 1.5, 1.75, 2.0の順にループ
+    const rates = [1.0, 1.25, 1.5, 1.75, 2.0];
+    const currentIndex = rates.indexOf(playbackRate);
+    const nextIndex = (currentIndex + 1) % rates.length;
+    setPlaybackRate(rates[nextIndex]);
+
+    if (audioRef.current) {
+      audioRef.current.playbackRate = rates[nextIndex];
+    }
   };
 
   // 音声プレーヤーコンポーネント
@@ -479,13 +480,22 @@ ${meetingMinute.content || '議事内容はありません'}
     // ファイル名のみを抽出（パスを含む場合は除去）
     const fileName = audioFilePath.split('/').pop() || audioFilePath;
     
-    // 新しいバケット「minutesaudio」を使用
-    const apiUrl = `/api/meeting-minutes/audio/${encodeURIComponent(fileName)}`;
+    // meeting_recordings/ディレクトリ内のファイルかどうかを確認
+    const isInRecordingsSubdir = audioFilePath.includes('meeting_recordings/');
+    
+    // APIエンドポイントのURL構築
+    // meeting_recordings/を含むパスの場合はそのまま使用、そうでなければmeeting_recordings/を追加
+    const apiPathParam = isInRecordingsSubdir 
+      ? audioFilePath
+      : `meeting_recordings/${fileName}`;
+    
+    const encodedApiPathParam = encodeURIComponent(apiPathParam);
+    const apiUrl = `/api/meeting-minutes/audio/${encodedApiPathParam}`;
     
     // タイムスタンプ付きのフォールバックURL（キャッシュ回避用）
     const apiUrlWithTimestamp = `${apiUrl}?t=${Date.now()}`;
     
-    // 複数のURLフォールバック - 両方ともファイル名のみを使用
+    // 複数のURLフォールバック
     const audioUrls = [
       apiUrl,                   // 基本URL
       apiUrlWithTimestamp,      // タイムスタンプ付き
@@ -591,8 +601,8 @@ ${meetingMinute.content || '議事内容はありません'}
       audio_file_path,
       speakers,
       segments,
-      meeting_type,
-      recorded_by_user,
+      meeting_types,
+      recorded_by,
       attendees
     } = meetingMinute;
     
@@ -638,14 +648,14 @@ ${meetingMinute.content || '議事内容はありません'}
                 <div className="text-sm bg-white/60 text-purple-700 px-3 py-1 rounded-full border border-purple-200">
                   <Calendar className="inline-block h-4 w-4 mr-1 relative -top-[1px]" /> {formattedDate}
                 </div>
-                {meeting_type?.name && (
+                {meeting_types?.name && (
                   <div className="text-sm bg-white/60 text-purple-700 px-3 py-1 rounded-full border border-purple-200">
-                    <Users className="inline-block h-4 w-4 mr-1 relative -top-[1px]" /> {meeting_type.name}
+                    <Users className="inline-block h-4 w-4 mr-1 relative -top-[1px]" /> {meeting_types.name}
                   </div>
                 )}
-                {recorded_by_user?.email && (
+                {recorded_by && (
                   <div className="text-sm bg-white/60 text-purple-700 px-3 py-1 rounded-full border border-purple-200">
-                    <UserCircle className="inline-block h-4 w-4 mr-1 relative -top-[1px]" /> {recorded_by_user.email}
+                    <UserCircle className="inline-block h-4 w-4 mr-1 relative -top-[1px]" /> {recorded_by}
                   </div>
                 )}
               </div>
@@ -698,8 +708,8 @@ ${meetingMinute.content || '議事内容はありません'}
                 <div className="mt-6">
                   <h3 className="text-lg font-semibold text-purple-900 mb-2">会議内容</h3>
                   <div className="space-y-4">
-                    {segmentsData.map((segment, index) => {
-                      const speaker = speakersData.find(s => s.id === segment.speakerId) || { name: '話者不明', color: '#666666' };
+                    {segmentsData.map((segment: any, index: number) => {
+                      const speaker = speakersData.find((s: any) => s.id === segment.speakerId) || { name: '話者不明', color: '#666666' };
                       return (
                         <div 
                           key={index} 
@@ -806,22 +816,22 @@ ${meetingMinute.content || '議事内容はありません'}
                   <div className="flex flex-wrap gap-y-2">
                     <div className="flex items-center text-sm text-slate-600 mr-4">
                       <Calendar className="h-4 w-4 mr-1 text-slate-400" />
-                      {format(new Date(meetingMinute.meeting_date), 'yyyy年MM月dd日', { locale: ja })}
+                      {format(new Date((meetingMinute as MeetingMinute).meeting_date), 'yyyy年MM月dd日', { locale: ja })}
                     </div>
                     
                     <div className="flex items-center text-sm text-slate-600">
                       <Users className="h-4 w-4 mr-1 text-slate-400" />
-                      {meetingMinute.attendees?.length > 0 
-                        ? `${meetingMinute.attendees.length}名` 
+                      {(meetingMinute as MeetingMinute).attendees?.length > 0 
+                        ? `${(meetingMinute as MeetingMinute).attendees.length}名` 
                         : '参加者情報なし'}
                     </div>
                   </div>
                   
-                  {meetingMinute.is_transcribed && meetingMinute.audio_file_path && (
+                  {(meetingMinute as MeetingMinute).is_transcribed && (meetingMinute as MeetingMinute).audio_file_path && (
                     <div className="mt-4">
                       <audio 
                         ref={audioRef} 
-                        src={meetingMinute.audio_file_path}
+                        src={audioSrc}
                         className="hidden" 
                         controls 
                         preload="metadata"
@@ -874,8 +884,8 @@ ${meetingMinute.content || '議事内容はありません'}
                             // 現在のソースURLを確認
                             const currentSrc = audioElement.src || '';
                             
-                            // ファイル名抽出 - パスは無視
-                            const fileName = meetingMinute?.audio_file_path?.split('/').pop() || 
+                            // ファイル名抽出 - パスを保持
+                            const fileName = (meetingMinute as MeetingMinute).audio_file_path?.split('/').pop() || 
                                             currentSrc.split('/').pop()?.split('?')[0] || '';
                             
                             if (!fileName) {
@@ -884,6 +894,7 @@ ${meetingMinute.content || '議事内容はありません'}
                             }
                             
                             // 新しいバケット「minutesaudio」を使用
+                            // meeting_recordings/ プレフィックスを使用する
                             const newUrl = `/api/meeting-minutes/audio/${encodeURIComponent(fileName)}?t=${Date.now()}`;
                             console.log('音声ファイルの再試行URL:', newUrl);
                             
@@ -903,7 +914,7 @@ ${meetingMinute.content || '議事内容はありません'}
                         {/* 日付・参加者情報 */}
                         <div className="flex items-center justify-between mb-4">
                           <div className="text-xs text-slate-600">
-                            録音日: {format(new Date(meetingMinute.meeting_date), 'yyyy年MM月dd日', { locale: ja })}
+                            録音日: {format(new Date((meetingMinute as MeetingMinute).meeting_date), 'yyyy年MM月dd日', { locale: ja })}
                           </div>
                           <div className="text-xs text-slate-600">
                             長さ: {formatTime(duration || 0)}
@@ -1080,7 +1091,7 @@ ${meetingMinute.content || '議事内容はありません'}
                     variant="ghost" 
                     size="sm" 
                     onClick={regenerateSummary}
-                    disabled={isResummarizing || !meetingMinute.is_transcribed}
+                    disabled={isResummarizing || !(meetingMinute as MeetingMinute).is_transcribed}
                     className="h-8"
                   >
                     {isResummarizing ? (
@@ -1092,8 +1103,8 @@ ${meetingMinute.content || '議事内容はありません'}
                   </Button>
                 </div>
                 <Card className="p-4 bg-white">
-                  {meetingMinute.summary ? (
-                    <p className="text-sm whitespace-pre-wrap">{meetingMinute.summary}</p>
+                  {(meetingMinute as MeetingMinute).summary ? (
+                    <p className="text-sm whitespace-pre-wrap">{(meetingMinute as MeetingMinute).summary}</p>
                   ) : (
                     <p className="text-sm text-slate-500 italic">要約はまだありません</p>
                   )}
@@ -1148,7 +1159,7 @@ ${meetingMinute.content || '議事内容はありません'}
                 <div className="flex items-center justify-between mb-2">
                   <h2 className="text-lg font-semibold">議事内容</h2>
                   
-                  {meetingMinute.is_transcribed && (
+                  {(meetingMinute as MeetingMinute).is_transcribed && (
                     <Button 
                       variant="outline" 
                       size="sm" 
@@ -1161,7 +1172,7 @@ ${meetingMinute.content || '議事内容はありません'}
                   )}
                 </div>
                 
-                {meetingMinute.is_transcribed ? (
+                {(meetingMinute as MeetingMinute).is_transcribed ? (
                   <div className="space-y-3">
                     {segments.map((segment, index) => (
                       <div 
@@ -1243,8 +1254,8 @@ ${meetingMinute.content || '議事内容はありません'}
                   </div>
                 ) : (
                   <Card className="p-4 bg-white">
-                    {meetingMinute.content ? (
-                      <p className="text-sm whitespace-pre-wrap">{meetingMinute.content}</p>
+                    {(meetingMinute as MeetingMinute).content ? (
+                      <p className="text-sm whitespace-pre-wrap">{(meetingMinute as MeetingMinute).content}</p>
                     ) : (
                       <p className="text-sm text-slate-500 italic">議事内容はまだありません</p>
                     )}

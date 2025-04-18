@@ -11,7 +11,8 @@
     "generate-pwa-icons": "node scripts/convert-svg-to-png.js",
     "setup-pwa": "bash scripts/generate-pwa-assets.sh",
     "vercel-build": "next build",
-    "check-missing-records": "ts-node scripts/check_missing_records.ts"
+    "check-missing-records": "ts-node scripts/check_missing_records.ts",
+    "create-minutesaudio-bucket": "node create_minutesaudio_bucket.js"
   },
   "dependencies": {
     "@holiday-jp/holiday_jp": "2.4.0",

@@ -19,7 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { supabase } from "@/lib/supabaseClient";
+import supabase from "@/lib/supabaseClient";
 import { useAuth } from "@/contexts/AuthContext";
 import { setSessionCheckEnabled } from "@/contexts/AuthContext";
 import Papa from 'papaparse'; // CSVパーサーライブラリを追加

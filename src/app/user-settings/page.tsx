@@ -12,7 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { AppHeader } from "@/components/ui/app-header";
 import { Separator } from "@/components/ui/separator";
 import { motion } from "framer-motion";
-import { supabase } from "@/lib/supabaseClient";
+import supabase from "@/lib/supabaseClient";
 
 type FormValues = {
   lastName: string;

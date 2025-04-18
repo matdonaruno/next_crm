@@ -13,6 +13,9 @@ export interface MeetingMinute {
   title: string;
   meeting_date: string;
   recorded_by: string;
+  recorded_by_name?: string;
+  recorded_by_email?: string;
+  creator_info?: string;  // JSON文字列
   facility_id: string;
   department_id?: string;
   attendees: string[];
@@ -20,6 +23,7 @@ export interface MeetingMinute {
   summary?: string;
   audio_file_path?: string;
   is_transcribed: boolean;
+  transcription_status?: 'waiting' | 'processing' | 'completed' | 'failed';  // 文字起こし状態
   keywords: string[];
   created_at: string;
   updated_at: string;

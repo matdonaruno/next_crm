@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ThermometerSnowflake, Wrench, ChartLine, FlaskRound, AlertTriangle, FileText, Mic } from 'lucide-react';
+import { ThermometerSnowflake, Wrench, ChartLine, FlaskRound, AlertTriangle, FileText } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { useState, useEffect, useCallback } from 'react';
@@ -55,14 +55,6 @@ const menuItems = [
     path: '/reagent_dash',
     color: 'bg-dashboard-purple',
     tooltip: '試薬在庫管理'
-  },
-  {
-    title: 'Meeting Minutes Management',
-    description: 'Record and search meeting minutes',
-    icon: Mic,
-    path: '/meeting-minutes',
-    color: 'bg-dashboard-pink',
-    tooltip: '会議議事録管理'
   },
 ];
 

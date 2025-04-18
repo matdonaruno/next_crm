@@ -30,7 +30,7 @@ export default function MeetingSearchChatbot({ facilityId, isOpen, onClose }: Me
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
-      content: 'こんにちは！会議議事録について質問してください。例えば「先週の会議の内容は？」や「マリオに関する議事録を探して」など、質問や検索キーワードを入力できます。'
+      content: 'こんにちは！会議議事録について質問してください。例えば「先週の会議の内容は？」や「○○に関する議事録を探して」など、単語単位でも質問できます。質問や検索キーワードを入力してください。'
     }
   ]);
   const [inputText, setInputText] = useState('');
@@ -65,6 +65,16 @@ export default function MeetingSearchChatbot({ facilityId, isOpen, onClose }: Me
       return [];
     }
 
+    if (!facilityId) {
+      toast({
+        title: 'エラー',
+        description: '施設情報が取得できません。ユーザープロファイルを確認してください。',
+        variant: 'destructive',
+      });
+      return [];
+    }
+
+    console.log('会議議事録を検索します:', { query, facilityId });
     setIsSearching(true);
 
     try {
@@ -86,6 +96,7 @@ export default function MeetingSearchChatbot({ facilityId, isOpen, onClose }: Me
       }
 
       const data = await response.json();
+      console.log('検索結果:', data.results?.length || 0, '件');
       return data.results || [];
     } catch (error) {
       console.error('検索エラー:', error);

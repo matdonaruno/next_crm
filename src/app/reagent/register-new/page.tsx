@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, Suspense } from "react";
 import { useForm } from "react-hook-form";
-import { supabase } from "@/lib/supabaseClient";
+import supabase from "@/lib/supabaseClient";
 import { useRouter, useSearchParams } from "next/navigation";
 import Papa from "papaparse";
 import {

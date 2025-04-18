@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import supabaseClient from '@/lib/supabaseClient';
 import { Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -28,7 +28,7 @@ export default function UserNotifications() {
     let mounted = true;
 
     async function fetchNotifications() {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseClient
         .from('user_notifications')
         .select('*')
         .order('created_at', { ascending: false })
@@ -49,7 +49,7 @@ export default function UserNotifications() {
     fetchNotifications();
 
     // リアルタイム更新をリッスン
-    const channel = supabase
+    const channel = supabaseClient
       .channel('user_notifications_changes')
       .on(
         'postgres_changes',
@@ -68,13 +68,13 @@ export default function UserNotifications() {
 
     return () => {
       mounted = false;
-      supabase.removeChannel(channel);
+      supabaseClient.removeChannel(channel);
     };
   }, []); // 依存配列は空のまま
 
   // 通知を既読にする
   const markAsRead = async (notificationId: string) => {
-    const { error } = await supabase
+    const { error } = await supabaseClient
       .from('user_notifications')
       .update({ is_read: true })
       .eq('id', notificationId);
@@ -99,7 +99,7 @@ export default function UserNotifications() {
 
   // すべての通知を既読にする
   const markAllAsRead = async () => {
-    const { error } = await supabase
+    const { error } = await supabaseClient
       .from('user_notifications')
       .update({ is_read: true })
       .in(

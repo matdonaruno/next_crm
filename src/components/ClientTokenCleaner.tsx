@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import supabaseClient from "@/lib/supabaseClient";
 import Cookies from 'js-cookie';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
@@ -108,7 +108,7 @@ export function ClientTokenCleaner() {
       // 現在のセッションを確認
       const checkSession = async () => {
         try {
-          const { data, error } = await supabase.auth.getSession();
+          const { data, error } = await supabaseClient.auth.getSession();
           
           console.log("ClientTokenCleaner: セッション確認", {
             hasSession: !!data.session,
@@ -127,7 +127,7 @@ export function ClientTokenCleaner() {
             console.log("ClientTokenCleaner: セッションとクッキーの不整合を検出");
             
             // セッションをクリアして再ログインを促す
-            await supabase.auth.signOut({ scope: 'local' });
+            await supabaseClient.auth.signOut({ scope: 'local' });
             
             // リダイレクト状態をセット
             setRedirecting(true);

@@ -10,6 +10,8 @@ const openai = new OpenAI({
 
 export async function POST(request: NextRequest) {
   try {
+    console.log('API: 要約処理開始');
+    
     // APIキーの確認
     if (!process.env.OPENAI_API_KEY) {
       console.error('API: OpenAIのAPIキーが設定されていません');
@@ -18,23 +20,36 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    // 認証チェック
+    // 認証チェック（必須）
     const authHeader = request.headers.get('Authorization');
+    console.log('API: 認証ヘッダー:', authHeader ? 'あり' : 'なし');
+    
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       console.error('API: 認証ヘッダーがありません');
-      return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
+      return NextResponse.json({ error: '認証が必要です。ログインしてください。' }, { status: 401 });
     }
-
+    
     // Supabaseクライアントの初期化
     const cookieStore = cookies();
     const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
     
-    // 認証情報の確認
+    // セッションの確認
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError || !session) {
+    
+    if (sessionError) {
       console.error('API: セッション取得エラー:', sessionError);
-      return NextResponse.json({ error: '認証セッションが無効です' }, { status: 401 });
+      return NextResponse.json({ 
+        error: '認証エラー: セッションの取得に失敗しました', 
+        message: sessionError.message 
+      }, { status: 401 });
     }
+    
+    if (!session) {
+      console.error('API: 有効なセッションがありません');
+      return NextResponse.json({ error: '認証エラー: 有効なセッションがありません。再ログインしてください。' }, { status: 401 });
+    }
+    
+    console.log('API: 認証済みユーザー:', session.user.id);
 
     // リクエストボディの解析
     const body = await request.json();
@@ -66,7 +81,20 @@ export async function POST(request: NextRequest) {
 
     // レスポンスからJSONを抽出
     const content = response.choices[0].message.content;
-    const result = content ? JSON.parse(content) : null;
+    let result;
+    
+    try {
+      result = content ? JSON.parse(content) : null;
+    } catch (parseError) {
+      console.error('API: JSON解析エラー:', parseError);
+      console.log('API: 受信したGPTレスポンス:', content);
+      
+      // JSONでなかった場合はデフォルト値を設定
+      result = {
+        summary: content || "要約の生成に失敗しました",
+        keywords: []
+      };
+    }
     
     if (!result) {
       return NextResponse.json({ error: '要約の生成に失敗しました' }, { status: 500 });

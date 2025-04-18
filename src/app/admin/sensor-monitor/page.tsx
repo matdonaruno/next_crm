@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseClient';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Activity, Terminal, RefreshCw, AlertTriangle, Thermometer, Droplets, Gauge } from 'lucide-react';
 import { Button } from '@/components/ui/button';

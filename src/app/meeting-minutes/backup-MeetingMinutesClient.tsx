@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useCallback } from 'react';
-import { Mic, Plus, Search, FileText, Calendar, ChevronRight, MessageSquare, Clock, Filter, UserCircle, CheckCircle, XCircle } from 'lucide-react';
+import { Mic, Plus, Search, FileText, Calendar, ChevronRight, MessageSquare, Clock, Filter } from 'lucide-react';
 import { format } from 'date-fns';
 import { ja } from 'date-fns/locale';
 import { AppHeader } from '@/components/ui/app-header';
@@ -17,7 +17,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/use-auth';
 import { MeetingMinute, MeetingType } from '@/types/meeting-minutes';
-import supabaseClient from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseClient';
 import dynamic from 'next/dynamic';
 
 // よりモダンでスムーズなアニメーション
@@ -111,7 +111,7 @@ export default function MeetingMinutesClient() {
     if (!user?.id) return null;
 
     try {
-      const { data, error } = await supabaseClient.from('profiles').select('facility_id').eq('id', user.id).single();
+      const { data, error } = await supabase.from('profiles').select('facility_id').eq('id', user.id).single();
 
       if (error) {
         console.error('施設ID取得エラー:', error);
@@ -188,7 +188,7 @@ export default function MeetingMinutesClient() {
 
       // 方法2: 直接Supabaseクライアントを使用
       console.log('直接Supabaseクエリを実行します');
-      const { data: directData, error: directError } = await supabaseClient
+      const { data: directData, error: directError } = await supabase
         .from('meeting_minutes')
         .select('*')
         .eq('facility_id', currentFacilityId) // 現在の施設IDを使用
@@ -200,7 +200,7 @@ export default function MeetingMinutesClient() {
       }
 
       // 総レコード数を確認して詳細表示
-      const { count, error: countError } = await supabaseClient
+      const { count, error: countError } = await supabase
         .from('meeting_minutes')
         .select('*', { count: 'exact', head: true });
 
@@ -312,7 +312,7 @@ export default function MeetingMinutesClient() {
 
     try {
       // 不一致のレコードを取得
-      const { data: wrongRecords, error: findError } = await supabaseClient
+      const { data: wrongRecords, error: findError } = await supabase
         .from('meeting_minutes')
         .select('id, facility_id')
         .neq('facility_id', currentFacilityId);
@@ -339,7 +339,7 @@ export default function MeetingMinutesClient() {
         facility_id: currentFacilityId
       }));
 
-      const { error: updateError } = await supabaseClient
+      const { error: updateError } = await supabase
         .from('meeting_minutes')
         .upsert(updates);
 
@@ -402,8 +402,7 @@ export default function MeetingMinutesClient() {
       <AppHeader
         title="会議議事録"
         icon={<Mic className="h-5 w-5 text-indigo-600" />}
-        showBackButton={true}
-        onBackClick={() => router.push('/depart')}
+        showBackButton={false}
         className="bg-white/90 backdrop-blur-xl border-b border-slate-100/80 shadow-sm z-20"
       />
 
@@ -556,56 +555,8 @@ export default function MeetingMinutesClient() {
                         </div>
 
                         <div className="flex justify-between items-start">
-                          <div>
-                            <h3 className="font-medium text-slate-800 pr-4 text-base">{minute.title}</h3>
-                            {(minute.recorded_by_name || minute.creator_info) && (
-                              <div className="flex items-center mt-1.5 text-xs text-slate-500">
-                                <UserCircle className="h-3.5 w-3.5 mr-1.5 text-indigo-400" />
-                                {minute.recorded_by_name || 
-                                  (minute.creator_info && JSON.parse(minute.creator_info).name) || 
-                                  '記録者不明'}
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex items-center">
-                            {minute.transcription_status && (
-                              <div className="mr-2">
-                                {minute.transcription_status === 'waiting' && (
-                                  <div className="flex items-center">
-                                    <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-100 flex items-center px-2 py-0.5 rounded-lg">
-                                      <Clock className="h-3 w-3 mr-1 text-blue-500" />
-                                      <span className="text-xs">待機中</span>
-                                    </Badge>
-                                  </div>
-                                )}
-                                {minute.transcription_status === 'processing' && (
-                                  <div className="flex items-center">
-                                    <Badge variant="outline" className="bg-amber-50 text-amber-600 border-amber-100 flex items-center px-2 py-0.5 rounded-lg">
-                                      <div className="h-3 w-3 mr-1 rounded-full border-2 border-amber-500 border-t-transparent animate-spin" />
-                                      <span className="text-xs">処理中</span>
-                                    </Badge>
-                                  </div>
-                                )}
-                                {minute.transcription_status === 'completed' && (
-                                  <div className="flex items-center">
-                                    <Badge variant="outline" className="bg-green-50 text-green-600 border-green-100 flex items-center px-2 py-0.5 rounded-lg">
-                                      <CheckCircle className="h-3 w-3 mr-1 text-green-500" />
-                                      <span className="text-xs">完了</span>
-                                    </Badge>
-                                  </div>
-                                )}
-                                {minute.transcription_status === 'failed' && (
-                                  <div className="flex items-center">
-                                    <Badge variant="outline" className="bg-red-50 text-red-600 border-red-100 flex items-center px-2 py-0.5 rounded-lg">
-                                      <XCircle className="h-3 w-3 mr-1 text-red-500" />
-                                      <span className="text-xs">失敗</span>
-                                    </Badge>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            <ChevronRight className="h-5 w-5 text-indigo-400 flex-shrink-0 transition-transform group-hover:translate-x-1" />
-                          </div>
+                          <h3 className="font-medium text-slate-800 pr-4 text-base">{minute.title}</h3>
+                          <ChevronRight className="h-5 w-5 text-indigo-400 flex-shrink-0 transition-transform group-hover:translate-x-1" />
                         </div>
 
                         {minute.summary && (

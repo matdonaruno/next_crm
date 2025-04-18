@@ -4,7 +4,7 @@ import React, { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, ThermometerSnowflake, ChevronLeft, Home } from 'lucide-react';
 import { Slot } from '@radix-ui/react-slot';
-import { supabase } from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseClient';
 import { getCachedFacility, cacheFacility } from '@/lib/facilityCache';
 import { getCurrentUser } from '@/lib/userCache';
 

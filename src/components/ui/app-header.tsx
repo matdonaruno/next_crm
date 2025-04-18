@@ -19,6 +19,7 @@ interface AppHeaderProps {
   title?: string;
   onBackClick?: () => void;
   icon?: ReactNode;
+  className?: string;
 }
 
 // カスタムツールチップスタイル
@@ -26,7 +27,7 @@ const tooltipContentClass = "bg-primary border-primary";
 const tooltipStyle = { backgroundColor: '#8167a9', color: 'white', border: '1px solid #8167a9' };
 const tooltipTextStyle = { color: 'white' };
 
-export function AppHeader({ showBackButton = true, title, onBackClick, icon }: AppHeaderProps) {
+export function AppHeader({ showBackButton = true, title, onBackClick, icon, className }: AppHeaderProps) {
   const router = useRouter();
   const { user, profile, loading, signOut } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
@@ -60,7 +61,7 @@ export function AppHeader({ showBackButton = true, title, onBackClick, icon }: A
   };
 
   return (
-    <header className="bg-white text-primary shadow-sm w-full">
+    <header className={`bg-white text-primary shadow-sm w-full ${className || ''}`}>
       <div className="w-full px-4 py-3 flex items-center">
         {/* 戻るアイコン - 左端に配置 */}
         {showBackButton && (

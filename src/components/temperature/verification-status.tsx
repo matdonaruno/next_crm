@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseClient';
 import { format, startOfWeek, endOfWeek, subWeeks, isSameWeek } from 'date-fns';
 import { ja } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';

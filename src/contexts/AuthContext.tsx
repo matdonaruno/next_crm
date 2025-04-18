@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabaseClient';
+import supabaseClient from '@/lib/supabaseClient';
 import Cookies from 'js-cookie';
 import { User, Session, PostgrestError, Subscription } from '@supabase/supabase-js';
 // import { Profile } from '@/types/index'; // ★ 正しいパスが見つかるまでコメントアウト
@@ -211,7 +211,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               count: 'exact' as const
             };
             
-            const { data, error } = await supabase
+            const { data, error } = await supabaseClient
               .from('profiles')
               .select('*', options)
               .eq('id', userId)
@@ -232,7 +232,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               console.log("AuthContext: プロファイルが存在しません。新規作成を試みます");
               
               // ユーザー情報を取得
-              const { data: userData, error: userError } = await supabase.auth.getUser();
+              const { data: userData, error: userError } = await supabaseClient.auth.getUser();
               if (userError || !userData.user) {
                 console.error("AuthContext: ユーザー情報取得エラー:", userError);
                 continue;
@@ -346,7 +346,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // この関数内ではローディング状態を設定しない（呼び出し元で管理）
     try {
       // ユーザー情報を再確認 (オプションだが、最新情報を取得する場合)
-      const { data: { user: currentUserData }, error: userError } = await supabase.auth.getUser();
+      const { data: { user: currentUserData }, error: userError } = await supabaseClient.auth.getUser();
       if (userError) {
         console.error("AuthContext: ユーザー再確認エラー:", userError);
       } else if (currentUserData && JSON.stringify(currentUserData) !== JSON.stringify(userRef.current)) {
@@ -357,7 +357,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       // プロファイル情報を取得
       console.log("AuthContext: プロファイル取得試行 for user:", userId);
-      const { data: profileData, error: profileError } = await supabase
+      const { data: profileData, error: profileError } = await supabaseClient
         .from('profiles')
         .select('*') // 必要に応じてリレーションも指定: '*, facilities(*)'
         .eq('id', userId)
@@ -411,7 +411,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(true); // 初期化開始時にローディング開始
       try {
         // 初回セッション取得
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
         if (sessionError) {
           console.error("AuthContext: 初回セッション取得エラー:", sessionError);
         }
@@ -461,7 +461,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     initializeAuth();
 
     // ★ 認証状態の変更を監視
-    const { data: authListener } = supabase.auth.onAuthStateChange(
+    const { data: authListener } = supabaseClient.auth.onAuthStateChange(
       async (event, session) => {
         console.log(`AuthContext: onAuthStateChange イベント: ${event}, セッション有無: ${!!session}`);
 
@@ -587,7 +587,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       console.log('アクティビティログ記録:', logData);
 
-      const { error } = await supabase
+      const { error } = await supabaseClient
         .from('user_activity_logs')
         .insert(logData);
 
@@ -607,7 +607,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoadingState('authenticating');
       setLoadingMessage('ログイン中...');
       
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabaseClient.auth.signInWithPassword({
         email,
         password,
       });
@@ -695,7 +695,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       clearAllAuthStorage();
       
       // グローバルスコープでログアウト
-      await supabase.auth.signOut({ scope: 'global' });
+      await supabaseClient.auth.signOut({ scope: 'global' });
       console.log("signOut: ログアウト成功");
       
       setLoadingState('idle');
@@ -734,7 +734,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         is_active: profile?.is_active !== undefined ? profile.is_active : true // 既存の状態を維持、なければtrue
       };
 
-      const { error } = await supabase
+      const { error } = await supabaseClient
         .from('profiles')
         .update(updateData)
         .eq('id', user.id);

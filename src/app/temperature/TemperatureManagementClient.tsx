@@ -4,7 +4,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Bell, Plus, FileText, ChevronLeft, Home, Check, X, Activity, ThermometerSnowflake, Battery, BatteryMedium, BatteryLow, BatteryWarning, BatteryFull, Thermometer, Droplets, Gauge, FileCheck, AlertTriangle, Info } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import supabase from "@/lib/supabaseClient";
 import { DayContentProps } from "react-day-picker";
 import { getCachedFacility, cacheFacility } from "@/lib/facilityCache";
 import { getCurrentUser } from "@/lib/userCache";
