@@ -4,20 +4,42 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ja } from 'date-fns/locale';
-import { Send, Search, X, Loader2, MessageSquare, Sparkles } from 'lucide-react';
+import { Send, X, Loader2, MessageSquare, Sparkles, Filter, Calendar } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useAuth } from '@/hooks/use-auth';
+import { useSupabase } from '@/app/_providers/supabase-provider';
+import { useAuthContext } from '@/contexts/AuthContext';
 import { SearchResult } from '@/types/meeting-minutes';
+
+// ハイライト機能のためのコンポーネント
+const HighlightedText = ({ text, query }: { text: string; query: string }) => {
+  if (!query.trim()) return <span>{text}</span>;
+  
+  const parts = text.split(new RegExp(`(${query})`, 'gi'));
+  return (
+    <span>
+      {parts.map((part, index) => 
+        part.toLowerCase() === query.toLowerCase() ? (
+          <mark key={index} className="bg-yellow-200 text-yellow-900 rounded px-1">
+            {part}
+          </mark>
+        ) : (
+          <span key={index}>{part}</span>
+        )
+      )}
+    </span>
+  );
+};
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   results?: SearchResult[];
+  query?: string; // 検索クエリを保存
 }
 
 interface MeetingSearchChatbotProps {
@@ -35,11 +57,29 @@ export default function MeetingSearchChatbot({ facilityId, isOpen, onClose }: Me
   ]);
   const [inputText, setInputText] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [dateFilter, setDateFilter] = useState<{ start?: string; end?: string }>({});
+  const [typeFilter, setTypeFilter] = useState<string>('');
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { session } = useSupabase();
+  const { user } = useAuthContext();
   const router = useRouter();
+
+  // 検索履歴をローカルストレージから読み込み
+  useEffect(() => {
+    const saved = localStorage.getItem('meeting-search-history');
+    if (saved) {
+      try {
+        setSearchHistory(JSON.parse(saved));
+      } catch (e) {
+        console.warn('検索履歴の読み込みに失敗:', e);
+      }
+    }
+  }, []);
 
   // チャットボット表示時に入力欄にフォーカス
   useEffect(() => {
@@ -74,7 +114,6 @@ export default function MeetingSearchChatbot({ facilityId, isOpen, onClose }: Me
       return [];
     }
 
-    console.log('会議議事録を検索します:', { query, facilityId });
     setIsSearching(true);
 
     try {
@@ -82,12 +121,16 @@ export default function MeetingSearchChatbot({ facilityId, isOpen, onClose }: Me
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${user.id}`,
+          'Authorization': `Bearer ${session?.access_token || ''}`, // セッショントークンを使用
         },
         body: JSON.stringify({
           query,
           facilityId,
+          startDate: dateFilter.start,
+          endDate: dateFilter.end,
+          meetingType: typeFilter,
         }),
+        credentials: 'include', // クッキーも含める
       });
 
       if (!response.ok) {
@@ -96,7 +139,6 @@ export default function MeetingSearchChatbot({ facilityId, isOpen, onClose }: Me
       }
 
       const data = await response.json();
-      console.log('検索結果:', data.results?.length || 0, '件');
       return data.results || [];
     } catch (error) {
       console.error('検索エラー:', error);
@@ -128,6 +170,11 @@ export default function MeetingSearchChatbot({ facilityId, isOpen, onClose }: Me
       { role: 'assistant', content: '検索中...', results: [] }
     ]);
 
+    // 検索履歴に追加
+    const newHistory = [userMessage.content, ...searchHistory.filter(h => h !== userMessage.content)].slice(0, 10);
+    setSearchHistory(newHistory);
+    localStorage.setItem('meeting-search-history', JSON.stringify(newHistory));
+
     // 検索実行
     const searchResults = await searchMeetingMinutes(userMessage.content);
 
@@ -140,13 +187,14 @@ export default function MeetingSearchChatbot({ facilityId, isOpen, onClose }: Me
         if (searchResults.length > 0) {
           newMessages[newMessages.length - 1] = {
             role: 'assistant',
-            content: '以下の議事録が見つかりました：',
+            content: `「${userMessage.content}」に関連する議事録が${searchResults.length}件見つかりました：`,
             results: searchResults,
+            query: userMessage.content,
           };
         } else {
           newMessages[newMessages.length - 1] = {
             role: 'assistant',
-            content: 'お探しの内容に関連する議事録は見つかりませんでした。別のキーワードで試してみてください。',
+            content: `「${userMessage.content}」に関連する議事録は見つかりませんでした。\n\n他のキーワードで試すか、以下をお試しください：\n- もっと一般的な言葉を使う\n- 異なる表現で検索する\n- 会議のタイトルや日付で検索する`,
           };
         }
       }
@@ -168,6 +216,16 @@ export default function MeetingSearchChatbot({ facilityId, isOpen, onClose }: Me
     onClose();
   };
 
+  const handleSuggestionClick = (suggestion: string) => {
+    setInputText(suggestion);
+    setShowSuggestions(false);
+    setTimeout(() => handleSendMessage(), 100);
+  };
+
+  const filteredSuggestions = searchHistory
+    .filter(h => h.toLowerCase().includes(inputText.toLowerCase()) && h !== inputText)
+    .slice(0, 5);
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -185,15 +243,66 @@ export default function MeetingSearchChatbot({ facilityId, isOpen, onClose }: Me
                 <MessageSquare className="h-5 w-5 text-pink-500 mr-2" />
                 <h3 className="font-medium text-gray-800">会議検索アシスタント</h3>
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onClose}
-                className="h-8 w-8 rounded-full hover:bg-pink-200/50"
-              >
-                <X className="h-4 w-4 text-gray-600" />
-              </Button>
+              <div className="flex items-center space-x-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowFilters(!showFilters)}
+                  className="h-8 w-8 rounded-full hover:bg-pink-200/50"
+                >
+                  <Filter className="h-4 w-4 text-gray-600" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onClose}
+                  className="h-8 w-8 rounded-full hover:bg-pink-200/50"
+                >
+                  <X className="h-4 w-4 text-gray-600" />
+                </Button>
+              </div>
             </div>
+
+            {/* フィルタパネル */}
+            {showFilters && (
+              <div className="p-3 border-b border-pink-100 bg-pink-50/50">
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <Calendar className="h-4 w-4 text-gray-500" />
+                    <span className="text-sm font-medium text-gray-700">期間指定</span>
+                  </div>
+                  <div className="flex space-x-2">
+                    <Input
+                      type="date"
+                      value={dateFilter.start || ''}
+                      onChange={(e) => setDateFilter(prev => ({ ...prev, start: e.target.value }))}
+                      className="text-xs"
+                      placeholder="開始日"
+                    />
+                    <Input
+                      type="date"
+                      value={dateFilter.end || ''}
+                      onChange={(e) => setDateFilter(prev => ({ ...prev, end: e.target.value }))}
+                      className="text-xs"
+                      placeholder="終了日"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between mt-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setDateFilter({});
+                        setTypeFilter('');
+                      }}
+                      className="text-xs"
+                    >
+                      フィルタクリア
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* メッセージエリア */}
             <ScrollArea className="h-[400px] p-4">
@@ -206,7 +315,7 @@ export default function MeetingSearchChatbot({ facilityId, isOpen, onClose }: Me
                     <div
                       className={`max-w-[80%] rounded-2xl p-3 ${
                         message.role === 'user'
-                          ? 'bg-gradient-to-r from-pink-400 to-purple-500 text-white'
+                          ? 'bg-gradient-to-r from-pink-100 to-purple-100 text-gray-700 border border-pink-200'
                           : 'bg-gray-100 text-gray-800'
                       }`}
                     >
@@ -223,12 +332,12 @@ export default function MeetingSearchChatbot({ facilityId, isOpen, onClose }: Me
                             >
                               <div className="text-xs text-pink-500 font-medium">
                                 {format(new Date(result.meeting_date), 'yyyy年MM月dd日', { locale: ja })}
-                                {result.meeting_type && ` · ${result.meeting_type}`}
                               </div>
-                              <div className="font-medium text-sm text-gray-800">{result.title}</div>
-                              <div className="text-xs text-gray-600 mt-1 line-clamp-2">{result.snippet}</div>
-                              <div className="text-xs text-gray-400 mt-1">
-                                関連度: {Math.round(result.relevance * 100)}%
+                              <div className="font-medium text-sm text-gray-800">
+                                <HighlightedText text={result.title} query={message.query || ''} />
+                              </div>
+                              <div className="text-xs text-gray-600 mt-1 line-clamp-2">
+                                <HighlightedText text={result.snippet} query={message.query || ''} />
                               </div>
                             </div>
                           ))}
@@ -248,13 +357,33 @@ export default function MeetingSearchChatbot({ facilityId, isOpen, onClose }: Me
                   <Input
                     ref={inputRef}
                     value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
+                    onChange={(e) => {
+                      setInputText(e.target.value);
+                      setShowSuggestions(e.target.value.length > 0 && filteredSuggestions.length > 0);
+                    }}
                     onKeyDown={handleKeyDown}
+                    onFocus={() => setShowSuggestions(inputText.length > 0 && filteredSuggestions.length > 0)}
+                    onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                     placeholder="質問を入力..."
                     disabled={isSearching}
                     className="pr-10 border-pink-200 focus:border-purple-400 focus:ring-purple-300 rounded-full"
                   />
                   <Sparkles className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-pink-400 opacity-70" />
+                  
+                  {/* 検索履歴サジェスト */}
+                  {showSuggestions && filteredSuggestions.length > 0 && (
+                    <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-40 overflow-y-auto">
+                      {filteredSuggestions.map((suggestion, index) => (
+                        <div
+                          key={index}
+                          onClick={() => handleSuggestionClick(suggestion)}
+                          className="px-3 py-2 text-sm cursor-pointer hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                        >
+                          <HighlightedText text={suggestion} query={inputText} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <Button
                   onClick={handleSendMessage}

@@ -2,9 +2,9 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import supabaseClient from '@/lib/supabaseClient';
+import supabaseClient from '../lib/supabase/client';
 import Cookies from 'js-cookie';
-import { User, Session, PostgrestError, Subscription } from '@supabase/supabase-js';
+import { User, Session, PostgrestError, Subscription, AuthChangeEvent } from '@supabase/supabase-js';
 // import { Profile } from '@/types/index'; // ★ 正しいパスが見つかるまでコメントアウト
 import { useToast } from '@/hooks/use-toast';
 
@@ -32,6 +32,7 @@ interface UserProfile {
 
 interface AuthContextType {
   user: User | null;
+  session: Session | null;
   profile: any | null; // ★ 一時的に any に変更
   loading: boolean;
   sessionCheckEnabled: boolean;
@@ -75,6 +76,7 @@ export const setSessionCheckEnabled = (enabled: boolean) => {
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<any | null>(null); // ★ 一時的に any に変更
   const [loading, setLoading] = useState(true);
   const [sessionCheckEnabled, _setSessionCheckEnabled] = useState(SESSION_CHECK_ENABLED);
@@ -419,6 +421,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (isMounted) {
           if (session) {
             console.log("AuthContext: 初期セッションあり");
+            setSession(session);
             // ★ 以前のユーザーと違うか、ユーザーがいない場合のみ fetch
             if (!userRef.current || userRef.current.id !== session.user.id) {
               console.log("AuthContext: 初期ユーザー設定 & プロファイル取得実行");
@@ -435,6 +438,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             }
           } else {
             console.log("AuthContext: 初期セッションなし");
+            setSession(null);
             setUser(null);
             setProfile(null);
             userRef.current = null;
@@ -462,7 +466,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     // ★ 認証状態の変更を監視
     const { data: authListener } = supabaseClient.auth.onAuthStateChange(
-      async (event, session) => {
+      async (event: AuthChangeEvent, session: Session | null) => {
         console.log(`AuthContext: onAuthStateChange イベント: ${event}, セッション有無: ${!!session}`);
 
         // ★ isMounted チェックを追加
@@ -492,6 +496,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             // ユーザーが実際に切り替わった場合のみデータ取得
             console.log(`AuthContext: SIGNED_IN - ユーザー変更 (${currentUserId} -> ${newUserId})。データ取得実行`);
             setLoading(true);
+            setSession(session);
             setUser(session!.user);
             userRef.current = session!.user;
             await fetchUserAndProfile(newUserId);
@@ -499,11 +504,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           } else if (newUserId && newUserId === currentUserId) {
             // ユーザーIDは同じだがイベント発生 (タブアクティブ化など)
             console.log(`AuthContext: SIGNED_IN - ユーザー同じ (${newUserId})。ユーザーオブジェクト更新のみ`);
+            setSession(session);
             setUser(session!.user); // ユーザーオブジェクト参照の更新は行う
             userRef.current = session!.user;
             // プロファイルは再取得しない
           } else if (!newUserId) {
              console.warn(`AuthContext: SIGNED_IN イベントだが session.user が存在しない`);
+             setSession(null);
              setUser(null);
              setProfile(null);
              userRef.current = null;
@@ -512,6 +519,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           }
         } else if (event === 'SIGNED_OUT') {
           console.log(`AuthContext: SIGNED_OUT 検出`);
+          setSession(null);
           setUser(null);
           setProfile(null);
           userRef.current = null;
@@ -769,6 +777,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const value = {
     user,
+    session,
     profile,
     loading,
     sessionCheckEnabled,
@@ -784,13 +793,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
-export function useAuth() {
+export function useAuthContext() {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error('useAuthContext must be used within an AuthProvider');
   }
   return context;
 }
+
+// Back‑compat: keep the old name around
+export const useAuth = useAuthContext;
 
 // すべての認証関連ストレージをクリア
 const clearAllAuthStorage = () => {
@@ -828,4 +840,7 @@ const clearAllAuthStorage = () => {
   } catch (e) {
     console.error("AuthContext: ストレージクリア中にエラー:", e);
   }
-}; 
+};
+
+export default AuthProvider;
+

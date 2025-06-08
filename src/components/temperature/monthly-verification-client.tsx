@@ -3,23 +3,37 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { CheckCircle, AlertCircle, Loader2, Calendar, FileCheck } from 'lucide-react';
+import { CheckCircle, AlertCircle, Loader2, Calendar } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, subMonths, addMonths } from 'date-fns';
 import { ja } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
-import supabase from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseBrowser';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { AppHeader } from '@/components/ui/app-header';
 import { formatDateForDisplay } from '@/lib/utils';
+import type { Database } from '@/types/supabase';
+
+type Profiles = Database['public']['Tables']['profiles']['Row'];
+type TemperatureRecordDetail = Database['public']['Tables']['temperature_record_details']['Row'];
+type MonthlyVerificationInsert = Database['public']['Tables']['monthly_temperature_verifications']['Insert'];
+type MonthlyVerificationUpdate = Database['public']['Tables']['monthly_temperature_verifications']['Update'];
+
+interface TemperatureRecordItem {
+  id: string;
+  created_at: string | null;
+  is_auto_recorded: boolean | null;
+  details: TemperatureRecordDetail[];
+}
 
 interface MonthlyStatus {
   yearMonth: string;
   isVerified: boolean;
   verifiedAt: string | null;
   verifiedBy: string | null;
+  verifiedByUserId?: string | null;
   comments: string | null;
   hasAnomalies: boolean;
 }
@@ -34,19 +48,10 @@ interface MonthlyVerificationClientProps {
   backHref?: string;
 }
 
-interface TemperatureRecord {
-  id: string;
-  created_at: string;
-  temperature: number;
-  recorded_by_name?: string;
-  notes?: string;
-  is_auto_recorded?: boolean;
-}
-
-export function MonthlyVerificationClient({ 
-  departmentId, 
+export function MonthlyVerificationClient({
+  departmentId,
   facilityId,
-  departmentName, 
+  departmentName,
   userId,
   isAdmin,
   yearMonth,
@@ -54,135 +59,86 @@ export function MonthlyVerificationClient({
 }: MonthlyVerificationClientProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [temperatureData, setTemperatureData] = useState<TemperatureRecord[]>([]);
+  const [temperatureData, setTemperatureData] = useState<TemperatureRecordItem[]>([]);
   const [comments, setComments] = useState('');
   const [hasAnomalies, setHasAnomalies] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<MonthlyStatus | null>(null);
-  const [userProfile, setUserProfile] = useState<any>(null);
+  const [userProfile, setUserProfile] = useState<Profiles | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<Date>(
     yearMonth ? parseISO(`${yearMonth}-01`) : new Date()
   );
   const { toast } = useToast();
   const router = useRouter();
 
-  // 初期データの読み込み
   useEffect(() => {
     if (!isAdmin) {
-      // 管理者でない場合はリダイレクト
       router.push(backHref);
       return;
     }
 
     const loadData = async () => {
       setLoading(true);
-      
+
       try {
-        // ユーザープロフィールの取得
-        const { data: profileData } = await supabase
+        // プロフィール取得
+        const { data: profileData, error: profileError } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', userId)
           .single();
-          
-        if (profileData) {
-          setUserProfile(profileData);
-        }
-        
-        // 年月の文字列を取得
+        if (profileError) throw profileError;
+        setUserProfile(profileData);
+
         const formattedYearMonth = format(selectedMonth, 'yyyy-MM');
         const monthStart = startOfMonth(selectedMonth);
         const monthEnd = endOfMonth(selectedMonth);
-        
-        console.log("月次データ取得期間:", {
-          yearMonth: formattedYearMonth,
-          start: format(monthStart, 'yyyy-MM-dd'),
-          end: format(monthEnd, 'yyyy-MM-dd'),
-          departmentId
-        });
-        
-        // 指定された月の温度データを取得
-        const { data: tempData, error: tempError } = await supabase
+
+        // ——— 温度データ取得 ———
+        const { data: rawTempData, error: tempError } = await supabase
           .from('temperature_records')
           .select(`
             id,
             created_at,
             is_auto_recorded,
-            temperature_record_details (
-              id,
-              temperature_item_id,
-              value,
-              data_source
-            )
+            temperature_record_details (*)
           `)
           .eq('department_id', departmentId)
           .eq('facility_id', facilityId)
           .gte('created_at', monthStart.toISOString())
           .lte('created_at', monthEnd.toISOString())
           .order('created_at', { ascending: false });
-          
-        if (tempError) {
-          console.error("温度データ取得エラー:", tempError);
-          throw tempError;
-        }
-        
-        // データを整形
-        const formattedData = tempData?.map(record => {
-          // 温度値を計算（複数ある場合は平均）
-          const temperatures = record.temperature_record_details
-            .filter(detail => detail.value !== null && typeof detail.value === 'number')
-            .map(detail => detail.value);
-          
-          const avgTemperature = temperatures.length > 0
-            ? temperatures.reduce((sum, val) => sum + val, 0) / temperatures.length
-            : 0;
-            
-          return {
-            id: record.id,
-            created_at: record.created_at,
-            temperature: parseFloat(avgTemperature.toFixed(1)),
-            is_auto_recorded: record.is_auto_recorded
-          };
-        }) || [];
-        
-        console.log(`取得した温度データ: ${formattedData?.length}件`);
-        setTemperatureData(formattedData);
-        
-        // 月次確認状況を取得
-        console.log("月次確認状況の取得:", {
-          facilityId,
-          departmentId,
-          yearMonth: formattedYearMonth
-        });
-        
+        if (tempError) throw tempError;
+
+        const formatted = (rawTempData || []).map(r => ({
+          id: r.id,
+          created_at: r.created_at,
+          is_auto_recorded: r.is_auto_recorded,
+          details: r.temperature_record_details
+        }));
+        setTemperatureData(formatted);
+
+        // ——— 月次確認状況取得 ———
         const { data: verificationData, error: verificationError } = await supabase
           .from('monthly_temperature_verifications')
-          .select('*, verified_by_profile:profiles(fullname)')
+          .select('*, verified_by_profile:profiles(id, fullname)')
           .eq('facility_id', facilityId)
           .eq('department_id', departmentId)
           .eq('year_month', formattedYearMonth)
           .single();
-          
-        if (verificationError) {
-          if (verificationError.code !== 'PGRST116') { // PGRST116は「レコードなし」エラー
-            console.error("確認状況取得エラー:", verificationError);
-            throw verificationError;
-          } else {
-            console.log("確認レコードなし");
-          }
-        } else {
-          console.log("確認レコード:", verificationData);
+        if (verificationError && verificationError.code !== 'PGRST116') {
+          throw verificationError;
         }
-        
+
         if (verificationData) {
           setVerificationStatus({
             yearMonth: formattedYearMonth,
             isVerified: true,
             verifiedAt: verificationData.verified_at,
-            verifiedBy: verificationData.verified_by_profile?.fullname || '不明なユーザー',
+            verifiedBy: verificationData.verified_by_profile?.fullname || '不明',
+            verifiedByUserId: verificationData.verified_by,
             comments: verificationData.comments,
             hasAnomalies: verificationData.has_anomalies
           });
-          
           setComments(verificationData.comments || '');
           setHasAnomalies(verificationData.has_anomalies || false);
         } else {
@@ -198,179 +154,122 @@ export function MonthlyVerificationClient({
       } catch (error) {
         console.error('データ読み込みエラー:', error);
         toast({
-          title: "エラー",
-          description: "データの読み込み中にエラーが発生しました。",
-          variant: "destructive",
+          title: 'エラー',
+          description: 'データの読み込み中にエラーが発生しました。',
+          variant: 'destructive'
         });
       } finally {
         setLoading(false);
       }
     };
-    
+
     loadData();
   }, [departmentId, facilityId, userId, selectedMonth, isAdmin, backHref, router, toast]);
-  
-  // 月次確認処理
+
   const handleVerifyMonth = async () => {
-    if (!verificationStatus || saving) return;
-    
+    if (!verificationStatus || saving || !userProfile) return;
     setSaving(true);
-    
+
     try {
       const { yearMonth } = verificationStatus;
-      
-      console.log("月次確認処理開始:", {
-        facilityId,
-        departmentId,
-        yearMonth,
-        hasAnomalies,
-        comments: comments ? "入力あり" : "なし"
-      });
-      
-      // 既存レコードのチェック
-      const { data: existingVerification, error: checkError } = await supabase
+      const { data: existing, error: checkError } = await supabase
         .from('monthly_temperature_verifications')
         .select('id')
         .eq('facility_id', facilityId)
         .eq('department_id', departmentId)
         .eq('year_month', yearMonth)
         .maybeSingle();
-        
-      if (checkError) {
-        console.error("既存レコード確認エラー:", checkError);
-        throw checkError;
-      }
-      
-      console.log("既存の確認レコード:", existingVerification);
-      
-      if (existingVerification) {
-        // 既存レコードの更新
-        console.log(`レコードID ${existingVerification.id} を更新`);
-        const { error: updateError } = await supabase
-          .from('monthly_temperature_verifications')
-          .update({
-            comments: comments,
-            has_anomalies: hasAnomalies,
-            verified_at: new Date().toISOString(),
-            verified_by: userId
-          })
-          .eq('id', existingVerification.id);
-          
-        if (updateError) {
-          console.error("更新エラー:", updateError);
-          throw updateError;
-        }
-      } else {
-        // 新規レコードの作成
-        console.log("新規レコード作成");
-        const newRecord = {
-          facility_id: facilityId,
-          department_id: departmentId,
-          year_month: yearMonth,
-          comments: comments,
+      if (checkError) throw checkError;
+
+      if (existing) {
+        const updatePayload: MonthlyVerificationUpdate = {
+          comments,
           has_anomalies: hasAnomalies,
           verified_at: new Date().toISOString(),
           verified_by: userId
         };
-        
-        console.log("挿入するデータ:", newRecord);
-        
-        const { data: insertData, error: insertError } = await supabase
+        const { error: updateError } = await supabase
           .from('monthly_temperature_verifications')
-          .insert(newRecord)
-          .select();
-          
-        if (insertError) {
-          console.error("挿入エラー:", insertError);
-          throw insertError;
-        }
-        
-        console.log("挿入結果:", insertData);
+          .update(updatePayload)
+          .eq('id', existing.id);
+        if (updateError) throw updateError;
+      } else {
+        const insertPayload: MonthlyVerificationInsert = {
+          facility_id: facilityId,
+          department_id: departmentId,
+          year_month: yearMonth,
+          comments,
+          has_anomalies: hasAnomalies,
+          verified_at: new Date().toISOString(),
+          verified_by: userId
+        };
+        const { error: insertError } = await supabase
+          .from('monthly_temperature_verifications')
+          .insert(insertPayload);
+        if (insertError) throw insertError;
       }
-      
-      // 状態を更新
-      setVerificationStatus(prev => prev ? {
+
+      setVerificationStatus(prev => prev && ({
         ...prev,
         isVerified: true,
         verifiedAt: new Date().toISOString(),
-        verifiedBy: userProfile?.fullname || '現在のユーザー',
-        comments: comments,
-        hasAnomalies: hasAnomalies
-      } : null);
-      
+        verifiedBy: userProfile.fullname || '現在のユーザー',
+        verifiedByUserId: userId,
+        comments,
+        hasAnomalies
+      }));
+
       toast({
-        title: "確認完了",
-        description: `${format(selectedMonth, 'yyyy年M月', { locale: ja })}の温度確認を記録しました。`,
+        title: '確認完了',
+        description: `${format(selectedMonth, 'yyyy年M月', { locale: ja })}の温度確認を記録しました。`
       });
-      
-      // 温度管理ページに戻る（オプション）
-      // router.push(backHref);
     } catch (error) {
       console.error('確認処理エラー:', error);
       toast({
-        title: "エラー",
-        description: "月次確認の処理中にエラーが発生しました。",
-        variant: "destructive",
+        title: 'エラー',
+        description: '月次確認の処理中にエラーが発生しました。',
+        variant: 'destructive'
       });
     } finally {
       setSaving(false);
     }
   };
 
-  // 前月に移動
-  const handlePreviousMonth = () => {
-    setSelectedMonth(prevMonth => subMonths(prevMonth, 1));
-  };
+  const handlePreviousMonth = () => setSelectedMonth(prev => subMonths(prev, 1));
+  const handleNextMonth = () => setSelectedMonth(prev => addMonths(prev, 1));
 
-  // 翌月に移動
-  const handleNextMonth = () => {
-    setSelectedMonth(prevMonth => addMonths(prevMonth, 1));
-  };
-  
   if (loading) {
     return (
       <>
-        <AppHeader 
-          title={`${departmentName} - 月次温度確認`} 
-          showBackButton={true} 
-        />
+        <AppHeader title={`${departmentName} - 月次温度確認`} showBackButton />
         <div className="flex justify-center items-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
-          <span className="ml-2 text-gray-500">データを読み込んでいます...</span>
+          <div className="h-10 w-10 border-4 border-pink-400 border-t-transparent rounded-full animate-spin"></div>
+          <span className="ml-2 text-pink-700">データを読み込んでいます...</span>
         </div>
       </>
     );
   }
-  
+
   if (!verificationStatus) {
     return (
       <>
-        <AppHeader 
-          title={`${departmentName} - 月次温度確認`} 
-          showBackButton={true} 
-        />
+        <AppHeader title={`${departmentName} - 月次温度確認`} showBackButton />
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <h2 className="text-xl font-semibold text-yellow-700 mb-2">データが見つかりません</h2>
           <p className="text-yellow-600">指定された月のデータが見つかりませんでした。別の月を選択してください。</p>
-          <Button 
-            className="mt-4" 
-            onClick={() => router.push(backHref)}
-          >
+          <Button className="mt-4" onClick={() => router.push(backHref)}>
             温度管理ページに戻る
           </Button>
         </div>
       </>
     );
   }
-  
+
   const formattedMonthText = format(selectedMonth, 'yyyy年M月', { locale: ja });
-  
+
   return (
     <>
-      <AppHeader 
-        title={`${departmentName} - 月次温度確認`} 
-        showBackButton={true} 
-      />
+      <AppHeader title={`${departmentName} - 月次温度確認`} showBackButton />
       <div className="space-y-6">
         <Card>
           <CardHeader className="bg-gray-50 rounded-t-lg">
@@ -380,19 +279,14 @@ export function MonthlyVerificationClient({
                 {formattedMonthText}の温度記録確認
               </span>
               <div className="flex space-x-2">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handlePreviousMonth}
-                  disabled={loading}
-                >
+                <Button variant="outline" size="sm" onClick={handlePreviousMonth}>
                   前月
                 </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={handleNextMonth}
-                  disabled={loading || new Date(selectedMonth) > new Date()}
+                  disabled={new Date(selectedMonth) > new Date()}
                 >
                   翌月
                 </Button>
@@ -431,13 +325,11 @@ export function MonthlyVerificationClient({
             ) : (
               <div className="mb-6">
                 <p className="text-gray-700 mb-4">
-                  {departmentName}の{formattedMonthText}の温度記録を確認してください。
-                  問題がなければ「確認完了」ボタンをクリックしてください。
+                  {departmentName}の{formattedMonthText}の温度記録を確認してください。問題がなければ「確認完了」ボタンをクリックしてください。
                 </p>
               </div>
             )}
-            
-            {/* 温度データ表示セクション */}
+
             <div className="mb-6">
               <h3 className="text-lg font-semibold mb-3">期間内の温度記録</h3>
               {temperatureData.length === 0 ? (
@@ -453,23 +345,31 @@ export function MonthlyVerificationClient({
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {temperatureData.slice(0, 50).map((record) => (
-                        <tr key={record.id}>
-                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                            {formatDateForDisplay(record.created_at)}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                            {record.temperature}℃
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                            {record.is_auto_recorded ? (
-                              <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">自動</span>
-                            ) : (
-                              <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">手動</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                      {temperatureData.slice(0, 50).map(record => {
+                        const temps = record.details
+                          .filter(d => d.value != null)
+                          .map(d => d.value as number);
+                        const avg = temps.length
+                          ? temps.reduce((a, b) => a + b, 0) / temps.length
+                          : 0;
+                        return (
+                          <tr key={record.id}>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                              {formatDateForDisplay(record.created_at!)}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                              {avg.toFixed(1)}℃
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                              {record.is_auto_recorded ? (
+                                <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">自動</span>
+                              ) : (
+                                <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">手動</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                   {temperatureData.length > 50 && (
@@ -480,8 +380,7 @@ export function MonthlyVerificationClient({
                 </div>
               )}
             </div>
-            
-            {/* 確認フォーム */}
+
             <div className="space-y-4">
               <div className="flex items-center space-x-2">
                 <Switch
@@ -491,32 +390,26 @@ export function MonthlyVerificationClient({
                   disabled={verificationStatus.isVerified}
                 />
                 <Label htmlFor="anomalies" className="text-gray-700">
-                  異常（管理範囲外の温度の発生など）あり
+                  異常あり
                 </Label>
               </div>
-              
               <div>
                 <Label htmlFor="comments" className="text-gray-700 mb-2 block">
-                  コメント（問題点や対応など）
+                  コメント
                 </Label>
                 <Textarea
                   id="comments"
-                  placeholder="確認時のコメントを入力してください..."
+                  placeholder="コメントを入力..."
                   className="w-full"
                   value={comments}
-                  onChange={(e) => setComments(e.target.value)}
+                  onChange={e => setComments(e.target.value)}
                   disabled={verificationStatus.isVerified}
                 />
               </div>
-              
               <div className="pt-4 flex justify-between">
-                <Button
-                  variant="outline"
-                  onClick={() => router.push(backHref)}
-                >
+                <Button variant="outline" onClick={() => router.push(backHref)}>
                   戻る
                 </Button>
-                
                 {!verificationStatus.isVerified && (
                   <Button
                     className="bg-primary hover:bg-primary/90 text-white"
@@ -534,4 +427,4 @@ export function MonthlyVerificationClient({
       </div>
     </>
   );
-} 
+}

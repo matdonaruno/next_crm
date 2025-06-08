@@ -1,11 +1,10 @@
 import MeetingMinuteDetailClient from './MeetingMinuteDetailClient';
 
-interface MeetingMinuteDetailPageProps {
-  params: {
-    id: string;
-  };
+interface Props {
+  params: { id: string };
 }
 
-export default async function MeetingMinuteDetailPage({ params }: MeetingMinuteDetailPageProps) {
-  return <MeetingMinuteDetailClient meetingMinuteId={params.id} />;
-} 
+export default async function MeetingMinuteDetailPage({ params }: Props) {
+  const { id } = await params;
+  return <MeetingMinuteDetailClient meetingMinuteId={id} />;
+}

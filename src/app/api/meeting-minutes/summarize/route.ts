@@ -1,134 +1,140 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+// src/app/api/meeting-minutes/summarize/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import OpenAI from 'openai';
+import { createClient } from '@supabase/supabase-js';
+import { Database } from '@/types/supabase';
 
-// OpenAIクライアントの初期化
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+type SummaryResp = { summary: string; keywords: string[] };
+
+export const dynamic = 'force-dynamic';
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('API: 要約処理開始');
+    console.log('[summarize] === 要約API開始 ===');
     
-    // APIキーの確認
-    if (!process.env.OPENAI_API_KEY) {
-      console.error('API: OpenAIのAPIキーが設定されていません');
-      return NextResponse.json({ 
-        error: 'OpenAI APIキーが設定されていません。サーバー環境変数OPENAI_API_KEYを確認してください。' 
-      }, { status: 500 });
+    /* 1) Authorization ヘッダーからアクセストークンを取得して Supabase クライアントを生成 */
+    const authHeader = request.headers.get('authorization') || '';
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+    console.log('[summarize] 認証情報確認', {
+      hasAuthHeader: !!authHeader,
+      authHeaderValue: authHeader,
+      tokenLength: token.length,
+      hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      serviceKeyLength: process.env.SUPABASE_SERVICE_ROLE_KEY?.length,
+      tokenPrefix: token.substring(0, 10),
+      serviceKeyPrefix: process.env.SUPABASE_SERVICE_ROLE_KEY?.substring(0, 10)
+    });
+
+    if (!token) {
+      console.error('[summarize] トークンが空です');
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // 認証チェック（必須）
-    const authHeader = request.headers.get('Authorization');
-    console.log('API: 認証ヘッダー:', authHeader ? 'あり' : 'なし');
+    // サービスロールキーかユーザートークンかを判定
+    const isServiceRole = token === process.env.SUPABASE_SERVICE_ROLE_KEY;
+    console.log('[summarize] 認証タイプ判定', { isServiceRole });
     
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.error('API: 認証ヘッダーがありません');
-      return NextResponse.json({ error: '認証が必要です。ログインしてください。' }, { status: 401 });
-    }
-    
-    // Supabaseクライアントの初期化
-    const cookieStore = cookies();
-    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
-    
-    // セッションの確認
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    
-    if (sessionError) {
-      console.error('API: セッション取得エラー:', sessionError);
-      return NextResponse.json({ 
-        error: '認証エラー: セッションの取得に失敗しました', 
-        message: sessionError.message 
-      }, { status: 401 });
-    }
-    
-    if (!session) {
-      console.error('API: 有効なセッションがありません');
-      return NextResponse.json({ error: '認証エラー: 有効なセッションがありません。再ログインしてください。' }, { status: 401 });
-    }
-    
-    console.log('API: 認証済みユーザー:', session.user.id);
+    const supabase = createClient<Database>(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      isServiceRole ? process.env.SUPABASE_SERVICE_ROLE_KEY! : process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      isServiceRole ? {} : { global: { headers: { Authorization: `Bearer ${token}` } } }
+    );
 
-    // リクエストボディの解析
-    const body = await request.json();
-    const { text } = body;
-    
-    if (!text || typeof text !== 'string') {
-      return NextResponse.json({ error: '要約するテキストが必要です' }, { status: 400 });
+    /* 認証ユーザー確認（サービスロールの場合はスキップ） */
+    if (!isServiceRole) {
+      const { data: { user }, error: authErr } = await supabase.auth.getUser();
+      if (authErr || !user) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
     }
 
-    console.log('API: テキストの要約処理を開始');
+    /* 2) 本文取得 & バリデーション */
+    const raw = (await request.json()) as unknown;
+    if (typeof raw !== 'object' || raw === null)
+      return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     
-    // OpenAI GPT-4を使って要約と情報抽出
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+    const { text, meetingMinuteId } = raw as { text?: string; meetingMinuteId?: string };
+    
+    // meetingMinuteIdが指定された場合は、DBから取得
+    let finalText = text;
+    if (meetingMinuteId) {
+      const { data: minute, error } = await supabase
+        .from('meeting_minutes')
+        .select('segments')
+        .eq('id', meetingMinuteId)
+        .single();
+
+      if (error || !minute) {
+        return NextResponse.json({ error: '議事録が見つかりません' }, { status: 404 });
+      }
+
+      if (minute.segments && Array.isArray(minute.segments)) {
+        finalText = minute.segments
+          .map((seg: any) => seg.text)
+          .filter(Boolean)
+          .join('\n');
+      }
+    }
+    
+    if (typeof finalText !== 'string' || !finalText.trim())
+      return NextResponse.json({ error: 'text が必要です (または meetingMinuteId)' }, { status: 400 });
+
+    /* 3) GPT-4o で要約＋キーワード抽出（JSON 返却） */
+    const res = await openai.chat.completions.create({
+      model: process.env.OPENAI_SUMMARY_MODEL ?? 'gpt-4o',
+      temperature: 0.3,
+      max_tokens: 400,
+      response_format: { type: 'json_object' },
       messages: [
         {
-          role: "system",
-          content: '会議議事録の内容を要約し、重要なキーワードを抽出してください。要約は300文字以内で、キーワードは10個程度抽出してください。JSONフォーマットで返してください。'
+          role: 'system',
+          content:
+            'あなたは熟練した議事録要約者です。以下の議事録を日本語で要約し、重要キーワードを最大10件抽出してください。要約は以下の形式で出力してください：\n\n【主要な議題・要素】\n• 議題1\n• 議題2\n• 議題3\n\n【詳細要約】\n（300文字以内で詳細な要約）\n\n必ず {"summary": "上記の形式での要約", "keywords": ["キーワード1", "キーワード2", ...]} の JSON 形式で回答してください。',
         },
-        {
-          role: "user",
-          content: text
-        }
+        { role: 'user', content: finalText },
       ],
-      temperature: 0.3,
-      max_tokens: 1000,
-      response_format: { type: "json_object" }
     });
 
-    // レスポンスからJSONを抽出
-    const content = response.choices[0].message.content;
-    let result;
-    
+    let parsed: SummaryResp;
     try {
-      result = content ? JSON.parse(content) : null;
-    } catch (parseError) {
-      console.error('API: JSON解析エラー:', parseError);
-      console.log('API: 受信したGPTレスポンス:', content);
-      
-      // JSONでなかった場合はデフォルト値を設定
-      result = {
-        summary: content || "要約の生成に失敗しました",
-        keywords: []
-      };
-    }
-    
-    if (!result) {
-      return NextResponse.json({ error: '要約の生成に失敗しました' }, { status: 500 });
+      parsed = JSON.parse(res.choices[0].message.content ?? '');
+    } catch {
+      parsed = { summary: res.choices[0].message.content ?? '', keywords: [] };
     }
 
-    console.log('API: 要約生成成功');
-    
-    return NextResponse.json({
-      text: text,
-      summary: result.summary,
-      keywords: result.keywords
+    // meetingMinuteIdが指定された場合は、DBに要約を保存
+    if (meetingMinuteId && parsed.summary) {
+      const { error: updateError } = await supabase
+        .from('meeting_minutes')
+        .update({
+          summary: parsed.summary,
+          keywords: parsed.keywords,
+          processing_status: 'done'
+        })
+        .eq('id', meetingMinuteId);
+
+      if (updateError) {
+        console.error('[summarize] 要約保存エラー', updateError);
+        return NextResponse.json({ error: '要約の保存に失敗しました' }, { status: 500 });
+      }
+    }
+
+    return NextResponse.json<SummaryResp>(parsed, {
+      status: 200,
+      headers: { 'Cache-Control': 'public, max-age=300' },
     });
-    
-  } catch (error) {
-    console.error('API: 要約生成エラー:', error);
-    
-    // OpenAI APIキーが設定されていない場合のエラーメッセージ
-    if (error instanceof Error && error.message.includes('API key')) {
-      return NextResponse.json({ 
-        error: 'OpenAI APIキーが設定されていません。環境変数OPENAI_API_KEYを確認してください。' 
-      }, { status: 500 });
-    }
-    
-    // JSONパースエラーの場合
-    if (error instanceof SyntaxError) {
-      return NextResponse.json({ 
-        error: 'APIからの応答を解析できませんでした',
-        message: error.message
-      }, { status: 500 });
-    }
-    
-    return NextResponse.json({ 
-      error: '内部サーバーエラー',
-      message: error instanceof Error ? error.message : '不明なエラーが発生しました'
-    }, { status: 500 });
+  } catch (e: any) {
+    console.error('[minutes][summarize] error:', {
+      name: e.name,
+      message: e.message,
+      stack: e.stack,
+    });
+    return NextResponse.json(
+      { error: e.message || '内部サーバーエラー' },
+      { status: 500 },
+    );
   }
-} 
+}

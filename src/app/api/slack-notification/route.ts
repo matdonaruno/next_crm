@@ -1,70 +1,124 @@
-import { NextResponse, NextRequest } from 'next/server';
+// src/app/api/slack-notification/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient } from '@/lib/supabase/server';
 
-export async function POST(request: NextRequest) {
-  try {
-    const requestBody = await request.json();
-    const { message, title, type } = requestBody;
-    
-    // 環境変数からSlack Webhook URLを取得
-    const webhookUrl = process.env.SLACK_WEBHOOK_URL;
-    
-    if (!webhookUrl) {
-      console.error('Slack Webhook URLが設定されていません');
-      return NextResponse.json({ error: 'Slack Webhook URLが設定されていません' }, { status: 500 });
-    }
-    
-    // Slackメッセージのフォーマット
-    const slackPayload = {
-      text: `*${title || '温度異常アラート'}*`,
-      blocks: [
-        {
-          type: "header",
-          text: {
-            type: "plain_text",
-            text: title || "温度異常アラート",
-            emoji: true
-          }
-        },
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: message
-          }
-        },
-        {
-          type: "context",
-          elements: [
-            {
-              type: "mrkdwn",
-              text: `*タイプ:* ${type || 'warning'} | *時刻:* ${new Date().toLocaleString('ja-JP')}`
-            }
-          ]
-        }
-      ]
-    };
-    
-    console.log('Slackに送信するペイロード:', JSON.stringify(slackPayload));
-    
-    // Slack Webhookに通知を送信
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(slackPayload)
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Slack通知送信エラー:', errorText);
-      return NextResponse.json({ error: 'Slack通知の送信に失敗しました' }, { status: 500 });
-    }
-    
-    console.log('Slack通知を送信しました');
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('Slack通知処理エラー:', error);
-    return NextResponse.json({ error: '内部サーバーエラー' }, { status: 500 });
+// Ensure Slack Webhook URL is set
+const webhookUrl = process.env.SLACK_WEBHOOK_URL;
+if (!webhookUrl) {
+  throw new Error('SLACK_WEBHOOK_URL must be set');
+}
+
+export const dynamic = 'force-dynamic'; // Cookie を読むので動的に
+
+/** POST /api/slack-notification
+ *
+ * body: { message: string; title?: string; type?: string }
+ * サインイン済みユーザーだけが呼べる Slack 通知エンドポイント
+ */
+export async function POST(req: NextRequest) {
+  /* 1) Supabase SSR クライアント & 認証チェック ---------------------- */
+  const supabase = await createServerClient();
+  const {
+    data: { user },
+    error: authErr,
+  } = await supabase.auth.getUser();
+
+  if (authErr || !user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-} 
+
+  // 2) JSON parsing with type validation
+  type Payload = { message: string; title?: string; type?: string };
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+  if (typeof raw !== 'object' || raw === null) {
+    return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
+  }
+  const { message, title = '温度異常アラート', type = 'warning' } = raw as Payload;
+  if (typeof message !== 'string' || message.trim() === '') {
+    return NextResponse.json({ error: '`message` is required' }, { status: 400 });
+  }
+  if (message.length > 2000) {
+    return NextResponse.json(
+      { error: 'message is too long (max 2000 chars)' },
+      { status: 400 },
+    );
+  }
+
+  /* 3) Webhook URL -------------------------------------------------- */
+  if (!webhookUrl) {
+    console.error('[slack] SLACK_WEBHOOK_URL is not set');
+    return NextResponse.json(
+      { error: 'Slack Webhook URL 未設定' },
+      { status: 500 },
+    );
+  }
+
+  /* 4) Slack 送信ペイロード ----------------------------------------- */
+  const slackPayload = {
+    text: `*${title}*`,
+    blocks: [
+      {
+        type: 'header',
+        text: {
+          type: 'plain_text',
+          text: title,
+          emoji: true,
+        },
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: message,
+        },
+      },
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: `*タイプ:* ${type} | *時刻:* ${new Date().toLocaleString(
+              'ja-JP',
+            )}`,
+          },
+          {
+            type: 'mrkdwn',
+            text: `*by:* <mailto:${user.email}|${user.email}>`,
+          },
+        ],
+      },
+    ],
+  };
+
+  // 5) Slack Webhook へ POST (network errors are caught)
+  let slackRes: Response;
+  try {
+    slackRes = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(slackPayload),
+    });
+  } catch (e) {
+    console.error('[slack] network error:', e);
+    return NextResponse.json(
+      { error: 'Slack 通知送信中にエラーが発生しました' },
+      { status: 500 },
+    );
+  }
+  if (!slackRes.ok) {
+    const txt = await slackRes.text();
+    console.error('[slack] send error:', txt);
+    return NextResponse.json(
+      { error: 'Slack 通知送信に失敗しました' },
+      { status: 500 },
+    );
+  }
+
+  /* 6) 成功応答 ----------------------------------------------------- */
+  return NextResponse.json({ success: true });
+}

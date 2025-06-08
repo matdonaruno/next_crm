@@ -1,12 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import supabase from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseBrowser';
 import { format, startOfWeek, endOfWeek, subWeeks, isSameWeek } from 'date-fns';
 import { ja } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
 import { FileCheck, AlertCircle, ChevronRight, CheckCircle, Clock, ChevronDown, ChevronUp } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+
+interface Profile {
+  id: string;
+  fullname: string;
+  facility_id: string;
+}
 
 interface VerificationStatusProps {
   facilityId: string;
@@ -154,9 +160,9 @@ export function VerificationStatus({
   const navigateToVerification = (weekStart: Date, weekEnd: Date) => {
     router.push(
       `/temperature/weekly-verification?` +
-      `department=${encodeURIComponent(departmentName)}&` +
-      `departmentId=${departmentId}&` +
-      `facilityId=${facilityId}&` +
+      `department=${encodeURIComponent(departmentName ?? '')}&` +
+      `departmentId=${departmentId ?? ''}&` +
+      `facilityId=${facilityId ?? ''}&` +
       `weekStart=${format(weekStart, 'yyyy-MM-dd')}&` +
       `weekEnd=${format(weekEnd, 'yyyy-MM-dd')}`
     );
@@ -165,8 +171,8 @@ export function VerificationStatus({
   if (loading) {
     return (
       <div className="p-4 text-center">
-        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>
-        <p className="mt-2 text-sm text-gray-500">確認状況を読み込み中...</p>
+        <div className="h-10 w-10 border-4 border-pink-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
+        <p className="mt-2 text-sm text-pink-700">確認状況を読み込み中...</p>
       </div>
     );
   }
@@ -201,7 +207,7 @@ export function VerificationStatus({
           <FileCheck className="h-5 w-5 mr-2 text-blue-500" />
           温度管理週次確認の状況
         </h3>
-        <div className="flex items-center">
+        <div className="flex items-center gap-3">
           <Button 
             variant="outline" 
             size="sm"
@@ -216,7 +222,6 @@ export function VerificationStatus({
           <Button
             variant="ghost"
             size="icon"
-            className="ml-2"
             onClick={(e) => {
               e.stopPropagation();
               setIsExpanded(!isExpanded);

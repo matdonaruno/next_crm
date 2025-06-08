@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
-import supabase from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseBrowser';
 
-// シンプルな認証フック（定期的なセッション確認なし）
+/**
+ * 非常にシンプルな認証フック（Webソケット接続なし）
+ * 注: 認証状態の変更監視はAuthProviderに一本化するため、このフックでは購読しません
+ */
 export function useSimpleAuth() {
-  const [user, setUser] = useState<any | null>(null);
+  const [session, setSession] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
@@ -11,10 +14,10 @@ export function useSimpleAuth() {
     const checkSession = async () => {
       try {
         const { data } = await supabase.auth.getSession();
-        setUser(data.session?.user || null);
+        setSession(data.session || null);
       } catch (error) {
         console.error('セッション確認エラー:', error);
-        setUser(null);
+        setSession(null);
       } finally {
         setLoading(false);
       }
@@ -22,17 +25,11 @@ export function useSimpleAuth() {
 
     checkSession();
 
-    // 認証状態変更のリスナー
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setUser(session?.user || null);
-      }
-    );
-
+    // 認証状態変更のリスナーは使わない（AuthProviderに一本化）
     return () => {
-      authListener.subscription.unsubscribe();
+      // クリーンアップ（何もしない）
     };
   }, []);
 
-  return { user, loading };
-} 
+  return { user: session?.user || null, loading };
+}

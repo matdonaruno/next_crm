@@ -3,7 +3,7 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { usePathname } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSession } from '@supabase/auth-helpers-react';
 
 // 異なるページタイプのアニメーション設定
 const transitions = {
@@ -77,9 +77,15 @@ interface PageTransitionProps {
 }
 
 export function PageTransition({ children }: PageTransitionProps) {
-  const { loading } = useAuth();
+  const session = useSession();
+  const [loading, setLoading] = useState(true);
   const { currentPath, delayedPath } = useDelayedPathname();
   const pageType = getPageType(currentPath);
+  
+  // セッションの状態が変わったらローディング完了
+  useEffect(() => {
+    setLoading(session === undefined);
+  }, [session]);
   
   // アニメーション設定を取得
   const animation = transitions[pageType];

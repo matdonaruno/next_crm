@@ -1,5 +1,6 @@
-import { ChatMessage, TranscriptionResult } from '@/types/meeting-minutes';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { TranscriptionResult } from '@/types/meeting-minutes'; // ChatMessage を削除
+// import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'; // 変更前
+import { createBrowserClient } from '@supabase/ssr'; // 変更後
 
 /**
  * 音声ファイルを文字起こしする関数
@@ -14,8 +15,16 @@ export async function transcribeAudio(audioFile: File): Promise<string> {
   formData.append('file', audioFile);
 
   // Supabaseクライアントの初期化
-  const supabase = createClientComponentClient();
+  // const supabase = createClientComponentClient(); // 変更前
+  const supabase = createBrowserClient( // 変更後
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
   
+  /* 正当性チェック（getUser）*/
+  const { data: userCheck } = await supabase.auth.getUser();
+  if (!userCheck.user) throw new Error("認証エラー");
+
   // セッションからトークンを取得
   console.log('認証セッション取得中...');
   const { data: { session } } = await supabase.auth.getSession();
@@ -33,13 +42,10 @@ export async function transcribeAudio(audioFile: File): Promise<string> {
   const timeoutId = setTimeout(() => controller.abort(), 180000); // 3分タイムアウト
   
   try {
-    const response = await fetch('/api/meeting-minutes/transcribe', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      },
-      body: formData,
-      signal: controller.signal
+    const response = await fetch("/api/meeting-minutes/transcribe", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData
     });
 
     clearTimeout(timeoutId); // タイムアウトをクリア
@@ -49,9 +55,9 @@ export async function transcribeAudio(audioFile: File): Promise<string> {
     if (!response.ok) {
       let errorDetail = '';
       try {
-        const error = await response.json();
-        errorDetail = error.error || error.message || '不明なエラー';
-      } catch (e) {
+        const errorData = await response.json(); // error から errorData に変更
+        errorDetail = errorData.error || errorData.message || '不明なエラー';
+      } catch (_parseError) { // e から _parseError に変更
         errorDetail = `HTTPエラー: ${response.status} ${response.statusText}`;
       }
       
@@ -85,10 +91,14 @@ export async function transcribeAudio(audioFile: File): Promise<string> {
 export async function summarizeText(text: string): Promise<TranscriptionResult> {
   // サーバーサイドAPIを使用
   // Supabaseクライアントの初期化
-  const supabase = createClientComponentClient();
+  // const supabase = createClientComponentClient(); // 変更前
+  const supabase = createBrowserClient( // 変更後
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
   
-  // セッションからトークンを取得
-  const { data: { session } } = await supabase.auth.getSession();
+  // const { data: { user } } = await supabase.auth.getUser(); // この行を削除
+  const { data: { session } } = await supabase.auth.getSession(); 
   const token = session?.access_token || '';
   
   if (!token) {
@@ -126,7 +136,11 @@ export async function summarizeText(text: string): Promise<TranscriptionResult> 
  */
 export async function searchMeetings(prompt: string, context?: string): Promise<string> {
   // Supabaseクライアントの初期化
-  const supabase = createClientComponentClient();
+  // const supabase = createClientComponentClient(); // 変更前
+  const supabase = createBrowserClient( // 変更後
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
   
   // セッションからトークンを取得
   const { data: { session } } = await supabase.auth.getSession();
@@ -155,4 +169,4 @@ export async function searchMeetings(prompt: string, context?: string): Promise<
 
   const data = await response.json();
   return data.results ? JSON.stringify(data.results) : '';
-} 
+}

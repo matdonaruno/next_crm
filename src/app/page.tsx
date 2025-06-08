@@ -1,86 +1,78 @@
-// src/app/page.tsx
 'use client';
 
-import { useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 
 export default function Home() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
+  const { session, loading } = useAuth();
+  const router  = useRouter();
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
+  /* ログイン済みならダッシュボードへリダイレクト */
   useEffect(() => {
-    const checkAuthAndRedirect = async () => {
-      console.log('Auth state:', { user, loading });
-      
-      if (!loading && user) {
-        console.log('User is authenticated, redirecting to /depart');
-        router.push('/depart');
-      }
-    };
+    if (session) router.replace('/depart');
+  }, [session, router]);
 
-    checkAuthAndRedirect();
-  }, [user, loading, router]);
-
+  /* セッション判定待ち */
   if (loading) {
-    return (
-      <div className="w-full min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-2xl font-bold mb-4">Labo Logbook</div>
-          <div className="text-gray-600">読み込み中...</div>
-        </div>
-      </div>
-    );
+    return <LoadingSpinner message="読み込み中..." fullScreen />;
   }
 
+  /* 未ログイン (null) */
   return (
     <div className="header w-full min-h-screen relative">
-      {/* ヘッダー内ロゴ部分 */}
-      <div className="inner-header flex">
-        <center>
-          <div className="text-2xl font-bold">Labo Logbook</div>
-          <div className="mt-20">
-            <Link 
-              href="/login" 
-              className="px-6 py-3 text-lg font-medium border-2 border-white text-white rounded-lg hover:bg-white/20 transition-all font-sans" 
-              role="button"
+      <div className="inner-header flex flex-col items-center">
+        <h1 className="text-2xl font-bold mt-8">Labo Logbook</h1>
+
+        <div className="mt-20">
+          {isAuthenticating ? (
+            <div className="px-6 py-3 text-lg font-medium border-2 border-white text-white rounded-lg bg-white/20 inline-flex items-center">
+              <span className="mr-2">Loading...</span>
+              <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setIsAuthenticating(true);
+                router.push('/login');
+              }}
+              className="px-6 py-3 text-lg font-medium border-2 border-white text-white rounded-lg hover:bg-white/20 transition-all"
             >
-              &nbsp;Login&nbsp;
-            </Link>
-          </div>
-        </center>
+              Login
+            </button>
+          )}
+        </div>
       </div>
-      
-      {/* キャッチコピー */}
-      <div>
-        <center>あなたの大切な時間を節約しましょう</center>
-      </div>
-      {/* ウェーブのSVG */}
-      <div>
-        <svg
-          className="waves"
-          xmlns="http://www.w3.org/2000/svg"
-          xmlnsXlink="http://www.w3.org/1999/xlink"
-          viewBox="0 24 150 28"
-          preserveAspectRatio="none"
-          shapeRendering="auto"
-        >
-          <defs>
-            <path id="gentle-wave" d="M-160 44c30 0 58-18 88-18s58 18 88 18 58-18 88-18 58 18 88 18 v44h-352z" />
-          </defs>
-          <g className="parallax">
-            <use xlinkHref="#gentle-wave" x="48" y="0" fill="rgba(255,255,255,0.7)" />
-            <use xlinkHref="#gentle-wave" x="48" y="3" fill="rgba(255,255,255,0.5)" />
-            <use xlinkHref="#gentle-wave" x="48" y="5" fill="rgba(255,255,255,0.3)" />
-            <use xlinkHref="#gentle-wave" x="48" y="7" fill="#fff" />
-          </g>
-        </svg>
-      </div>
-      {/* フッターコンテンツ */}
-      <div className="content flex">
+
+      <p className="mt-4 text-center">あなたの大切な時間を節約しましょう</p>
+
+      {/* 波（装飾） */}
+      <svg
+        className="waves"
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 24 150 28"
+        preserveAspectRatio="none"
+      >
+        <defs>
+          <path
+            id="gentle-wave"
+            d="M-160 44c30 0 58-18 88-18s58 18 88 18
+               58-18 88-18 58 18 88 18 v44h-352z"
+          />
+        </defs>
+        <g className="parallax">
+          <use href="#gentle-wave" x="48" y="0" fill="rgba(255,255,255,0.7)" />
+          <use href="#gentle-wave" x="48" y="3" fill="rgba(255,255,255,0.5)" />
+          <use href="#gentle-wave" x="48" y="5" fill="rgba(255,255,255,0.3)" />
+          <use href="#gentle-wave" x="48" y="7" fill="#fff" />
+        </g>
+      </svg>
+
+      <footer className="content flex justify-center py-4">
         <p>© 2025 Labo Logbook</p>
-      </div>
+      </footer>
     </div>
   );
 }

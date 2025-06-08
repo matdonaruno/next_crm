@@ -1,397 +1,429 @@
+// src/app/api/sensor/route.ts
 import { NextResponse } from 'next/server';
-import supabase from '@/lib/supabaseClient';
+import { createServiceClient } from '@/lib/supabase/service'; // サービスロールクライアント
 import { getJstTimestamp, getJstDateString } from '@/lib/utils';
+import type { Database } from '@/types/supabase';
+
+type SB = ReturnType<typeof createServiceClient>;
+type SensorDeviceRow =
+  Database['public']['Tables']['sensor_devices']['Row'];
+type MappingRow =
+  Database['public']['Tables']['sensor_mappings']['Row'];
 
 export async function POST(request: Request) {
+  const start = Date.now();
+
   try {
-    const startTime = Date.now(); // 処理開始時間
-    console.log(`センサーAPI: リクエスト受信 ${new Date().toISOString()}`);
+    console.log('[sensor] API request started');
     
-    // リクエストデータを取得
-    const requestData = await request.json();
+    /* ───────────────────────── 1) Supabase */
+    const supabase = createServiceClient();
+    console.log('[sensor] Supabase client created');
+
+    /* ───────────────────────── 2) payload */
+    const payload = await request.json();
+    console.log('[sensor] Payload received:', JSON.stringify(payload, null, 2));
+    const {
+      ahtTemp,
+      ahtHum,
+      bmpTemp,
+      bmpPres,
+      batteryVolt,
+      deviceId,
+      token,
+      ipAddress,
+      timestamp,
+      alert,
+      diagnostic,
+      ahtStatus,
+      bmpStatus,
+      device_id,
+      device_name,
+      mac_address,
+      data,
+    } = payload as Record<string, any>;
+
+    /* ───────────────────────── 3) 正規化 */
+    const effectiveDeviceId: string | null = device_id || deviceId || null;
+    const sensorData =
+      data ?? { 
+        ahtTemp, 
+        ahtHum, 
+        bmpTemp, 
+        bmpPres, 
+        batteryVolt,
+        timestamp,
+        alert,
+        diagnostic,
+        ahtStatus,
+        bmpStatus
+      };
+    const ip =
+      request.headers.get('x-forwarded-for') ||
+      ipAddress ||
+      'unknown';
+
+    console.log('[sensor] from', ip, 'deviceId=', effectiveDeviceId, 'diagnostic=', diagnostic, 'alert=', alert);
+
+    /* ───────────────────────── 4) デバイス検索とトークン認証 */
+    let device:
+      | Pick<
+          SensorDeviceRow,
+          'id' | 'device_name' | 'facility_id' | 'department_id' | 'location' | 'auth_token'
+        >
+      | null = null;
     
-    // 基本データ抽出（従来互換）+ 拡張フィールド
-    const { 
-      // 従来のフィールド
-      ahtTemp, ahtHum, bmpTemp, bmpPres, batteryVolt, deviceId, ipAddress, timestamp,
-      // 拡張フィールド 
-      device_id, device_name, mac_address, data 
-    } = requestData;
+    console.log('[sensor] Looking for device with ID:', effectiveDeviceId);
     
-    // 優先順位: device_id > deviceId
-    const effectiveDeviceId = device_id || deviceId || null;
-    
-    // センサーデータ形式の正規化（2つのフォーマットに対応）
-    const sensorData = data || { 
-      ahtTemp, ahtHum, bmpTemp, bmpPres, batteryVolt 
-    };
-    
-    // IPアドレスの取得（ヘッダー > リクエスト > デフォルト）
-    const ip = request.headers.get('x-forwarded-for') || ipAddress || 'unknown';
-    
-    console.log(`受信センサーデータ: ${ip} - デバイスID: ${effectiveDeviceId || 'なし'}`);
-    console.log('センサー値:', sensorData);
-    
-    // デバイスIDとIPアドレスの両方で検索（デバイスIDを優先）
-    let deviceData = null;
-    let isNewDevice = false;
-    
-    // 1. デバイス検索を並列実行
-    const [deviceByIdResult, deviceByIpResult] = await Promise.allSettled([
-      // デバイスIDで検索
-      effectiveDeviceId ? supabase
-        .from('sensor_devices')
-        .select('id, device_name, facility_id, department_id, location')
-        .eq('device_id', effectiveDeviceId)
-        .single() : Promise.resolve({ data: null }),
+    if (effectiveDeviceId) {
+      try {
+        const { data: deviceData, error: deviceError } = await supabase
+          .from('sensor_devices')
+          .select('id,device_name,facility_id,department_id,location,auth_token')
+          .eq('device_id', effectiveDeviceId)
+          .single();
+        
+        console.log('[sensor] Device query result:', { deviceData, deviceError });
+        
+        if (deviceError && deviceError.code !== 'PGRST116') {
+          throw new Error(`Device query failed: ${deviceError.message}`);
+        }
       
-      // IPアドレスで検索（後方互換性）
-      ip !== 'unknown' ? supabase
-        .from('sensor_devices')
-        .select('id, device_name, facility_id, department_id, location')
-        .eq('ip_address', ip)
-        .single() : Promise.resolve({ data: null })
-    ]);
-    
-    // デバイスIDでの検索結果を優先
-    if (deviceByIdResult.status === 'fulfilled' && deviceByIdResult.value.data) {
-      deviceData = deviceByIdResult.value.data;
-    } else if (deviceByIpResult.status === 'fulfilled' && deviceByIpResult.value.data) {
-      deviceData = deviceByIpResult.value.data;
+        if (deviceData) {
+          // トークン認証（既存デバイスの場合）
+          if (deviceData.auth_token && token !== deviceData.auth_token) {
+            console.log('[sensor] Token mismatch for device:', effectiveDeviceId);
+            return NextResponse.json(
+              { status: 'error', message: 'Invalid token' },
+              { status: 401 }
+            );
+          }
+          device = deviceData;
+          console.log('[sensor] Found existing device:', device.device_name);
+        }
+      } catch (deviceQueryError) {
+        console.error('[sensor] Error querying device:', deviceQueryError);
+        throw deviceQueryError;
+      }
     }
-    
-    // デバイスが存在しない場合は自動登録
-    if (!deviceData && effectiveDeviceId) {
-      console.log(`未登録デバイス(${effectiveDeviceId})を自動登録します`);
+
+    // IPアドレスでの検索（デバイスIDがない場合のフォールバック）
+    if (!device && ip !== 'unknown') {
+      const { data: deviceByIp } = await supabase
+        .from('sensor_devices')
+        .select('id,device_name,facility_id,department_id,location,auth_token')
+        .eq('ip_address', ip)
+        .single();
       
-      // デフォルト施設を取得（最初の施設を使用）
-      const { data: defaultFacility, error: facilityError } = await supabase
+      if (deviceByIp) device = deviceByIp;
+    }
+
+    let isNewDevice = false;
+
+    /* ───────────────────────── 5) 未登録は自動登録 */
+    if (!device && effectiveDeviceId) {
+      const { data: defFac } = await supabase
         .from('facilities')
         .select('id')
         .limit(1)
         .single();
-        
-      if (facilityError) {
-        console.error('デフォルト施設取得エラー:', facilityError);
-        
-        // センサーログだけは記録する
+
+      if (!defFac) {
         await supabase.from('sensor_logs').insert({
           raw_data: sensorData,
           ip_address: ip,
-          device_id: effectiveDeviceId || null,
-          recorded_at: getJstTimestamp()
+          device_id: effectiveDeviceId,
+          recorded_at: getJstTimestamp(),
         });
-        
-        return NextResponse.json({ 
-          status: 'error', 
-          message: 'デフォルト施設が設定されていません。先に施設を登録してください。',
-          sensorLogSaved: true
-        }, { status: 200 });
+        return NextResponse.json(
+          { status: 'error', message: '施設が未登録です。' },
+          { status: 200 },
+        );
       }
-      
-      // 新規デバイスを登録
-      const { data: newDevice, error: newDeviceError } = await supabase
+
+      const { data: newDev } = await supabase
         .from('sensor_devices')
         .insert({
           device_id: effectiveDeviceId,
-          device_name: device_name || `新規センサー ${effectiveDeviceId.substring(0, 8)}`, // 指定がなければ自動生成
-          mac_address: mac_address || null,
+          device_name:
+            device_name || `新規センサー ${effectiveDeviceId.slice(0, 8)}`,
+          mac_address,
           ip_address: ip !== 'unknown' ? ip : null,
-          facility_id: defaultFacility.id,
-          department_id: null, // デフォルトは未割り当て
+          facility_id: defFac.id,
           is_active: true,
           last_seen: getJstTimestamp(),
           location: '未設定',
-          note: '自動登録されたセンサーデバイスです。部門割り当てを行ってください。'
+          auth_token: token || null, // 新規デバイスのトークンを保存
         })
-        .select('id, device_name, facility_id, department_id, location')
+        .select('id,device_name,facility_id,department_id,location,auth_token')
         .single();
+
+      device = newDev;
+      isNewDevice = true;
       
-      if (newDeviceError) {
-        console.error('デバイス自動登録エラー:', newDeviceError);
-        
-        // センサーログだけは記録する
-        await supabase.from('sensor_logs').insert({
+      console.log('[sensor] New device registered:', effectiveDeviceId);
+    }
+
+    /* ───────────────────────── 6) 生ログ保存 */
+    console.log('[sensor] Saving sensor log...');
+    
+    try {
+      const { data: sensorLog, error: logError } = await supabase
+        .from('sensor_logs')
+        .insert({
+          sensor_device_id: device?.id ?? null,
           raw_data: sensorData,
           ip_address: ip,
-          device_id: effectiveDeviceId || null,
-          recorded_at: getJstTimestamp()
-        });
-        
-        return NextResponse.json({ 
-          status: 'error', 
-          message: 'デバイスの自動登録に失敗しました',
-          sensorLogSaved: true
-        }, { status: 200 });
+          device_id: effectiveDeviceId,
+          recorded_at: getJstTimestamp(),
+          is_processed: Boolean(device?.department_id),
+        })
+        .select('id')
+        .single();
+      
+      if (logError) {
+        console.error('[sensor] Sensor log save error:', logError);
+        throw new Error(`Sensor log save failed: ${logError.message}`);
       }
       
-      deviceData = newDevice;
-      isNewDevice = true;
-      console.log(`デバイス ${effectiveDeviceId} を自動登録しました。ID: ${deviceData.id}`);
+      console.log('[sensor] Sensor log saved with ID:', sensorLog?.id);
+    
+      // 以降でsensorLogを参照するために変数を設定
+      var savedSensorLog = sensorLog;
+    } catch (logSaveError) {
+      console.error('[sensor] Error saving sensor log:', logSaveError);
+      throw logSaveError;
     }
-    
-    // 2. センサーログに保存
-    const { data: sensorLog, error: logError } = await supabase
-      .from('sensor_logs')
-      .insert({
-        sensor_device_id: deviceData?.id || null,
-        raw_data: sensorData,
-        ip_address: ip,
-        device_id: effectiveDeviceId || null,
-        recorded_at: getJstTimestamp(),
-        is_processed: deviceData?.department_id ? true : false // 部門割り当てがあれば処理済みとマーク
-      })
-      .select('id')
-      .single();
-    
-    if (logError) {
-      console.error('センサーログ保存エラー:', logError);
-      return NextResponse.json({ 
-        status: 'error', 
-        message: 'センサーログの保存に失敗しました' 
-      }, { status: 500 });
-    }
-    
-    // デバイスが登録されていないか、部門割り当てがない場合
-    if (!deviceData || !deviceData.department_id) {
-      const message = !deviceData 
-        ? '未登録デバイスからのデータです' 
-        : 'デバイスに部門が割り当てられていません';
-      
-      console.log(`温度記録変換スキップ: ${message}`);
-      
-      const endTime = Date.now();
-      return NextResponse.json({ 
-        status: 'log_only', 
-        message,
-        device_status: deviceData ? 'unassigned' : 'unregistered',
-        is_new_device: isNewDevice,
-        sensor_log_id: sensorLog.id,
-        processingTime: endTime - startTime
-      }, { status: 200 });
-    }
-    
-    // 3. デバイス情報の更新
-    const updateData: any = { last_seen: getJstTimestamp() };
-    if (ip !== 'unknown') updateData.ip_address = ip;
-    
-    await supabase
-      .from('sensor_devices')
-      .update(updateData)
-      .eq('id', deviceData.id);
-    
-    // 4. マッピング情報を取得
-    const { data: mappings, error: mappingError } = await supabase
-      .from('sensor_mappings')
-      .select('sensor_type, temperature_item_id, offset_value')
-      .eq('sensor_device_id', deviceData.id);
-    
-    // 5. マッピングがない場合は自動マッピングを試みる
-    if (mappingError || !mappings || mappings.length === 0) {
-      console.log(`デバイス ${deviceData.id} のマッピングが見つかりません。自動マッピングを試みます。`);
-      
-      // 温度関連のセンサーフィールドを検出
-      const tempFields = Object.keys(sensorData).filter(key => 
-        key.includes('Temp') && typeof sensorData[key] === 'number'
-      );
-      
-      if (tempFields.length > 0) {
-        // デバイスの部門に対応するtemperature_itemsを取得
-        const { data: tempItems, error: itemsError } = await supabase
-          .from('temperature_items')
-          .select('id, item_name, display_name')
-          .eq('department_id', deviceData.department_id)
-          .eq('facility_id', deviceData.facility_id)
-          .order('display_order', { ascending: true })
-          .limit(tempFields.length);
-        
-        if (!itemsError && tempItems && tempItems.length > 0) {
-          // 自動マッピングを作成
-          const autoMappings = [];
-          
-          for (let i = 0; i < Math.min(tempFields.length, tempItems.length); i++) {
-            autoMappings.push({
-              sensor_device_id: deviceData.id,
-              sensor_type: tempFields[i],
-              temperature_item_id: tempItems[i].id,
-              offset_value: 0
-            });
-          }
-          
-          // マッピングをDBに保存
-          if (autoMappings.length > 0) {
-            const { data: savedMappings, error: saveMappingError } = await supabase
-              .from('sensor_mappings')
-              .insert(autoMappings)
-              .select('sensor_type, temperature_item_id, offset_value');
-            
-            if (!saveMappingError && savedMappings) {
-              console.log(`デバイス ${deviceData.id} に ${savedMappings.length} 件の自動マッピングを作成しました`);
-              // 作成したマッピングを使用
-              await processTemperatureRecord(deviceData, sensorData, savedMappings);
-              
-              const endTime = Date.now();
-              return NextResponse.json({ 
-                status: 'success_with_auto_mapping', 
-                message: '自動マッピングでデータを記録しました',
-                device_status: 'assigned',
-                is_new_device: isNewDevice,
-                sensor_log_id: sensorLog.id,
-                auto_mappings_created: savedMappings.length,
-                processingTime: endTime - startTime
-              });
-            }
-          }
-        }
-      }
-      
-      console.log(`自動マッピングできませんでした。センサーログのみ保存します。`);
-      
-      const endTime = Date.now();
-      return NextResponse.json({ 
-        status: 'log_only_no_mapping', 
-        message: 'マッピングがないため、温度記録には変換されませんでした',
-        device_status: 'assigned_no_mapping',
-        is_new_device: isNewDevice,
-        sensor_log_id: sensorLog.id,
-        processingTime: endTime - startTime
+
+    /* ───────────────────────── 7) バッテリー警告の処理 */
+    if (alert === 'low_battery' && device) {
+      // バッテリー警告の通知を作成
+      await supabase.from('user_notifications').insert({
+        user_id: 'system', // システム通知として記録
+        title: 'センサーバッテリー低下警告',
+        message: `センサー「${device.device_name}」のバッテリー電圧が低下しています (${batteryVolt}V)`,
+        notification_type: 'battery_warning',
+        related_data: {
+          device_id: device.id,
+          device_name: device.device_name,
+          battery_voltage: batteryVolt,
+          location: device.location,
+        },
       });
+      
+      console.log('[sensor] Battery warning logged for device:', device.device_name, 'voltage:', batteryVolt);
+    }
+
+    /* ───────────────────────── 8) 診断情報の処理 */
+    if (diagnostic && device) {
+      // 診断情報をログに記録
+      const diagnosticData = {
+        ahtStatus,
+        bmpStatus,
+        batteryVolt,
+        timestamp,
+        ip_address: ip,
+      };
+      
+      console.log('[sensor] Diagnostic data received:', diagnosticData);
+      
+      // センサー状態に異常がある場合は通知
+      if (ahtStatus !== 'OK' || bmpStatus !== 'OK') {
+        await supabase.from('user_notifications').insert({
+          user_id: 'system',
+          title: 'センサー異常検知',
+          message: `センサー「${device.device_name}」に異常が検知されました。AHT: ${ahtStatus}, BMP: ${bmpStatus}`,
+          notification_type: 'sensor_error',
+          related_data: {
+            device_id: device.id,
+            device_name: device.device_name,
+            diagnostic_data: diagnosticData,
+          },
+        });
+      }
+    }
+
+    /* ───────────────────────── 9) 部署未割当なら終了 */
+    if (!device || !device.department_id || !device.facility_id) {
+      return NextResponse.json(
+        {
+          status: 'log_only',
+          device_status: device
+            ? device.department_id
+              ? 'unassigned_facility'
+              : 'unassigned'
+            : 'unregistered',
+          is_new_device: isNewDevice,
+          sensor_log_id: savedSensorLog!.id,
+          processingTime: Date.now() - start,
+        },
+        { status: 200 },
+      );
+    }
+
+    /* ───────────────────────── 10) last_seen 更新 */
+    const update: Partial<SensorDeviceRow> = { 
+      last_seen: getJstTimestamp(),
+      last_connection: getJstTimestamp(), // 最終接続時刻も更新
+    };
+    if (ip !== 'unknown') update.ip_address = ip;
+    
+    // トークンが送信されていて、まだ保存されていない場合は保存
+    if (token && !device.auth_token) {
+      update.auth_token = token;
     }
     
-    // 6. マッピングに基づいて温度記録を処理
-    await processTemperatureRecord(deviceData, sensorData, mappings);
+    console.log('[sensor] Updating device with:', update);
     
-    const endTime = Date.now();
-    console.log(`センサーAPI: 処理完了 (${endTime - startTime}ms)`);
-    
+    try {
+      const { error: updateError } = await supabase
+        .from('sensor_devices')
+        .update(update)
+        .eq('id', device.id);
+      
+      if (updateError) {
+        console.error('[sensor] Device update error:', updateError);
+        throw new Error(`Device update failed: ${updateError.message}`);
+      }
+      
+      console.log('[sensor] Device updated successfully');
+    } catch (updateErr) {
+      console.error('[sensor] Error updating device:', updateErr);
+      throw updateErr;
+    }
+
+    /* ───────────────────────── 11) マッピング → 温度記録 */
+    const { data: mappings } = await supabase
+      .from('sensor_mappings')
+      .select('sensor_type,temperature_item_id,offset_value')
+      .eq('sensor_device_id', device.id);
+
+    if (!mappings?.length) {
+      return NextResponse.json(
+        {
+          status: 'log_only_no_mapping',
+          sensor_log_id: savedSensorLog!.id,
+          processingTime: Date.now() - start,
+          diagnostic: diagnostic || false,
+          alert: alert || null,
+        },
+        { status: 200 },
+      );
+    }
+
+    // 診断モードの場合は温度記録をスキップ
+    if (!diagnostic) {
+      await processTemperatureRecord(
+        supabase,
+        device as NonNullable<typeof device>, // facility_id/department_id 非 null を保証
+        sensorData,
+        mappings,
+      );
+    }
+
+    return NextResponse.json(
+      {
+        status: 'success',
+        sensor_log_id: savedSensorLog!.id,
+        processingTime: Date.now() - start,
+        diagnostic: diagnostic || false,
+        alert: alert || null,
+        device_name: device.device_name,
+      },
+      { status: 200 },
+    );
+  } catch (e) {
+    console.error('[sensor] API error:', e);
+    console.error('[sensor] Error stack:', e instanceof Error ? e.stack : 'No stack trace');
     return NextResponse.json({ 
-      status: 'success', 
-      message: 'センサーデータを正常に記録しました',
-      device_status: 'assigned',
-      is_new_device: isNewDevice,
-      sensor_log_id: sensorLog.id,
-      processingTime: endTime - startTime
-    });
-    
-  } catch (error) {
-    console.error('Sensor API error:', error);
-    return NextResponse.json({ 
-      status: 'error', 
-      message: 'Internal server error' 
+      status: 'error',
+      message: e instanceof Error ? e.message : 'Unknown error',
+      error_type: e instanceof Error ? e.constructor.name : 'Unknown'
     }, { status: 500 });
   }
 }
 
-// 温度記録処理の補助関数
+/* ───────────────────────── ヘルパー ───────────────────────── */
 async function processTemperatureRecord(
-  deviceData: { id: string; device_name: string; facility_id: string; department_id: string; location?: string },
-  sensorData: Record<string, any>,
-  mappings: Array<{ sensor_type: string; temperature_item_id: string; offset_value: number }>
+  supabase: SB,
+  device: {
+    id: string;
+    device_name: string;
+    facility_id: string | null;
+    department_id: string | null;
+    location: string | null;
+  },
+  sensor: Record<string, any>,
+  mappings: {
+    sensor_type: string;
+    temperature_item_id: string | null;
+    offset_value: number | null;
+  }[],
 ) {
-  try {
-    // 1. 現在日付（YYYY-MM-DD形式）- 日本時間で取得
-    const recordDate = getJstDateString();
-    
-    // 2. 既存レコードをチェック（同じ日に既に記録があるか）
-    const { data: existingRecord, error: recordError } = await supabase
-      .from('temperature_records')
-      .select('id')
-      .eq('facility_id', deviceData.facility_id)
-      .eq('department_id', deviceData.department_id)
-      .eq('record_date', recordDate)
-      .eq('is_auto_recorded', true) // 自動記録されたものだけをチェック
-      .single();
-    
-    let recordId;
-    
-    if (recordError || !existingRecord) {
-      console.log(`新しい温度記録を作成: 施設ID ${deviceData.facility_id}, 部署ID ${deviceData.department_id}`);
-      
-      // 3. 新しいレコードを作成
-      const { data: newRecord, error: insertError } = await supabase
-        .from('temperature_records')
-        .insert({
-          facility_id: deviceData.facility_id,
-          department_id: deviceData.department_id,
-          record_date: recordDate,
-          is_auto_recorded: true,
-          created_by: 'system',
-          note: `センサー「${deviceData.device_name}」からの自動記録 (${deviceData.location || '場所未設定'})`
-        })
-        .select('id')
-        .single();
-        
-      if (insertError || !newRecord) {
-        console.error('温度記録の作成に失敗:', insertError);
-        throw insertError;
-      }
-      
-      recordId = newRecord.id;
-    } else {
-      recordId = existingRecord.id;
-      console.log(`既存の温度記録を更新: ID ${recordId}`);
-    }
-    
-    // 4. 各センサーデータの処理を並列実行
-    const detailUpdates = mappings.map(mapping => {
-      // センサーデータ取得（sensorDataから直接値を取得）
-      const sensorValue = sensorData[mapping.sensor_type];
-      
-      // 値が存在しなければスキップ
-      if (sensorValue === undefined || sensorValue === null) {
-        return Promise.resolve();
-      }
-      
-      // オフセット値を適用
-      const adjustedValue = sensorValue + (mapping.offset_value || 0);
-      
-      // 既存レコードをチェックして、新規追加か更新かを判断して処理
-      return processDetailRecord(recordId, mapping.temperature_item_id, adjustedValue);
-    });
-    
-    // すべての詳細レコード処理を待機
-    await Promise.all(detailUpdates.filter(Boolean));
-    
-    return recordId;
-  } catch (error) {
-    console.error('温度記録処理エラー:', error);
-    throw error;
-  }
-}
+  /* facility / department が null の場合は何もしない */
+  if (!device.facility_id || !device.department_id) return;
 
-// 詳細レコード処理の補助関数
-async function processDetailRecord(recordId: string, itemId: string, value: number) {
-  try {
-    // 既存の詳細レコードをチェック
-    const { data: existingDetail, error: detailError } = await supabase
-      .from('temperature_record_details')
+  const recordDate = getJstDateString();
+
+  /* 1) ヘッダー行検索 / 作成 */
+  const { data: header } = await supabase
+    .from('temperature_records')
+    .select('id')
+    .eq('facility_id', device.facility_id)
+    .eq('department_id', device.department_id)
+    .eq('record_date', recordDate)
+    .eq('is_auto_recorded', true)
+    .single();
+
+  let recordId = header?.id as string | undefined;
+
+  if (!recordId) {
+    const { data: inserted } = await supabase
+      .from('temperature_records')
+      .insert({
+        facility_id: device.facility_id,
+        department_id: device.department_id,
+        record_date: recordDate,
+        is_auto_recorded: true,
+        created_by: 'system',
+        note: `センサー「${device.device_name}」自動記録`,
+      })
       .select('id')
-      .eq('temperature_record_id', recordId)
-      .eq('temperature_item_id', itemId)
       .single();
-      
-    if (detailError || !existingDetail) {
-      // 新しい詳細レコードを挿入
-      return supabase
-        .from('temperature_record_details')
-        .insert({
-          temperature_record_id: recordId,
-          temperature_item_id: itemId,
-          value: value,
-          data_source: 'sensor'
-        });
-    } else {
-      // 既存の詳細レコードを更新
-      return supabase
-        .from('temperature_record_details')
-        .update({ 
-          value: value,
-          data_source: 'sensor'
-        })
-        .eq('id', existingDetail.id);
-    }
-  } catch (error) {
-    console.error(`詳細レコード処理エラー(項目ID: ${itemId}):`, error);
-    throw error;
+
+    if (!inserted) throw new Error('temperature_records insert failed');
+    recordId = inserted.id;
   }
-} 
+
+  /* 2) 詳細レコード更新 */
+  await Promise.all(
+    mappings.map(async m => {
+      if (!m.temperature_item_id) return;
+      const raw = sensor[m.sensor_type];
+      if (raw == null) return;
+
+      const value = raw + (m.offset_value ?? 0);
+
+      const { data: detail } = await supabase
+        .from('temperature_record_details')
+        .select('id')
+        .eq('temperature_record_id', recordId!)
+        .eq('temperature_item_id', m.temperature_item_id)
+        .single();
+
+      if (!detail) {
+        return supabase.from('temperature_record_details').insert({
+          temperature_record_id: recordId,
+          temperature_item_id: m.temperature_item_id,
+          value,
+          data_source: 'sensor',
+        });
+      } else {
+        return supabase
+          .from('temperature_record_details')
+          .update({ value, data_source: 'sensor' })
+          .eq('id', detail.id);
+      }
+    }),
+  );
+}

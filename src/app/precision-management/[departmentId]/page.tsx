@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { PrecisionManagementRecordForm } from '@/components/precision-management/PrecisionManagementRecordForm';
+import PrecisionManagementRecordForm from '@/components/precision-management/PrecisionManagementRecordForm';
+
 import { WeeklyRecordsSummary } from '@/components/precision-management/WeeklyRecordsSummary';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -17,7 +18,9 @@ import { ja } from 'date-fns/locale';
 import { useToast } from '@/components/ui/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle, RefreshCw, Plus, FileCheck, ClipboardList, Calendar, LineChart, AlertTriangle, ChevronDown } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSupabase } from '@/app/_providers/supabase-provider';
+import { useUserProfile } from '@/hooks/use-user-profile';
+import { Profile } from '@/app/equipment_dash/types'; // Profile型をインポート
 import { AppHeader } from '@/components/ui/app-header';
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { motion } from 'framer-motion';
@@ -35,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { LoadingSpinner, CompactLoadingSpinner } from '@/components/common/LoadingSpinner';
 
 // 通知の型定義
 interface PrecisionManagementNotification {
@@ -69,7 +73,9 @@ export default function DepartmentPrecisionManagementPage() {
   const [activeTab, setActiveTab] = useState('daily');
   const { toast } = useToast();
   const [dataVersion, setDataVersion] = useState(0); // データ更新を制御するバージョン
-  const { user } = useAuth();
+  const { session } = useSupabase();
+  const { profile } = useUserProfile();
+  const user = session?.user;
 
   // 戻るボタンのカスタム処理
   const handleBackClick = useCallback(() => {
@@ -80,8 +86,8 @@ export default function DepartmentPrecisionManagementPage() {
     
     // 部署情報をクエリパラメータとして引き継ぐ
     if (department) {
-      const departmentName = encodeURIComponent(department.name);
-      router.push(`/taskpick?department=${departmentName}&departmentId=${departmentId}`);
+      const departmentName = encodeURIComponent(department.name ?? '');
+      router.push(`/taskpick?department=${departmentName}&departmentId=${departmentId ?? ''}`);
     } else {
       // 部署情報がない場合は単純に戻る
       router.push('/taskpick');
@@ -457,7 +463,7 @@ export default function DepartmentPrecisionManagementPage() {
   };
 
   if (loading) {
-    return <div className="flex justify-center items-center h-screen">読み込み中...</div>;
+    return <LoadingSpinner message="データを読み込み中..." fullScreen />;
   }
 
   if (hasFetchError) {
@@ -524,7 +530,7 @@ export default function DepartmentPrecisionManagementPage() {
               施設「独立行政法人国立病院機構　都城医療センター」
             </p>
             <p className="text-gray-600 text-sm">
-              {user?.user_metadata?.name || user?.email?.split('@')[0] || 'User'}さんがログインしています
+              {profile?.fullname || user?.email?.split('@')[0] || 'User'}さんがログインしています
             </p>
           </div>
         </div>
@@ -632,10 +638,7 @@ export default function DepartmentPrecisionManagementPage() {
                   </AccordionTrigger>
                   <AccordionContent>
                     {loadingRecords ? (
-                      <div className="p-8 text-center">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto"></div>
-                        <p className="mt-4 text-gray-500">データを読み込み中...</p>
-                      </div>
+                      <CompactLoadingSpinner message="データを読み込み中..." />
                     ) : selectedDayRecords.length === 0 ? (
                       <div className="p-8 text-center text-gray-500">
                         <p>この日付の記録はありません</p>
@@ -701,10 +704,7 @@ export default function DepartmentPrecisionManagementPage() {
                   </AccordionTrigger>
                   <AccordionContent>
                     {loadingRecords ? (
-                      <div className="p-8 text-center">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto"></div>
-                        <p className="mt-4 text-gray-500">データを読み込み中...</p>
-                      </div>
+                      <CompactLoadingSpinner message="データを読み込み中..." />
                     ) : yesterdayRecords.length === 0 ? (
                       <div className="p-8 text-center text-gray-500">
                         <p>この日付の記録はありません</p>
@@ -770,10 +770,7 @@ export default function DepartmentPrecisionManagementPage() {
                   </AccordionTrigger>
                   <AccordionContent>
                     {loadingRecords ? (
-                      <div className="p-8 text-center">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto"></div>
-                        <p className="mt-4 text-gray-500">データを読み込み中...</p>
-                      </div>
+                      <CompactLoadingSpinner message="データを読み込み中..." />
                     ) : dayBeforeYesterdayRecords.length === 0 ? (
                       <div className="p-8 text-center text-gray-500">
                         <p>この日付の記録はありません</p>

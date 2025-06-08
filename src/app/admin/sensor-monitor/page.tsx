@@ -1,8 +1,10 @@
+// src/app/admin/sensor-monitor/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
-import supabase from '@/lib/supabaseClient';
+import { useSupabase } from '@/app/_providers/supabase-provider';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { useToast } from '@/hooks/use-toast';
 import { Activity, Terminal, RefreshCw, AlertTriangle, Thermometer, Droplets, Gauge } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
@@ -10,10 +12,10 @@ import { motion } from 'framer-motion';
 interface SensorDevice {
   id: string;
   device_name: string;
-  ip_address: string;
-  device_id?: string;
+  ip_address: string | null;
+  device_id?: string | null;
   last_seen: string | null;
-  status: string;
+  status: string | null;
   isOnline: boolean;
   facilities: { name: string } | null;
   departments: { name: string } | null;
@@ -38,63 +40,71 @@ export default function SensorMonitor() {
   const [devices, setDevices] = useState<SensorDevice[]>([]);
   const [logs, setLogs] = useState<SensorLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const { supabase } = useSupabase();
+  const { toast } = useToast();
   
   const fetchData = async () => {
     setLoading(true);
-    
     try {
-      // デバイス状態の取得
-      const { data: deviceData, error: deviceError } = await supabase
-        .from('sensor_devices')
-        .select(`
-          id, 
-          device_name, 
-          ip_address,
-          device_id,
-          last_seen, 
-          status,
-          facilities(name),
-          departments(name)
-        `)
-        .order('last_seen', { ascending: false });
-        
+      // デバイス・ログを並列取得
+      const [
+        { data: deviceData, error: deviceError },
+        { data: logData, error: logError }
+      ] = await Promise.all([
+        supabase
+          .from('sensor_devices')
+          .select(`
+            id,
+            device_name,
+            ip_address,
+            device_id,
+            last_seen,
+            status,
+            facilities(name),
+            departments(name)
+          `)
+          .order('last_seen', { ascending: false }),
+        supabase
+          .from('sensor_logs')
+          .select(`
+            id,
+            sensor_device_id,
+            raw_data,
+            recorded_at,
+            sensor_devices(device_name)
+          `)
+          .order('recorded_at', { ascending: false })
+          .limit(50)
+      ]);
+
+      // デバイス処理
       if (deviceError) {
         console.error('デバイス取得エラー:', deviceError);
+        toast({ title: 'デバイス取得エラー', variant: 'destructive' });
       } else if (deviceData) {
-        // オンライン状態の判定（15分以内の応答があればオンライン）
-        const now = new Date();
-        const devices = deviceData.map(device => {
-          const lastSeen = device.last_seen ? new Date(device.last_seen) : null;
-          const isOnline = lastSeen && (now.getTime() - lastSeen.getTime() < 15 * 60 * 1000);
-          return {
-            ...device,
-            isOnline
-          };
+        const now = Date.now();
+        const processedDevices: SensorDevice[] = deviceData.map((d) => {
+          const lastSeenMs = d.last_seen ? new Date(d.last_seen).getTime() : 0;
+          const isOnline = lastSeenMs !== 0 && now - lastSeenMs < 15 * 60 * 1000;
+          return { ...d, isOnline };
         });
-        
-        setDevices(devices as unknown as SensorDevice[]);
+        setDevices(processedDevices);
       }
-      
-      // 最新のセンサーログ
-      const { data: logData, error: logError } = await supabase
-        .from('sensor_logs')
-        .select(`
-          id,
-          sensor_device_id,
-          raw_data,
-          recorded_at,
-          sensor_devices(device_name)
-        `)
-        .order('recorded_at', { ascending: false })
-        .limit(50);
-        
+
+      // ログ処理
       if (logError) {
         console.error('ログ取得エラー:', logError);
+        toast({ title: 'ログ取得エラー', variant: 'destructive' });
       } else if (logData) {
-        setLogs(logData as unknown as SensorLog[]);
+        setLogs(logData as SensorLog[]);
       }
     } catch (error) {
-      console.error('データ取得エラー:', error);
+      console.error('データ取得例外:', error);
+      toast({
+        title: 'データ取得例外',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
@@ -102,21 +112,21 @@ export default function SensorMonitor() {
   
   useEffect(() => {
     fetchData();
-    
+
     // 定期的な更新（1分ごと）
     const interval = setInterval(fetchData, 60 * 1000);
-    
+
     // リアルタイム更新のサブスクリプション
     const subscription = supabase
       .channel('sensor_logs_changes')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sensor_logs' }, fetchData)
       .subscribe();
-    
+
     return () => {
       subscription.unsubscribe();
       clearInterval(interval);
     };
-  }, []);
+  }, [supabase]); // Provider が変わった場合に再登録
   
   return (
     <div className="container mx-auto p-4">

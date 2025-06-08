@@ -9,10 +9,12 @@ import { Label } from "@/components/ui/label";
 import { AlertTriangle, Search, UserRound, Mail, Building, Sprout, ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSupabase } from "@/components/SupabaseProvider";
+import type { Database } from "@/types/supabase";
 import { AppHeader } from "@/components/ui/app-header";
 import { Separator } from "@/components/ui/separator";
 import { motion } from "framer-motion";
-import supabase from "@/lib/supabaseClient";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 
 type FormValues = {
   lastName: string;
@@ -24,10 +26,23 @@ interface Facility {
   name: string;
 }
 
+type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+
 export default function UserSettings() {
-  const { user, profile, updateProfile } = useAuth();
-  const { register, handleSubmit, setValue, formState: { errors } } = useForm<FormValues>();
+  const { session, user, profile: authProfile, loading: authLoading } = useAuth();
+  const supabase = useSupabase();
   const router = useRouter();
+  
+  if (authLoading) {
+    return <LoadingSpinner message="ユーザー情報を読み込み中..." fullScreen />;
+  }
+  
+  if (!session || !user) {
+    router.replace("/login");
+    return null;
+  }
+  
+  const { register, handleSubmit, setValue, formState: { errors } } = useForm<FormValues>();
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -39,24 +54,25 @@ export default function UserSettings() {
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [showFacilityDropdown, setShowFacilityDropdown] = useState(false);
 
+  // AuthContextから取得したプロフィールを使用
   useEffect(() => {
-    if (profile) {
+    if (authProfile) {
       // フルネームを姓と名に分割
-      const fullnameParts = (profile.fullname || "").split(" ");
+      const fullnameParts = (authProfile.fullname || "").split(" ");
       setValue("lastName", fullnameParts[0] || "");
       setValue("firstName", fullnameParts[1] || "");
       
       // 施設IDが設定されている場合、選択された施設を設定
-      if (profile.facility_id) {
-        console.log("プロファイルから施設ID検出: ", profile.facility_id);
-        fetchSelectedFacility(profile.facility_id);
+      if (authProfile.facility_id) {
+        console.log("プロファイルから施設ID検出: ", authProfile.facility_id);
+        fetchSelectedFacility(authProfile.facility_id);
       } else {
         console.log("プロファイルに施設IDがありません");
       }
     } else {
       console.log("プロファイルがロードされていません");
     }
-  }, [profile, setValue]);
+  }, [authProfile, setValue]);
 
   // 施設データの読み込み
   useEffect(() => {
@@ -145,6 +161,25 @@ export default function UserSettings() {
     setShowFacilityDropdown(false);
   };
 
+  // プロファイル更新処理
+  const updateProfile = async (profileData: Partial<Profile>) => {
+    if (!user) return { error: new Error('ユーザーが認証されていません') };
+    
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update(profileData)
+        .eq('id', user.id);
+      
+      if (error) throw error;
+      
+      return { error: null };
+    } catch (error: any) {
+      console.error('プロフィール更新エラー:', error);
+      return { error };
+    }
+  };
+
   const onSubmit = async (data: FormValues) => {
     try {
       setLoading(true);
@@ -179,19 +214,21 @@ export default function UserSettings() {
         if (user && user.id) {
           console.log("プロファイル更新エラー、直接DBへの挿入を試みます");
           
-          const profileData = {
+          const email = user.email ?? "";
+          const profileData: Profile = {
             id: user.id,
-            fullname: fullname,
+            fullname,
             facility_id: selectedFacility.id,
-            email: user.email,
+            email,
+            is_active: true,
+            role: "regular_user",
             created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
           };
-          
           // まずupsertを試す
           const { error: upsertError } = await supabase
             .from('profiles')
-            .upsert(profileData);
+            .upsert([profileData]);
           
           if (upsertError) {
             console.error("Supabase upsertエラー:", upsertError);
@@ -199,7 +236,7 @@ export default function UserSettings() {
             // upsertに失敗した場合はinsertを試す
             const { error: insertError } = await supabase
               .from('profiles')
-              .insert(profileData);
+              .insert([profileData]);
             
             if (insertError) {
               console.error("Supabase insertエラー:", insertError);

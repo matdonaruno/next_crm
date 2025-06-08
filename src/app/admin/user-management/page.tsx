@@ -1,675 +1,608 @@
+// src/app/admin/user-management/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import supabase from '@/lib/supabaseClient';
+import { Users } from 'lucide-react';
+import { User } from '@supabase/supabase-js';
+
+import supabase from '@/lib/supabaseBrowser';
+import { Database } from '@/types/supabase';
+
+import { AppHeader } from '@/components/ui/app-header';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import LoadingUI from '@/components/LoadingUI';
 import { useToast } from '@/hooks/use-toast';
-import { AppHeader } from '@/components/ui/app-header';
-import { Users } from 'lucide-react';
-import { LoadingUI } from '@/components/LoadingUI';
-import { useEffect as useEffectOnce } from 'react';
-import { User } from '@supabase/supabase-js';
 
-// ロールの選択肢
-const ROLE_OPTIONS = [
+/* ------------------------------------------------------------------ */
+/* 1. 定数                                                             */
+/* ------------------------------------------------------------------ */
+type Role = Database['public']['Enums']['user_role'];
+
+const ROLE_OPTIONS: { value: Role; label: string }[] = [
   { value: 'superuser', label: 'スーパーユーザー' },
   { value: 'facility_admin', label: '施設管理者' },
   { value: 'approver', label: '承認者' },
-  { value: 'regular_user', label: '一般ユーザー' }
+  { value: 'regular_user', label: '一般ユーザー' },
 ];
+
+/* ------------------------------------------------------------------ */
+/* 2. コンポーネント                                                  */
+/* ------------------------------------------------------------------ */
+/* 型 */
+interface Invitation {
+  id: string;
+  email: string;
+  role: Role;
+  facility_id: string;
+  expires_at: string;
+  is_used: boolean;
+  facilities: { name: string } | null;
+}
+
+interface UserProfileRow {
+  id: string;
+  fullname: string | null;
+  email: string | null;
+  role: Role;
+  is_active: boolean;
+  facility_id: string | null;
+  facilities: { name: string } | null;
+}
 
 export default function UserManagement() {
   const router = useRouter();
   const { toast } = useToast();
+
+  /* -------------------- state -------------------- */
   const [loading, setLoading] = useState(false);
-  const [departments, setDepartments] = useState<any[]>([]);
-  const [invitations, setInvitations] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState('invite');
-  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
-  const [isAuthorized, setIsAuthorized] = useState<boolean>(false);
-  const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<Role | null>(null);
+  const [currentUserFacilityId, setCurrentUserFacilityId] = useState<string>('');
+
+  const [activeTab, setActiveTab] = useState<'invite' | 'invitations' | 'users'>(
+    'invite',
+  );
+
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [users, setUsers] = useState<UserProfileRow[]>([]);
   const [showInactiveUsers, setShowInactiveUsers] = useState(false);
-  
-  // 招待フォーム用のステート
+
+  /* 招待フォーム */
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState('regular_user');
-  const [currentUserFacilityId, setCurrentUserFacilityId] = useState('');
-  const [departmentId, setDepartmentId] = useState('');
+  const [role, setRole] = useState<Role>('regular_user');
 
-  // ユーザーのロールを確認し、アクセス権限をチェック
+  /* ---------------------------------------------------------------- */
+  /* 3. 認証＆ロールチェック                                           */
+  /* ---------------------------------------------------------------- */
   useEffect(() => {
-    async function checkUserRole() {
-      setIsCheckingAuth(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (user) {
-        setCurrentUser(user);
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role, facility_id')
-          .eq('id', user.id)
-          .single();
-        
-        if (profile) {
-          setCurrentUserRole(profile.role);
-          setCurrentUserFacilityId(profile.facility_id);
-          
-          // スーパーユーザーまたは施設管理者のみアクセス可能
-          if (profile.role === 'superuser' || profile.role === 'facility_admin') {
-            setIsAuthorized(true);
-          } else {
-            setIsAuthorized(false);
-            toast({
-              title: 'アクセス権限エラー',
-              description: 'このページにアクセスする権限がありません',
-              variant: 'destructive'
-            });
-            router.push('/depart'); // 権限がない場合はホームにリダイレクト
-          }
-        }
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+
+      setCurrentUser(user);
+
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('role, facility_id')
+        .eq('id', user.id)
+        .single();
+
+      if (error || !profile) {
+        toast({
+          title: '認証エラー',
+          description: 'プロフィールを取得できませんでした',
+          variant: 'destructive',
+        });
+        router.push('/depart');
+        return;
+      }
+
+      setCurrentUserRole(profile.role);
+      setCurrentUserFacilityId(profile.facility_id ?? '');
+
+      if (['superuser', 'facility_admin'].includes(profile.role)) {
+        setIsAuthorized(true);
       } else {
-        router.push('/login'); // ログインしていない場合はログインページにリダイレクト
+        toast({
+          title: 'アクセス権限エラー',
+          description: 'このページにアクセスする権限がありません',
+          variant: 'destructive',
+        });
+        router.push('/depart');
       }
-      
+
       setIsCheckingAuth(false);
-    }
-    
-    checkUserRole();
+    })();
   }, [router, toast]);
-  
-  // 現在のユーザーの施設情報を取得
-  useEffect(() => {
-    async function fetchCurrentUserFacility() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('facility_id')
-          .eq('id', user.id)
-          .single();
-        
-        if (profile && profile.facility_id) {
-          setCurrentUserFacilityId(profile.facility_id);
-        }
-      }
-    }
-    
-    fetchCurrentUserFacility();
-  }, []);
-  
-  // 部門の取得
-  useEffect(() => {
-    async function fetchDepartments() {
-      // 現在のユーザーの施設に属する部門のみを取得
-      if (currentUserFacilityId) {
-        const { data: departmentsData } = await supabase
-          .from('departments')
-          .select('*')
-          .eq('facility_id', currentUserFacilityId);
-        
-        setDepartments(departmentsData || []);
-      }
-    }
-    
-    fetchDepartments();
-  }, [currentUserFacilityId]);
-  
-  // 招待リストと既存ユーザーの取得
-  useEffect(() => {
-    async function fetchInvitationsAndUsers() {
-      if (!isAuthorized) return; // 権限チェック後のみ実行
-      // if (activeTab !== 'invitations' && activeTab !== 'users') return; // 両方のタブでデータを取得し直す場合
 
-      setLoading(true);
-      
-      try {
-        // 常に招待リストを取得 (タブ切り替え時に毎回最新化)
-        const { data: invitationsData, error: invitationsError } = await supabase
-          .from('user_invitations')
-          .select(`*,
-                    facilities(name)
-                  `)
-          .order('created_at', { ascending: false });
-        
-        if (invitationsError) {
-          console.error('招待リスト取得エラー:', invitationsError);
-          toast({ title: '招待リスト取得エラー', description: invitationsError.message, variant: 'destructive' });
-        } else {
-          setInvitations(invitationsData || []);
-        }
-        
-        // 常にユーザーリストを取得 (タブ切り替え時に毎回最新化)
-        const { data: usersData, error: usersError } = await supabase
-          .from('profiles') // ★ APIルートではなくprofilesテーブルから取得
-          .select(`
-            id,
-            fullname,
-            email,
-            role,
-            is_active,
-            facility_id,
-            facilities(name) // 施設名も取得
-          `)
-          .order('created_at', { ascending: false });
+  /* ---------------------------------------------------------------- */
+  /* 4. 招待リスト & ユーザーリスト取得                                */
+  /* ---------------------------------------------------------------- */
+  const loadLists = async () => {
+    setLoading(true);
 
-        if (usersError) {
-          console.error('ユーザーリスト取得エラー:', usersError);
-          toast({ title: 'ユーザーリスト取得エラー', description: usersError.message, variant: 'destructive' });
-        } else {
-          setUsers(usersData || []); // profilesから取得したユーザーリストをセット
-        }
-          
-      } catch (error: any) {
-        console.error('データ取得エラー:', error);
-        toast({ title: 'データ取得エラー', description: error.message, variant: 'destructive' });
-      } finally {
-        setLoading(false);
-      }
+    /* 招待 */
+    const { data: inv, error: invErr } = await supabase
+      .from('user_invitations')
+      .select(`
+        *,
+        facilities(name)
+      `)
+      .order('created_at', { ascending: false });
+
+    if (invErr) {
+      toast({
+        title: '招待リスト取得エラー',
+        description: invErr.message,
+        variant: 'destructive',
+      });
+    } else {
+      setInvitations(inv as Invitation[]);
     }
-    
-    // isAuthorizedが変わった時、またはタブが変わった時にデータを取得
-    if (isAuthorized) { 
-      fetchInvitationsAndUsers();
+
+    /* ユーザー */
+    const { data: usr, error: usrErr } = await supabase
+      .from('profiles')
+      .select(`
+        id,
+        fullname,
+        email,
+        role,
+        is_active,
+        facility_id,
+        facilities(name)
+      `)
+      .order('created_at', { ascending: false });
+
+    if (usrErr) {
+      toast({
+        title: 'ユーザーリスト取得エラー',
+        description: usrErr.message,
+        variant: 'destructive',
+      });
+    } else {
+      setUsers(usr as UserProfileRow[]);
     }
-    // 依存配列から activeTab を削除し、isAuthorized のみでトリガーする（または必要に応じて activeTab も残す）
-    // この例では isAuthorized が true になったときに初期ロードを行う想定
-  }, [isAuthorized, toast]); 
-  
-  // 新規ユーザー招待
+
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (!isAuthorized) return;
+    loadLists();
+  }, [isAuthorized, toast]);
+
+  /* ---------------------------------------------------------------- */
+  /* 5. 招待送信                                                      */
+  /* ---------------------------------------------------------------- */
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!email || !role || !currentUserFacilityId) {
       toast({
         title: '入力エラー',
-        description: 'メールアドレスとロールは必須です。また、あなたの施設情報が取得できませんでした。',
-        variant: 'destructive'
+        description: 'メール・ロールが未入力、または施設情報がありません',
+        variant: 'destructive',
       });
       return;
     }
-    
+
+    setLoading(true);
+
     try {
-      setLoading(true);
-      console.log('招待リクエストを送信: ', { email, role, facilityId: currentUserFacilityId });
-      
-      // APIを呼び出して招待処理
-      const response = await fetch('/api/invitations', {
+      const res = await fetch('/api/invitations', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
           role,
           facilityId: currentUserFacilityId,
-          departmentId: null // 部門IDはnullに設定
         }),
       });
-      
-      const result = await response.json();
-      console.log('招待APIレスポンス:', { status: response.status, statusText: response.statusText, data: result });
-      
-      if (!response.ok) {
-        // 既存の招待が見つかった場合は特別なエラーメッセージを表示
-        if (result.canDelete && result.invitation) {
-          const invitation = result.invitation;
-          const errorMessage = result.error + " 削除しますか？";
-          
-          // 招待削除の確認を表示
-          if (confirm(errorMessage)) {
-            await handleCancelInvitation(invitation.id, true);
-            // 削除後に再度招待処理を試みる
-            if (confirm("招待を削除しました。もう一度招待を送信しますか？")) {
-              // 再帰的に招待処理を呼び出し
-              handleInvite(e);
-              return;
-            }
-          }
-        }
-        
-        throw new Error(result.error || result.details || '招待処理中にエラーが発生しました');
-      }
-      
-      // 成功メッセージ
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || '招待送信に失敗しました');
+
       toast({
         title: '招待メール送信完了',
-        description: `${email}に招待メールを送信しました。`,
+        description: `${email} に招待メールを送信しました`,
       });
-      
-      // フォームをリセット
+
       setEmail('');
       setRole('regular_user');
-      
-      // 招待リストを更新
-      const { data: invitationsData } = await supabase
-        .from('user_invitations')
-        .select(`
-          *,
-          facilities(name)
-        `)
-        .order('created_at', { ascending: false });
-      
-      setInvitations(invitationsData || []);
-      
-    } catch (error: any) {
-      console.error('招待エラーの詳細:', error);
+      // 招待リストを即時再読込
+      await loadLists();
+    } catch (err: any) {
       toast({
         title: '招待エラー',
-        description: error.message,
-        variant: 'destructive'
+        description: err.message,
+        variant: 'destructive',
       });
     } finally {
       setLoading(false);
     }
   };
-  
-  // 招待取り消し
-  const handleCancelInvitation = async (invitationId: string, skipConfirmation = false) => {
-    try {
-      if (!skipConfirmation && !confirm('本当にこの招待を取り消しますか？')) {
-        return;
-      }
-      
-      setLoading(true);
-      
-      // 招待を削除
-      const { error } = await supabase
-        .from('user_invitations')
-        .delete()
-        .eq('id', invitationId);
-      
-      if (error) throw new Error(error.message);
-      
-      // 招待リストを更新
-      setInvitations(invitations.filter(inv => inv.id !== invitationId));
-      
+
+  /* ---------------------------------------------------------------- */
+  /* 6. 招待キャンセル                                                */
+  /* ---------------------------------------------------------------- */
+  const handleCancelInvitation = async (invId: string) => {
+    if (!confirm('この招待を取り消しますか？')) return;
+
+    setLoading(true);
+    const { error } = await supabase
+      .from('user_invitations')
+      .delete()
+      .eq('id', invId);
+
+    if (error) {
       toast({
-        title: '招待取り消し完了',
-        description: '招待を取り消しました。',
-      });
-    } catch (error: any) {
-      console.error('招待取り消しエラー:', error);
-      toast({
-        title: '招待取り消しエラー',
+        title: 'キャンセル失敗',
         description: error.message,
-        variant: 'destructive'
+        variant: 'destructive',
       });
-    } finally {
-      setLoading(false);
+    } else {
+      setInvitations((prev) => prev.filter((i) => i.id !== invId));
+      toast({ title: '招待を取り消しました' });
     }
+    setLoading(false);
   };
-  
-  // ユーザーの停止/有効化
-  const handleToggleUserActive = async (userId: string, isActive: boolean) => {
-    try {
-      setLoading(true);
-      
-      // ユーザーの状態を更新
-      const { error } = await supabase
-        .from('profiles')
-        .update({ is_active: !isActive })
-        .eq('id', userId);
-      
-      if (error) throw new Error(error.message);
-      
-      // ユーザーリストを更新
-      setUsers(users.map(user => 
-        user.id === userId ? { ...user, is_active: !isActive } : user
-      ));
-      
+
+  /* ---------------------------------------------------------------- */
+  /* 7. ユーザー操作（停止 / 有効化 / ロール変更）                    */
+  /* ---------------------------------------------------------------- */
+  const toggleUserActive = async (userId: string, isActive: boolean) => {
+    setLoading(true);
+    const { error } = await supabase
+      .from('profiles')
+      .update({ is_active: !isActive })
+      .eq('id', userId);
+
+    if (error) {
       toast({
-        title: isActive ? 'ユーザー停止完了' : 'ユーザー有効化完了',
-        description: isActive ? 'ユーザーを停止しました。' : 'ユーザーを有効化しました。',
-      });
-      
-    } catch (error: any) {
-      toast({
-        title: 'ユーザー状態変更エラー',
+        title: '更新エラー',
         description: error.message,
-        variant: 'destructive'
+        variant: 'destructive',
       });
-    } finally {
-      setLoading(false);
+    } else {
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId ? { ...u, is_active: !isActive } : u,
+        ),
+      );
     }
+    setLoading(false);
   };
-  
-  // ユーザーロール変更
-  const handleChangeUserRole = async (userId: string, newRole: string) => {
-    try {
-      setLoading(true);
-      
-      // ユーザーのロールを更新
-      const { error } = await supabase
-        .from('profiles')
-        .update({ role: newRole })
-        .eq('id', userId);
-      
-      if (error) throw new Error(error.message);
-      
-      // ユーザーリストを更新
-      setUsers(users.map(user => 
-        user.id === userId ? { ...user, role: newRole } : user
-      ));
-      
-      toast({
-        title: 'ロール変更完了',
-        description: 'ユーザーのロールを変更しました。',
-      });
-      
-    } catch (error: any) {
+
+  const changeUserRole = async (userId: string, newRole: Role) => {
+    setLoading(true);
+    const { error } = await supabase
+      .from('profiles')
+      .update({ role: newRole })
+      .eq('id', userId);
+
+    if (error) {
       toast({
         title: 'ロール変更エラー',
         description: error.message,
-        variant: 'destructive'
+        variant: 'destructive',
       });
-    } finally {
-      setLoading(false);
+    } else {
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u)),
+      );
     }
+    setLoading(false);
   };
-  
-  // 招待の期限を表示するフォーマッター
-  const formatExpiryDate = (expiresAt: string) => {
-    const date = new Date(expiresAt);
-    return date.toLocaleString('ja-JP');
-  };
-  
-  // ロール名を日本語に変換
-  const getRoleName = (roleValue: string) => {
-    const role = ROLE_OPTIONS.find(r => r.value === roleValue);
-    return role ? role.label : roleValue;
-  };
-  
+
+  /* ---------------------------------------------------------------- */
+  /* 8. 描画                                                          */
+  /* ---------------------------------------------------------------- */
+  if (isCheckingAuth)
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <LoadingUI />
+      </div>
+    );
+
+  if (!isAuthorized)
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Card className="max-w-md border-pink-200 shadow-md">
+          <CardHeader className="bg-gradient-to-r from-pink-100 to-purple-100 rounded-t-lg">
+            <CardTitle className="text-pink-800">アクセス権限がありません</CardTitle>
+            <CardDescription>
+              このページにアクセスするには管理者権限が必要です
+            </CardDescription>
+          </CardHeader>
+          <CardFooter className="bg-pink-50">
+            <Button onClick={() => router.push('/depart')}>ホームに戻る</Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+
+  /* ---------- 実際の UI ---------- */
   return (
     <div className="min-h-screen bg-gradient-to-b from-pink-50 to-purple-50">
-      <AppHeader 
-        showBackButton={true}
+      <AppHeader
+        showBackButton
         title="ユーザー管理"
         icon={<Users className="h-6 w-6 text-pink-400" />}
       />
-      
-      {isCheckingAuth ? (
-        <div className="flex justify-center items-center h-screen">
-          <LoadingUI />
-        </div>
-      ) : isAuthorized ? (
-        <div className="container max-w-5xl mx-auto px-4 py-6">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="mb-6 grid w-full grid-cols-3 bg-pink-100 p-1">
-              <TabsTrigger 
-                value="invite" 
-                className="data-[state=active]:bg-white data-[state=active]:text-pink-800"
-              >
-                ユーザー招待
-              </TabsTrigger>
-              <TabsTrigger 
-                value="invitations" 
-                className="data-[state=active]:bg-white data-[state=active]:text-pink-800"
-              >
-                招待リスト
-              </TabsTrigger>
-              <TabsTrigger 
-                value="users" 
-                className="data-[state=active]:bg-white data-[state=active]:text-pink-800"
-              >
-                ユーザーリスト
-              </TabsTrigger>
-            </TabsList>
-            
-            {/* 招待フォーム */}
-            <TabsContent value="invite">
-              <Card className="border-pink-200 shadow-md">
-                <CardHeader className="bg-gradient-to-r from-pink-100 to-purple-100 rounded-t-lg">
-                  <CardTitle className="flex items-center gap-2 text-pink-800">
-                    <Users className="h-5 w-5" />
-                    新規ユーザー招待
-                  </CardTitle>
-                  <CardDescription>
-                    新しいユーザーを招待します。招待メールが送信されます。
-                  </CardDescription>
-                </CardHeader>
-                <form onSubmit={handleInvite}>
-                  <CardContent className="pt-6 space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="email" className="text-pink-800">メールアドレス</Label>
-                      <Input 
-                        id="email" 
-                        type="email" 
-                        placeholder="例: user@example.com" 
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        required
-                        className="border-pink-200 focus:border-pink-500 focus:ring-pink-500"
-                      />
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label htmlFor="role" className="text-pink-800">ロール</Label>
-                      <select
-                        id="role"
-                        className="w-full p-2 border rounded bg-white border-pink-200 focus:border-pink-500 focus:ring-pink-500 text-sm"
-                        value={role}
-                        onChange={(e) => setRole(e.target.value)}
-                        required
-                      >
-                        {ROLE_OPTIONS
-                          .filter(option => currentUserRole === 'superuser' || option.value !== 'superuser')
-                          .map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-                  </CardContent>
-                  <CardFooter className="bg-pink-50">
-                    <Button
-                      type="submit"
-                      disabled={loading}
-                      className="bg-pink-600 hover:bg-pink-700"
+
+      <div className="container max-w-5xl mx-auto px-4 py-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab as any}>
+          {/* ---------------- Tab ボタン ---------------- */}
+          <TabsList className="grid w-full grid-cols-3 bg-pink-100 p-1 mb-6">
+            <TabsTrigger value="invite">ユーザー招待</TabsTrigger>
+            <TabsTrigger value="invitations">招待リスト</TabsTrigger>
+            <TabsTrigger value="users">ユーザーリスト</TabsTrigger>
+          </TabsList>
+
+          {/* ---------------- 1) 招待フォーム ----------- */}
+          <TabsContent value="invite">
+            <Card className="border-pink-200 shadow-md">
+              <CardHeader className="bg-gradient-to-r from-pink-100 to-purple-100 rounded-t-lg">
+                <CardTitle className="flex items-center gap-2 text-pink-800">
+                  <Users className="h-5 w-5" />
+                  新規ユーザー招待
+                </CardTitle>
+                <CardDescription>招待メールを送信します</CardDescription>
+              </CardHeader>
+
+              <form onSubmit={handleInvite}>
+                <CardContent className="space-y-4 pt-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="email">メールアドレス</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="role">ロール</Label>
+                    <select
+                      id="role"
+                      value={role}
+                      onChange={(e) =>
+                        setRole(
+                          e.target.value as Database['public']['Enums']['user_role'],
+                        )
+                      }
+                      className="w-full border rounded p-2"
                     >
-                      {loading ? '処理中...' : '招待を送信'}
-                    </Button>
-                  </CardFooter>
-                </form>
-              </Card>
-            </TabsContent>
-            
-            {/* 招待リスト */}
-            <TabsContent value="invitations">
-              <Card className="border-pink-200 shadow-md">
-                <CardHeader className="bg-gradient-to-r from-pink-100 to-purple-100 rounded-t-lg">
-                  <CardTitle className="flex items-center gap-2 text-pink-800">
-                    <Users className="h-5 w-5" />
-                    招待リスト
-                  </CardTitle>
-                  <CardDescription>
-                    送信済みの招待一覧です。
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="pt-6">
-                  {loading ? (
-                    <div className="flex justify-center items-center py-10">
-                      <LoadingUI />
-                    </div>
-                  ) : invitations.length === 0 ? (
-                    <div className="text-center py-10 text-gray-500">
-                      招待はありません
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead>
-                          <tr className="border-b border-pink-200 bg-pink-50">
-                            <th className="p-2 text-left text-pink-800">メールアドレス</th>
-                            <th className="p-2 text-left text-pink-800">ロール</th>
-                            <th className="p-2 text-left text-pink-800">施設</th>
-                            <th className="p-2 text-left text-pink-800">有効期限</th>
-                            <th className="p-2 text-left text-pink-800">状態</th>
-                            <th className="p-2 text-left text-pink-800">操作</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {invitations.map((invitation) => (
-                            <tr key={invitation.id} className="border-b border-pink-100 hover:bg-pink-50">
-                              <td className="p-2">{invitation.email}</td>
-                              <td className="p-2">{getRoleName(invitation.role)}</td>
-                              <td className="p-2">{invitation.facilities?.name}</td>
-                              <td className="p-2">{formatExpiryDate(invitation.expires_at)}</td>
+                      {ROLE_OPTIONS.filter(
+                        (o) =>
+                          currentUserRole === 'superuser' ||
+                          o.value !== 'superuser',
+                      ).map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </CardContent>
+
+                <CardFooter className="bg-pink-50">
+                  <Button type="submit" disabled={loading}>
+                    {loading ? '送信中…' : '招待を送信'}
+                  </Button>
+                </CardFooter>
+              </form>
+            </Card>
+          </TabsContent>
+
+          {/* ---------------- 2) 招待リスト -------------- */}
+          <TabsContent value="invitations">
+            <Card className="border-pink-200 shadow-md">
+              <CardHeader className="bg-gradient-to-r from-pink-100 to-purple-100 rounded-t-lg">
+                <CardTitle className="flex items-center gap-2 text-pink-800">
+                  <Users className="h-5 w-5" />
+                  招待リスト
+                </CardTitle>
+              </CardHeader>
+
+              <CardContent className="pt-6">
+                {loading ? (
+                  <LoadingUI />
+                ) : invitations.length === 0 ? (
+                  <p className="text-center text-gray-500 py-8">招待はありません</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-pink-50 border-b border-pink-200">
+                          <th className="p-2">メール</th>
+                          <th className="p-2">ロール</th>
+                          <th className="p-2">施設</th>
+                          <th className="p-2">有効期限</th>
+                          <th className="p-2">状態</th>
+                          <th className="p-2">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {invitations.map((inv) => {
+                          const expired =
+                            new Date(inv.expires_at) < new Date();
+                          return (
+                            <tr
+                              key={inv.id}
+                              className="border-b border-pink-100 hover:bg-pink-50"
+                            >
+                              <td className="p-2">{inv.email}</td>
                               <td className="p-2">
-                                {invitation.is_used ? (
+                                {
+                                  ROLE_OPTIONS.find((r) => r.value === inv.role)!
+                                    .label
+                                }
+                              </td>
+                              <td className="p-2">{inv.facilities?.name}</td>
+                              <td className="p-2">
+                                {new Date(inv.expires_at).toLocaleString('ja-JP')}
+                              </td>
+                              <td className="p-2">
+                                {inv.is_used ? (
                                   <span className="text-green-600">使用済み</span>
-                                ) : new Date(invitation.expires_at) < new Date() ? (
+                                ) : expired ? (
                                   <span className="text-red-600">期限切れ</span>
                                 ) : (
                                   <span className="text-blue-600">有効</span>
                                 )}
                               </td>
                               <td className="p-2">
-                                {!invitation.is_used && new Date(invitation.expires_at) >= new Date() && (
-                                  <Button 
-                                    variant="destructive" 
-                                    size="sm" 
-                                    onClick={() => handleCancelInvitation(invitation.id)}
-                                    className="bg-pink-600 hover:bg-pink-700"
+                                {!inv.is_used && !expired && (
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={() => handleCancelInvitation(inv.id)}
                                   >
                                     取消
                                   </Button>
                                 )}
                               </td>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-            
-            {/* ユーザーリスト */}
-            <TabsContent value="users">
-              <Card className="border-pink-200 shadow-md">
-                <CardHeader className="bg-gradient-to-r from-pink-100 to-purple-100 rounded-t-lg">
-                  <CardTitle className="flex items-center justify-between gap-2 text-pink-800">
-                    <div className="flex items-center gap-2">
-                      <Users className="h-5 w-5" />
-                      ユーザーリスト
-                    </div>
-                    <Button 
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowInactiveUsers(!showInactiveUsers)}
-                      className="bg-white border-pink-300 text-pink-800 hover:bg-pink-50"
-                    >
-                      {showInactiveUsers ? '停止中を隠す' : '停止中を表示'}
-                    </Button>
-                  </CardTitle>
-                  <CardDescription>
-                    登録済みのユーザー一覧です。
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="pt-6">
-                  {loading ? (
-                    <div className="flex justify-center items-center py-10">
-                      <LoadingUI />
-                    </div>
-                  ) : users.length === 0 ? (
-                    <div className="text-center py-10 text-gray-500">
-                      ユーザーはいません
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead>
-                          <tr className="border-b border-pink-200 bg-pink-50">
-                            <th className="p-2 text-left text-pink-800">名前</th>
-                            <th className="p-2 text-left text-pink-800">メールアドレス</th>
-                            <th className="p-2 text-left text-pink-800">ロール</th>
-                            <th className="p-2 text-left text-pink-800">施設</th>
-                            <th className="p-2 text-left text-pink-800">状態</th>
-                            <th className="p-2 text-left text-pink-800">操作</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {users
-                            .filter(user => showInactiveUsers || user.is_active)
-                            .map((user) => (
-                            <tr key={user.id} className="border-b border-pink-100 hover:bg-pink-50">
-                              <td className="p-2">{user.fullname || '-'}</td>
-                              <td className="p-2">{user.email}</td>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ---------------- 3) ユーザーリスト ---------- */}
+          <TabsContent value="users">
+            <Card className="border-pink-200 shadow-md">
+              <CardHeader className="bg-gradient-to-r from-pink-100 to-purple-100 rounded-t-lg">
+                <CardTitle className="flex items-center gap-2 text-pink-800">
+                  <Users className="h-5 w-5" />
+                  ユーザーリスト
+                </CardTitle>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-2"
+                  onClick={() => setShowInactiveUsers((v) => !v)}
+                >
+                  {showInactiveUsers ? '停止中を隠す' : '停止中を表示'}
+                </Button>
+              </CardHeader>
+
+              <CardContent className="pt-6">
+                {loading ? (
+                  <LoadingUI />
+                ) : users.length === 0 ? (
+                  <p className="text-center text-gray-500 py-8">
+                    ユーザーがいません
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-pink-50 border-b border-pink-200">
+                          <th className="p-2">名前</th>
+                          <th className="p-2">メール</th>
+                          <th className="p-2">ロール</th>
+                          <th className="p-2">施設</th>
+                          <th className="p-2">状態</th>
+                          <th className="p-2">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {users
+                          .filter((u) => showInactiveUsers || u.is_active)
+                          .map((u) => (
+                            <tr
+                              key={u.id}
+                              className="border-b border-pink-100 hover:bg-pink-50"
+                            >
+                              <td className="p-2">{u.fullname || '-'}</td>
+                              <td className="p-2">{u.email}</td>
                               <td className="p-2">
                                 <select
-                                  value={user.role}
-                                  onChange={(e) => handleChangeUserRole(user.id, e.target.value)}
-                                  className="p-1 border border-pink-200 rounded focus:border-pink-500 focus:ring-pink-500 text-sm w-full"
-                                  disabled={loading || !isAuthorized || currentUserRole !== 'superuser'}
+                                  value={u.role ?? 'regular_user'}
+                                  onChange={(e) =>
+                                    changeUserRole(
+                                      u.id,
+                                      e.target.value as Role,
+                                    )
+                                  }
+                                  disabled={
+                                    loading ||
+                                    currentUserRole !== 'superuser'
+                                  }
+                                  className="p-1 border rounded w-full text-sm"
                                 >
-                                  {ROLE_OPTIONS
-                                    .filter(option => currentUserRole === 'superuser' || option.value !== 'superuser')
-                                    .map((option) => (
-                                      <option key={option.value} value={option.value}>
-                                        {option.label}
-                                      </option>
-                                    ))}
+                                  {ROLE_OPTIONS.filter(
+                                    (o) =>
+                                      currentUserRole === 'superuser' ||
+                                      o.value !== 'superuser',
+                                  ).map((o) => (
+                                    <option key={o.value} value={o.value}>
+                                      {o.label}
+                                    </option>
+                                  ))}
                                 </select>
                               </td>
-                              <td className="p-2">{user.facilities?.name || '-'}</td>
+                              <td className="p-2">{u.facilities?.name || '-'}</td>
                               <td className="p-2">
-                                {user.is_active ? (
+                                {u.is_active ? (
                                   <span className="text-green-600">有効</span>
                                 ) : (
-                                  <span className="text-red-600">停止中</span>
+                                  <span className="text-red-600">停止</span>
                                 )}
                               </td>
                               <td className="p-2">
-                                <Button 
-                                  variant={user.is_active ? "destructive" : "default"} 
-                                  size="sm" 
-                                  onClick={() => handleToggleUserActive(user.id, user.is_active)}
-                                  disabled={loading || !isAuthorized || user.id === currentUser?.id}
-                                  className={user.is_active ? "bg-pink-600 hover:bg-pink-700" : "bg-pink-500 hover:bg-pink-600"}
+                                <Button
+                                  size="sm"
+                                  variant={u.is_active ? 'destructive' : 'default'}
+                                  disabled={loading || currentUser?.id === u.id}
+                                  onClick={() =>
+                                    toggleUserActive(u.id, u.is_active)
+                                  }
                                 >
-                                  {user.is_active ? '停止' : '有効化'}
+                                  {u.is_active ? '停止' : '有効化'}
                                 </Button>
                               </td>
                             </tr>
                           ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
-        </div>
-      ) : (
-        <div className="flex justify-center items-center h-screen">
-          <Card className="border-pink-200 shadow-md max-w-md">
-            <CardHeader className="bg-gradient-to-r from-pink-100 to-purple-100 rounded-t-lg">
-              <CardTitle className="text-pink-800">アクセス権限がありません</CardTitle>
-              <CardDescription>
-                このページにアクセスするには管理者権限が必要です。
-              </CardDescription>
-            </CardHeader>
-            <CardFooter className="bg-pink-50">
-              <Button 
-                onClick={() => router.push('/depart')}
-                className="bg-pink-600 hover:bg-pink-700"
-              >
-                ホームに戻る
-              </Button>
-            </CardFooter>
-          </Card>
-        </div>
-      )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </div>
     </div>
   );
-} 
+}

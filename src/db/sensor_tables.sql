@@ -10,7 +10,9 @@ CREATE TABLE IF NOT EXISTS sensor_devices (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   last_seen TIMESTAMP WITH TIME ZONE,
   status TEXT DEFAULT 'active',
-  auth_token TEXT
+  auth_token TEXT,
+  is_active BOOLEAN DEFAULT TRUE,
+  mac_address TEXT
 );
 
 -- センサーマッピングテーブル
@@ -31,12 +33,19 @@ CREATE TABLE IF NOT EXISTS sensor_logs (
   raw_data JSONB,
   recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   ip_address TEXT,
-  device_id TEXT -- MACアドレス由来のデバイス識別子
+  device_id TEXT, -- MACアドレス由来のデバイス識別子
+  is_processed BOOLEAN DEFAULT FALSE
 );
 
 -- 既存のテーブルにカラムを追加
 ALTER TABLE temperature_records ADD COLUMN IF NOT EXISTS is_auto_recorded BOOLEAN DEFAULT FALSE;
 ALTER TABLE temperature_record_details ADD COLUMN IF NOT EXISTS data_source TEXT DEFAULT 'manual';
+
+-- センサー関連テーブルにカラムを追加
+ALTER TABLE sensor_devices ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+ALTER TABLE sensor_devices ADD COLUMN IF NOT EXISTS mac_address TEXT;
+ALTER TABLE sensor_devices ADD COLUMN IF NOT EXISTS last_connection TIMESTAMP WITH TIME ZONE;
+ALTER TABLE sensor_logs ADD COLUMN IF NOT EXISTS is_processed BOOLEAN DEFAULT FALSE;
 
 -- センサーデータソース用のインデックス
 CREATE INDEX IF NOT EXISTS idx_sensor_logs_recorded_at ON sensor_logs(recorded_at);

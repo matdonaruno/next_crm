@@ -29,7 +29,12 @@ CREATE TABLE IF NOT EXISTS equipment_maintenance_records (
   performed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   result BOOLEAN NOT NULL,  -- true: OK, false: NG
   comment TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  verified_by UUID REFERENCES profiles(id),
+  verified_at TIMESTAMP WITH TIME ZONE,
+  approved_by UUID REFERENCES profiles(id),
+  approved_at TIMESTAMP WITH TIME ZONE,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'verified', 'approved')) DEFAULT 'pending'
 );
 
 -- インデックス
@@ -40,6 +45,9 @@ CREATE INDEX IF NOT EXISTS idx_equipment_maintenance_records_check_item ON equip
 CREATE INDEX IF NOT EXISTS idx_equipment_maintenance_records_equipment ON equipment_maintenance_records(equipment_id);
 CREATE INDEX IF NOT EXISTS idx_equipment_maintenance_records_performed_by ON equipment_maintenance_records(performed_by);
 CREATE INDEX IF NOT EXISTS idx_equipment_maintenance_records_performed_at ON equipment_maintenance_records(performed_at);
+CREATE INDEX IF NOT EXISTS idx_equipment_maintenance_records_verified_by ON equipment_maintenance_records(verified_by);
+CREATE INDEX IF NOT EXISTS idx_equipment_maintenance_records_approved_by ON equipment_maintenance_records(approved_by);
+CREATE INDEX IF NOT EXISTS idx_equipment_maintenance_records_status ON equipment_maintenance_records(status);
 
 -- RLS(Row Level Security)ポリシー
 ALTER TABLE equipment ENABLE ROW LEVEL SECURITY;

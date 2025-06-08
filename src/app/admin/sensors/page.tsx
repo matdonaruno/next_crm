@@ -1,7 +1,8 @@
+// src/app/admin/sensors/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
-import supabase from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseBrowser';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,11 +13,11 @@ import { motion } from 'framer-motion';
 interface SensorDevice {
   id: string;
   device_name: string;
-  ip_address: string;
-  device_id?: string;
-  location: string;
+  ip_address: string | null;
+  device_id?: string | null;
+  location: string | null;
   last_seen: string | null;
-  status: string;
+  status: string | null;
   facilities: { name: string } | null;
   departments: { name: string } | null;
   facility_id: string | null;
@@ -365,7 +366,7 @@ export default function SensorManagement() {
                 <Label htmlFor="edit_device_id">デバイスID (MACアドレス由来)</Label>
                 <Input 
                   id="edit_device_id" 
-                  value={currentDevice.device_id || ''}
+                  value={currentDevice.device_id ?? ''}
                   onChange={(e) => setCurrentDevice({...currentDevice, device_id: e.target.value})}
                   className="border-pink-200"
                 />
@@ -375,7 +376,7 @@ export default function SensorManagement() {
                 <Label htmlFor="edit_ip_address">IPアドレス</Label>
                 <Input 
                   id="edit_ip_address" 
-                  value={currentDevice.ip_address}
+                  value={currentDevice.ip_address ?? ''}
                   onChange={(e) => setCurrentDevice({...currentDevice, ip_address: e.target.value})}
                   className="border-pink-200"
                 />
@@ -419,7 +420,7 @@ export default function SensorManagement() {
                 <Label htmlFor="edit_location">設置場所</Label>
                 <Input 
                   id="edit_location" 
-                  value={currentDevice.location || ''}
+                  value={currentDevice.location ?? ''}
                   onChange={(e) => setCurrentDevice({...currentDevice, location: e.target.value})}
                   className="border-pink-200"
                 />

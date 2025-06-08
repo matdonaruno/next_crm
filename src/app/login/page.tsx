@@ -1,114 +1,48 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import supabase from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Mail, Lock, ArrowRight, Cross, Sparkles } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
-import Cookies from 'js-cookie';
+import { Mail, Lock, Eye, EyeOff, ArrowRight, Cross, Sparkles } from 'lucide-react';
+import supabaseClient from '@/lib/supabase/client';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useSessionCheck } from '@/hooks/useSessionCheck';
-import { setSessionCheckEnabled } from '@/contexts/AuthContext';
+import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 
 const AuthForm = () => {
   const router = useRouter();
-  const { signIn, user, loading } = useAuth();
+  const supabase = supabaseClient;
+  
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [error, setError] = useState("");
-  const [redirecting, setRedirecting] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [showPassword, setShowPassword] = useState(false);
+  const [emailPlaceholder, setEmailPlaceholder] = useState("you@example.com");
+  const [passwordPlaceholder, setPasswordPlaceholder] = useState("••••••••");
 
-  // ログインページでのみセッション確認を有効化
+  // すでに認証済みの場合は部門選択画面にリダイレクト
   useEffect(() => {
-    setSessionCheckEnabled(true);
-    return () => {
-      // ページから離れる際に無効化
-      setSessionCheckEnabled(false);
-    };
-  }, []);
-
-  // ページロード時に既存のセッションをクリア
-  useEffect(() => {
-    const clearExistingSession = async () => {
-      try {
-        // Supabase URLからプロジェクトIDを抽出
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-        const projectId = supabaseUrl.match(/https:\/\/(.*?)\.supabase\.co/)?.[1] || 'bsgvaomswzkywbiubtjg';
-        const storageKey = `sb-${projectId}-auth-token`;
-        
-        // ローカルセッションのみをクリア（ログインページに来た場合は新しいログインを想定）
-        await supabase.auth.signOut({ scope: 'local' });
-        console.log("LoginPage: ローカルセッションをクリアしました");
-        
-        // クッキーを明示的に削除
-        Cookies.remove(storageKey, { path: '/' });
-        console.log("LoginPage: クッキーを削除しました");
-        
-        // ローカルストレージも削除
-        if (localStorage.getItem(storageKey)) {
-          localStorage.removeItem(storageKey);
-          console.log("LoginPage: ローカルストレージを削除しました");
-        }
-      } catch (e) {
-        console.error("LoginPage: セッションクリア中にエラーが発生しました", e);
+    const checkSession = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (data?.user) {
+        console.log("LoginPage: 既存セッション検出、リダイレクト準備中");
+        router.replace('/depart');
+        return;
       }
+      setCheckingSession(false);
     };
     
-    clearExistingSession();
-  }, []);
+    checkSession();
+  }, [router, supabase.auth]);
 
-  // デバッグ用：状態変更を監視
-  useEffect(() => {
-    console.log("LoginPage: 状態変更", { 
-      user: user?.id || 'なし', 
-      loading, 
-      authLoading, 
-      error: error || 'なし',
-      redirecting
-    });
-  }, [user, loading, authLoading, error, redirecting]);
-
-  // ユーザーが既にログインしている場合はリダイレクト
-  useEffect(() => {
-    console.log("LoginPage: ユーザー状態チェック", { 
-      loading, 
-      user: user?.id || 'なし',
-      redirecting
-    });
-    
-    if (!loading && user && !redirecting) {
-      console.log("LoginPage: ユーザーは既にログイン済み、リダイレクト準備中", user.id);
-      setRedirecting(true);
-      
-      // リダイレクト前に少し遅延を入れる（認証状態が完全に確立されるのを待つ）
-      setTimeout(() => {
-        console.log("LoginPage: /departへリダイレクト実行", user.id);
-        router.push('/depart');
-      }, 500); // 遅延を短縮
-    }
-  }, [user, loading, router, redirecting]);
-
-  // リダイレクト状態が変わった時に強制的にリダイレクトを実行
-  useEffect(() => {
-    if (redirecting && user) {
-      console.log("LoginPage: リダイレクト状態が変更されました。強制的にリダイレクトを実行します", user.id);
-      
-      // router.pushが機能しない場合に備えて、window.locationも使用
-      setTimeout(() => {
-        try {
-          console.log("LoginPage: 強制リダイレクト実行", user.id);
-          window.location.href = '/depart';
-        } catch (e) {
-          console.error("LoginPage: リダイレクト中にエラーが発生しました", e);
-        }
-      }, 1000);
-    }
-  }, [redirecting, user]);
+  // セッションチェック中はローディング表示のみ
+  if (checkingSession) {
+    return <LoadingSpinner message="認証状態を確認中..." fullScreen />;
+  }
 
   const handleAuth = async () => {
     setError("");
@@ -117,48 +51,28 @@ const AuthForm = () => {
     try {
       // サインイン処理
       console.log("LoginPage: サインイン処理開始", { email });
-      setRedirecting(true); // サインイン開始時にリダイレクト状態にする
       
-      const { error } = await signIn(email, password);
+      const { error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
 
-      if (error) {
-        console.error("LoginPage: サインインエラー", error);
-        setError(error.message);
-        setRedirecting(false); // エラー時はリダイレクト状態を解除
-      } else {
-        console.log("LoginPage: サインイン成功、リダイレクト準備中");
-        // 成功時はリダイレクト状態を維持
-        // ただし、明示的にリダイレクトも実行
-        setTimeout(() => {
-          console.log("LoginPage: サインイン成功後、明示的にリダイレクト実行");
-          window.location.href = '/depart';
-        }, 1000);
+      if (authError) {
+        throw authError;
       }
-    } catch (error: any) {
-      console.error("LoginPage: 認証処理中に例外発生", error);
-      setError(error.message || "認証中にエラーが発生しました");
-      setRedirecting(false); // 例外時はリダイレクト状態を解除
+
+      console.log("LoginPage: サインイン成功、リダイレクト準備中");
+      // 成功時にリダイレクト
+      router.push('/depart');
+    } catch (err: any) {
+      console.error("LoginPage: 認証処理中に例外発生", err);
+      setError(err.message || "認証中にエラーが発生しました");
     } finally {
       setAuthLoading(false);
     }
   };
 
-  // ローディング中はローディング表示
-  if (loading) {
-    console.log("LoginPage: グローバルローディング中...");
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-pink-100 to-purple-100">
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-center"
-        >
-          <p className="text-purple-600 font-medium">読み込み中...</p>
-        </motion.div>
-      </div>
-    );
-  }
-
+  // ログインページメインコンポーネント
   return (
     <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-pink-100 to-purple-100">
       {/* 背景の装飾パーティクル */}
@@ -208,7 +122,7 @@ const AuthForm = () => {
               </motion.div>
             </div>
 
-            <CardHeader className="space-y-1 pb-2">
+            <CardHeader className="flex flex-col items-center text-center space-y-1 pb-2">
               <div className="flex items-center space-x-2">
                 <motion.div
                   animate={{ scale: [1, 1.1, 1] }}
@@ -239,10 +153,13 @@ const AuthForm = () => {
                     <Input
                       id="email"
                       type="email"
-                      placeholder="you@example.com"
+                      placeholder={emailPlaceholder}
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
+                      onFocus={() => setEmailPlaceholder("")}
+                      onBlur={() => !email && setEmailPlaceholder("you@example.com")}
                       className="pl-10 border-pink-200 focus:border-purple-400 focus:ring-purple-300 rounded-xl"
+                      autoComplete="email"
                       required
                     />
                   </div>
@@ -256,13 +173,26 @@ const AuthForm = () => {
                     <Lock className="absolute left-3 top-3 h-4 w-4 text-pink-400" />
                     <Input
                       id="password"
-                      type="password"
-                      placeholder="••••••••"
+                      type={showPassword ? "text" : "password"}
+                      placeholder={passwordPlaceholder}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
+                      onFocus={() => setPasswordPlaceholder("")}
+                      onBlur={() => !password && setPasswordPlaceholder("••••••••")}
                       className="pl-10 border-pink-200 focus:border-purple-400 focus:ring-purple-300 rounded-xl"
+                      autoComplete="current-password"
                       required
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
+                    >
+                      {showPassword
+                        ? <EyeOff className="h-4 w-4" />
+                        : <Eye className="h-4 w-4" />
+                      }
+                    </button>
                   </div>
                 </div>
 
@@ -284,7 +214,7 @@ const AuthForm = () => {
                 >
                   <Button 
                     type="submit"
-                    className="w-full bg-gradient-to-r from-pink-400 to-purple-500 hover:from-pink-500 hover:to-purple-600 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
+                    className="w-full bg-gradient-to-r from-pink-400 to-purple-500 hover:from-pink-300 hover:to-purple-400 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
                     disabled={authLoading || !email || !password}
                   >
                     {authLoading ? "処理中..." : "ログイン"}

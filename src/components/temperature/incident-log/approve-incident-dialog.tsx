@@ -16,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import supabase from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseBrowser';
 import { Badge } from '@/components/ui/badge';
 
 interface ApproveIncidentDialogProps {

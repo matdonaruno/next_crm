@@ -7,11 +7,12 @@ import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/comp
 import { ReactNode, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useAuth } from '@/contexts/AuthContext';
+import { CompactLoadingSpinner } from '@/components/common/LoadingSpinner';
 
 // 通知コンポーネントを動的にインポート（サーバーサイドレンダリングを無効化）
 const UserNotifications = dynamic(() => import('@/components/UserNotifications'), {
   ssr: false,
-  loading: () => <div className="w-8 h-8"></div>,
+  loading: () => <div className="w-8 h-8 flex items-center justify-center"><CompactLoadingSpinner /></div>,
 });
 
 interface AppHeaderProps {
@@ -88,7 +89,16 @@ export function AppHeader({ showBackButton = true, title, onBackClick, icon, cla
         {/* 右側のアイコン群 - 右詰めに配置 */}
         <div className="flex items-center space-x-1">
           {/* 通知アイコン */}
-          <UserNotifications />
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <UserNotifications />
+              </TooltipTrigger>
+              <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
+                <p style={tooltipTextStyle}>通知</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           
           {/* ユーザー管理アイコン（管理者のみ表示） */}
           {isAdmin && (

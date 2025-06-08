@@ -50,8 +50,8 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
     }
     
     // キャッシュになければSupabaseから取得
-    const { data: supabaseUser, error: userError } = await import('@/lib/supabaseClient')
-      .then(({ supabase }) => supabase.auth.getUser());
+    const { data: supabaseUser, error: userError } = await import('@/lib/supabaseBrowser')
+      .then((module) => module.default.auth.getUser());
       
     if (userError || !supabaseUser?.user) {
       console.error('認証ユーザー情報の取得に失敗しました:', userError);
@@ -59,8 +59,8 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
     }
     
     // プロファイル情報を取得
-    const { data: profileData, error: profileError } = await import('@/lib/supabaseClient')
-      .then(({ supabase }) => supabase
+    const { data: profileData, error: profileError } = await import('@/lib/supabaseBrowser')
+      .then((module) => module.default
         .from('profiles')
         .select('fullname, facility_id')
         .eq('id', supabaseUser.user.id)

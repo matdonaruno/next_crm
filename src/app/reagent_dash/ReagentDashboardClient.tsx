@@ -9,7 +9,7 @@ import {
   Bell,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -18,30 +18,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import supabase from "@/lib/supabaseClient";
+import supabase from "@/lib/supabaseBrowser";
 import { useAuth } from "@/contexts/AuthContext";
-import { setSessionCheckEnabled } from "@/contexts/AuthContext";
-import Papa from 'papaparse'; // CSVパーサーライブラリを追加
+import Papa from 'papaparse';
 import { AppHeader } from "@/components/ui/app-header";
 import { motion } from "framer-motion";
 import { getJstTimestamp } from "@/lib/utils";
-import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
-import { Line } from 'react-chartjs-2';
-import { formatDistanceToNow, isWithinInterval, subMonths } from "date-fns";
-import { ja } from "date-fns/locale";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { LoadingSpinner, CompactLoadingSpinner } from '@/components/common/LoadingSpinner';
 
 interface Reagent {
   id: number;
-  department: string;
+  department: string; // department UUID
   name: string;
   lotNo: string;
   specification: string;
-  unit: string; // 追加：単位
-  expirationDate: string; // ISO 日付文字列
+  unit: string;
+  expirationDate: string;
   registrationDate: string;
   registeredBy: { fullname: string } | string;
   used: boolean;
@@ -49,10 +43,9 @@ interface Reagent {
   ended_at: string | null;
   used_by?: { fullname: string } | string | null;
   ended_by?: { fullname: string } | string | null;
-  items?: ReagentItem[]; // 試薬アイテムの配列を追加
+  items?: ReagentItem[];
 }
 
-// 試薬アイテムのインターフェース
 interface ReagentItem {
   id: number;
   name: string;
@@ -66,7 +59,6 @@ interface ReagentItem {
   ended_by_fullname?: string;
 }
 
-// 試薬マスターデータの型定義
 interface ReagentMaster {
   code: string;
   name: string;
@@ -92,30 +84,22 @@ export default function ReagentDashboardClient() {
   const departmentName = searchParams?.get('department') || '';
   const departmentId = searchParams?.get('departmentId') || '';
   const [reagents, setReagents] = useState<Reagent[]>([]);
-  const [reagentItems, setReagentItems] = useState<ReagentItem[]>([]); // 試薬アイテムの状態を追加
+  const [reagentItems, setReagentItems] = useState<ReagentItem[]>([]);
   const [currentUserName, setCurrentUserName] = useState("");
-  const [facilityName, setFacilityName] = useState(""); // 施設名の状態を追加
-  // フィルター用の状態
+  const [facilityName, setFacilityName] = useState("");
   const [selectedDepartment, setSelectedDepartment] = useState("all");
   const [showEnded, setShowEnded] = useState(false);
-  const [expandedReagents, setExpandedReagents] = useState<Record<number, boolean>>({}); // 展開状態を管理
-  // 表示モード用の状態を追加
-  const [compactMode, setCompactMode] = useState<boolean>(false);
-  // すべて展開状態を管理
+  const [expandedReagents, setExpandedReagents] = useState<Record<number, boolean>>({});
+  const [compactMode, setCompactMode] = useState<boolean>(true);
   const [allExpanded, setAllExpanded] = useState<boolean>(false);
-  // 期限切れ通知用の状態
   const [expiryNotifications, setExpiryNotifications] = useState<Reagent[]>([]);
-  // 試薬マスターデータ
   const [reagentMasterData, setReagentMasterData] = useState<Record<string, ReagentMaster>>({});
-  // ローディング状態とエラー管理（UIに表示するために使用）
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // 読み込み開始時間を追跡するための状態
   const [loadingStartTime, setLoadingStartTime] = useState<number | null>(null);
-  // 自動リロードのタイマーID
   const [autoReloadTimerId, setAutoReloadTimerId] = useState<NodeJS.Timeout | null>(null);
+  const [departments, setDepartments] = useState<Array<{id: string, name: string}>>([]);
 
-  // 通知データの状態
   const [notifications, setNotifications] = useState([
     {
       id: 1,
@@ -127,116 +111,109 @@ export default function ReagentDashboardClient() {
       id: 2,
       type: 'info',
       message: '試薬在庫状況が更新されました(デモ用)',
-      timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000), // 1日前
+      timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000),
     },
     {
       id: 3,
       type: 'success',
       message: '新しい試薬管理ガイドラインが公開されました(デモ用)',
-      timestamp: new Date(Date.now() - 72 * 60 * 60 * 1000), // 3日前
+      timestamp: new Date(Date.now() - 72 * 60 * 60 * 1000),
     }
   ]);
 
   // 背景色を白色に変更
   useEffect(() => {
-    // 不要なbodyスタイル変更は削除
-    // 代わりにコンポーネント内で背景色を指定する
-    
-    // コンポーネントのマウント時にセッション確認を無効化
-    setSessionCheckEnabled(false);
-    console.log("ReagentDashboard: セッション確認を無効化しました");
-    
-    // クリーンアップ時（コンポーネントのアンマウント時）にセッション確認を再度有効化
     return () => {
-      setSessionCheckEnabled(true);
-      console.log("ReagentDashboard: セッション確認を再有効化しました");
+      console.log("ReagentDashboard: コンポーネントがアンマウントされました");
     };
   }, []);
 
-  // メインのuseEffect
-  useEffect(() => {
-    console.log("ReagentDash: メインuseEffect実行", { 
-      hasProfile: !!profile,
-      facilityId: profile?.facility_id || 'なし',
-      isLoading: loading
+  // ユーザーIDからフルネームを取得する関数
+  const [userCache, setUserCache] = useState<Record<string, string>>({});
+  
+  const getUserFullname = useCallback(async (userId: string): Promise<string> => {
+    try {
+      if (!userId) return "";
+      
+      // キャッシュから取得
+      if (userCache[userId]) {
+        return userCache[userId];
+      }
+      
+      console.log("ReagentDash: ユーザー名取得", { userId });
+      
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("fullname")
+        .eq("id", userId)
+        .single();
+        
+      if (error) {
+        console.error("ReagentDash: ユーザー名取得エラー:", error);
+        return `ユーザー(${userId.substring(0, 8)})`;
+      }
+      
+      const fullname = data?.fullname || `ユーザー(${userId.substring(0, 8)})`;
+      
+      // キャッシュに保存
+      setUserCache(prev => ({ ...prev, [userId]: fullname }));
+      
+      return fullname;
+    } catch (err) {
+      console.error("ReagentDash: ユーザー名取得エラー:", err);
+      return `ユーザー(${userId.substring(0, 8)})`;
+    }
+  }, [userCache]);
+
+  // 試薬名をマスターデータから取得する関数
+  const getReagentNameByCode = useCallback((code: string): string => {
+    if (!code) return '';
+    
+    const masterData = reagentMasterData[code];
+    if (masterData) {
+      return masterData.name;
+    }
+    
+    return code;
+  }, [reagentMasterData]);
+
+  // 期限切れ通知チェック
+  const checkExpiryNotifications = useCallback((reagentData: Reagent[]) => {
+    const now = new Date();
+    const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    
+    const expiringReagents = reagentData.filter(reagent => {
+      const expiryDate = new Date(reagent.expirationDate);
+      return expiryDate <= thirtyDaysFromNow && expiryDate >= now && !reagent.ended_at;
     });
     
-    if (loading) {
-      console.log("ReagentDash: 認証情報ロード中のため、データ取得を延期");
-      return;
-    }
+    console.log("ReagentDash: 期限切れ間近の試薬", { count: expiringReagents.length });
+    setExpiryNotifications(expiringReagents);
+  }, []);
+
+  // 部署マスターデータを取得
+  const fetchDepartments = useCallback(async () => {
+    if (!profile?.facility_id) return;
     
-    if (!profile?.facility_id) {
-      console.log("ReagentDash: 施設IDがないため、データ取得をスキップ");
-      return;
-    }
-    
-    // データ取得前にローディング状態を設定
-    setIsLoading(true);
-    setError(null);
-    // 読み込み開始時間を記録
-    setLoadingStartTime(Date.now());
-    
-    console.log("ReagentDash: マスターデータとデータの取得を開始");
-    
-    // 非同期処理を実行
-    const fetchData = async () => {
-      try {
-        // マスターデータを先に読み込む
-        await loadReagentMasterData();
+    try {
+      console.log("ReagentDash: 部署マスター取得開始");
+      const { data, error } = await supabase
+        .from("departments")
+        .select("id, name")
+        .eq("facility_id", profile.facility_id)
+        .order("name");
         
-        // マスターデータ読み込み後に試薬データを取得
-        await fetchReagents();
-        
-        // ユーザープロファイルを取得
-        await fetchCurrentUserProfile();
-        
-        // すべての取得が完了したらローディング状態を解除
-        setIsLoading(false);
-        // 読み込み完了したのでタイマーをクリア
-        setLoadingStartTime(null);
-        if (autoReloadTimerId) {
-          clearTimeout(autoReloadTimerId);
-          setAutoReloadTimerId(null);
-        }
-      } catch (err) {
-        console.error("ReagentDash: データ取得中にエラーが発生:", err);
-        setError("データの取得中にエラーが発生しました。");
-        setIsLoading(false);
-        // エラー発生時も読み込み時間をリセット
-        setLoadingStartTime(null);
-        if (autoReloadTimerId) {
-          clearTimeout(autoReloadTimerId);
-          setAutoReloadTimerId(null);
-        }
+      if (error) {
+        console.error("ReagentDash: 部署マスター取得エラー:", error);
+        return;
       }
-    };
-    
-    fetchData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, profile?.facility_id]);
-
-  // 自動リロード用のuseEffect
-  useEffect(() => {
-    // 読み込み開始時間が設定されていて、まだローディング中の場合
-    if (loadingStartTime && isLoading) {
-      // 15秒後に自動リロードするタイマーを設定
-      const timerId = setTimeout(() => {
-        console.log("ReagentDash: データ読み込みが長時間かかっているため、ページを自動リロードします");
-        // 現在のURLを取得してリロード
-        window.location.reload();
-      }, 15000); // 15秒後
-
-      setAutoReloadTimerId(timerId);
-
-      // クリーンアップ関数
-      return () => {
-        if (timerId) {
-          clearTimeout(timerId);
-        }
-      };
+      
+      console.log("ReagentDash: 部署マスター取得成功", { count: data?.length || 0 });
+      setDepartments(data || []);
+    } catch (error) {
+      console.error("ReagentDash: 部署マスター取得エラー:", error);
     }
-  }, [loadingStartTime, isLoading]);
+  }, [profile?.facility_id]);
 
   // 試薬マスターデータをCSVから読み込む
   const loadReagentMasterData = async () => {
@@ -289,320 +266,333 @@ export default function ReagentDashboardClient() {
     }
   };
 
-  // 試薬名をマスターデータから取得する関数
-  const getReagentNameByCode = useCallback((code: string): string => {
-    if (!code) return '';
-    
-    const masterData = reagentMasterData[code];
-    if (masterData) {
-      return masterData.name;
-    }
-    
-    return code; // マスターデータに存在しない場合はコードをそのまま返す
-  }, [reagentMasterData]);
-
-  // ユーザーIDからフルネームを取得する関数
-  const getUserFullname = useCallback((userId: string) => {
-    // プロファイル情報からユーザー名を取得
-    try {
-      // ユーザーIDがない場合は空文字を返す
-      if (!userId) return "";
-      
-      console.log("ReagentDash: ユーザー名取得", { userId });
-      
-      // ここでユーザー情報を取得するロジックを実装
-      // 本来はAPIリクエストなどで取得するが、現在はダミーデータを返す
-      return `ユーザー(${userId.substring(0, 8)})`;
-    } catch (err) {
-      console.error("ReagentDash: ユーザー名取得エラー:", err);
-      return "";
-    }
-  }, []);
-
   // 試薬アイテムの取得
   const fetchReagentItems = useCallback(async () => {
     if (!profile?.facility_id) {
-      console.log("ReagentDash: fetchReagentItems - 施設IDがないためスキップ");
+      console.log("ReagentDash: fetchReagentItems - 施設IDがありません");
       return;
     }
 
-    console.log("ReagentDash: 試薬アイテムの取得を開始", { 
-      facilityId: profile.facility_id,
-      timestamp: new Date().toISOString()
-    });
-
     try {
-      console.log("ReagentDash: 試薬アイテムクエリ実行前", { 
-        facilityId: profile.facility_id,
-        timestamp: new Date().toISOString(),
-        table: "reagent_items"
-      });
-
-      // 明示的にセッションを確認
-      const { data: sessionData } = await supabase.auth.getSession();
-      console.log("ReagentDash: アイテム取得前のセッション確認", {
-        hasSession: !!sessionData.session,
-        userId: sessionData.session?.user?.id || "なし",
-        accessToken: sessionData.session?.access_token ? "あり" : "なし"
-      });
-
-      if (!sessionData.session) {
-        console.error("ReagentDash: セッションが無効です。アイテム取得をスキップします。");
-        return;
-      }
-
+      console.log("ReagentDash: 試薬アイテムの取得開始", { facilityId: profile.facility_id });
+      
       const { data, error } = await supabase
         .from("reagent_items")
-        .select(`*, reagent_package_id`)
+        .select("*")
+        .eq("facility_id", profile.facility_id)
         .order("created_at", { ascending: false });
-
-      console.log("ReagentDash: 試薬アイテムクエリ実行結果", { 
-        success: !error, 
-        error: error?.message || 'なし',
-        dataReceived: !!data,
-        count: data?.length || 0,
-        timestamp: new Date().toISOString()
-      });
 
       if (error) {
         console.error("ReagentDash: 試薬アイテム取得エラー:", error);
-        return;
+        throw error;
       }
 
-      if (!data || data.length === 0) {
-        console.log("ReagentDash: 取得した試薬アイテムデータが空です");
-        setReagentItems([]);
-        return;
-      }
+      const itemsWithFullnames = await Promise.all((data || []).map(async (item) => ({
+        ...item,
+        user_fullname: item.user ? await getUserFullname(item.user) : '',
+        ended_by_fullname: item.ended_by ? await getUserFullname(item.ended_by) : ''
+      })));
 
-      console.log("ReagentDash: 試薬アイテム取得成功", { 
-        count: data.length,
-        firstItem: data[0] ? JSON.stringify(data[0]).substring(0, 100) + '...' : 'なし'
-      });
-
-      // ユーザー名を設定
-      const itemsWithUserNames = data.map(item => {
-        return {
-          ...item,
-          user_fullname: item.user ? getUserFullname(item.user) : null,
-          ended_by_fullname: item.ended_by ? getUserFullname(item.ended_by) : null
-        };
-      });
-
-      console.log("ReagentDash: 試薬アイテム処理完了", { 
-        processedCount: itemsWithUserNames.length,
-        setStateTimestamp: new Date().toISOString()
-      });
-
-      setReagentItems(itemsWithUserNames);
-    } catch (err) {
-      console.error("ReagentDash: 試薬アイテム取得中に例外が発生:", err);
-      setError("試薬アイテムの取得中にエラーが発生しました");
+      console.log("ReagentDash: 試薬アイテム取得成功", { count: itemsWithFullnames.length });
+      setReagentItems(itemsWithFullnames);
+    } catch (error) {
+      console.error("ReagentDash: 試薬アイテム取得エラー:", error);
     }
   }, [profile?.facility_id, getUserFullname]);
 
-  // 試薬データの取得（profiles との join で各ユーザー情報を取得）
+  // 試薬データの取得
   const fetchReagents = useCallback(async () => {
     if (!profile?.facility_id) {
-      console.log("ReagentDash: fetchReagents - 施設IDがないためスキップ");
+      console.log("ReagentDash: fetchReagents - 施設IDがありません");
       return;
     }
 
-    console.log("ReagentDash: 試薬データの取得を開始", { 
-      facilityId: profile.facility_id,
-      timestamp: new Date().toISOString()
-    });
-
     try {
-      // データ取得前のデバッグログ
-      console.log("ReagentDash: Supabaseクエリ実行前", { 
-        facilityId: profile.facility_id,
-        timestamp: new Date().toISOString(),
-        table: "reagents",
-        query: "select * from reagents where facility_id = '" + profile.facility_id + "'"
-      });
-
-      // 明示的にセッションを確認
-      const { data: sessionData } = await supabase.auth.getSession();
-      console.log("ReagentDash: データ取得前のセッション確認", {
-        hasSession: !!sessionData.session,
-        userId: sessionData.session?.user?.id || "なし",
-        accessToken: sessionData.session?.access_token ? "あり" : "なし"
-      });
-
-      if (!sessionData.session) {
-        console.error("ReagentDash: セッションが無効です。データ取得をスキップします。");
-        return;
-      }
-
-      // 試薬データクエリを作成
+      console.log("ReagentDash: 試薬データの取得開始", { facilityId: profile.facility_id });
+      
       let query = supabase
         .from("reagents")
-        .select(`*, registeredBy (fullname), used_by (fullname), ended_by (fullname)`)
+        .select("*")
         .eq("facility_id", profile.facility_id);
         
-      // 部署名が指定されている場合は部署名でフィルタリング
-      if (departmentName) {
-        console.log(`ReagentDash: 部署 "${departmentName}" でフィルタリング`);
-        query = query.eq("department", departmentName);
+      // 部署IDが指定されている場合は部署IDでフィルタリング
+      if (departmentId) {
+        console.log(`ReagentDash: 部署ID "${departmentId}" でフィルタリング`);
+        query = query.eq("department", departmentId);
       }
       
-      // 並び順を指定して実行
       const { data, error } = await query.order("registrationDate", { ascending: false });
-
-      // クエリ結果のデバッグログ
-      console.log("ReagentDash: Supabaseクエリ実行結果", { 
-        success: !error, 
-        error: error?.message || 'なし',
-        dataReceived: !!data,
-        count: data?.length || 0,
-        timestamp: new Date().toISOString()
-      });
 
       if (error) {
         console.error("ReagentDash: 試薬データ取得エラー:", error);
-        setError("試薬データの取得中にエラーが発生しました: " + error.message);
-        return;
+        throw error;
       }
+
+      console.log("ReagentDash: 試薬データ取得成功", { count: data?.length || 0 });
       
-      // データが空の場合のログ
-      if (!data || data.length === 0) {
-        console.log("ReagentDash: 取得した試薬データが空です");
-        setReagents([]);
-        return;
-      }
-      
-      console.log("ReagentDash: 試薬データ取得成功", { 
-        count: data.length,
-        firstItem: data[0] ? JSON.stringify(data[0]).substring(0, 100) + '...' : 'なし'
-      });
-      
-      // 試薬名をマスターデータから取得して設定
-      const reagentsWithNames = (data || []).map(reagent => {
-        // nameフィールドがコードの場合、マスターデータから名前を取得
-        if (reagent.name && reagent.name.match(/^[A-Z0-9-]+$/)) {
-          const masterName = getReagentNameByCode(reagent.name);
-          console.log(`ReagentDash: 試薬名マッピング - コード: ${reagent.name}, マスター名: ${masterName || 'なし'}`);
-          return {
-            ...reagent,
-            originalCode: reagent.name, // 元のコードを保存
-            name: masterName || reagent.name
-          };
-        }
-        return reagent;
-      });
-      
-      console.log("ReagentDash: 試薬データ処理完了", { 
-        processedCount: reagentsWithNames.length,
-        setStateTimestamp: new Date().toISOString()
-      });
-      
-      setReagents(reagentsWithNames);
-      
-      // 期限切れ通知を更新
-      checkExpiryNotifications(reagentsWithNames);
+      // データ整形
+      const formattedData = await Promise.all((data || []).map(async (item) => ({
+        ...item,
+        name: getReagentNameByCode(item.name),
+        registeredBy: item.registeredBy ? await getUserFullname(item.registeredBy) : '',
+        used_by: item.used_by ? await getUserFullname(item.used_by) : null,
+        ended_by: item.ended_by ? await getUserFullname(item.ended_by) : null
+      })));
+
+      setReagents(formattedData);
       
       // 試薬アイテムも取得
-      fetchReagentItems();
-    } catch (err) {
-      console.error("ReagentDash: 試薬データ取得中に例外が発生:", err);
+      await fetchReagentItems();
+      
+      // 期限切れ通知をチェック
+      checkExpiryNotifications(formattedData);
+    } catch (error) {
+      console.error("ReagentDash: 試薬データ取得エラー:", error);
+      throw error;
     }
-  }, [profile?.facility_id, getReagentNameByCode, fetchReagentItems]);
+  }, [profile?.facility_id, getReagentNameByCode, getUserFullname, checkExpiryNotifications]);
 
-  // 期限切れ間近（1ヶ月以内）の試薬を検出する関数
-  const checkExpiryNotifications = (reagents: Reagent[]) => {
-    const today = new Date();
-    const oneMonthLater = new Date();
-    oneMonthLater.setMonth(today.getMonth() + 1);
-    
-    const nearExpiryReagents = reagents.filter(reagent => {
-      if (!reagent.expirationDate) return false;
-      
-      // 使用終了した試薬は除外
-      if (reagent.ended_at) return false;
-      
-      const expiryDate = new Date(reagent.expirationDate);
-      // 有効期限が今日から1ヶ月以内で、かつ今日以降のもの
-      return expiryDate <= oneMonthLater && expiryDate >= today;
-    });
-    
-    setExpiryNotifications(nearExpiryReagents);
-  };
+  // 現在のユーザープロファイルの取得
+  const fetchCurrentUserProfile = useCallback(async () => {
+    if (!user?.id || !profile?.facility_id) {
+      console.log("ReagentDash: fetchCurrentUserProfile - ユーザーIDまたは施設IDがありません");
+      return;
+    }
 
-  // カレントユーザーの氏名取得
-  const fetchCurrentUserProfile = async () => {
-    if (!user) return;
     try {
-      // プロファイル情報を取得
-      const { data: profileData, error: profileError } = await supabase
+      console.log("ReagentDash: ユーザープロファイル取得開始", { userId: user.id });
+      
+      const { data: userData, error: userError } = await supabase
         .from("profiles")
-        .select("fullname, facility_id")
+        .select("fullname")
         .eq("id", user.id)
         .single();
 
-      if (profileError) {
-        console.error("プロファイル取得エラー:", profileError);
-        return;
+      if (userError) {
+        console.error("ReagentDash: ユーザープロファイル取得エラー:", userError);
+      } else if (userData) {
+        console.log("ReagentDash: ユーザープロファイル取得成功", { fullname: userData.fullname });
+        setCurrentUserName(userData.fullname || "");
       }
 
-      if (profileData) {
-        setCurrentUserName(profileData.fullname || "");
-        
-        // 施設情報を取得
-        if (profileData.facility_id) {
-          const { data: facilityData, error: facilityError } = await supabase
-            .from("facilities")
-            .select("name")
-            .eq("id", profileData.facility_id)
-            .single();
-            
-          if (!facilityError && facilityData) {
-            setFacilityName(facilityData.name);
-          }
-        }
+      // 施設名も取得
+      const { data: facilityData, error: facilityError } = await supabase
+        .from("facilities")
+        .select("name")
+        .eq("id", profile.facility_id)
+        .single();
+
+      if (facilityError) {
+        console.error("ReagentDash: 施設情報取得エラー:", facilityError);
+      } else if (facilityData) {
+        console.log("ReagentDash: 施設情報取得成功", { name: facilityData.name });
+        setFacilityName(facilityData.name || "");
       }
     } catch (error) {
-      console.error("ユーザープロファイル取得エラー:", error);
+      console.error("ReagentDash: プロファイル取得エラー:", error);
     }
-  };
+  }, [user?.id, profile?.facility_id]);
 
-  // visibilitychangeイベントのリスナー
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        fetchReagents();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // 試薬パッケージの展開・折りたたみを切り替える
-  const toggleReagentExpand = (reagentId: number, e: React.MouseEvent) => {
-    e.stopPropagation(); // 行のクリックイベントを停止
+  // 試薬パッケージの展開・折りたたみ
+  const toggleReagentExpand = useCallback((reagentId: number) => {
     setExpandedReagents(prev => ({
       ...prev,
       [reagentId]: !prev[reagentId]
     }));
-  };
+  }, []);
 
-  // 行クリック時の処理（詳細画面への遷移）
-  const handleRowClick = (reagent: Reagent) => {
-    router.push(`/reagent/${reagent.id}`);
-  };
+  // 使用開始処理
+  const handleUsageStart = useCallback(async (reagentId: number) => {
+    if (!user?.id || !profile?.facility_id) return;
 
-  // ユニークな部署一覧（フィルター用）
-  const departmentOptions = useMemo(() => {
-    const deps = new Set<string>();
-    reagents.forEach((r) => {
-      if (r.department) deps.add(r.department);
+    try {
+      console.log("ReagentDash: 使用開始処理", { reagentId });
+      
+      const now = getJstTimestamp();
+      
+      // reagentsテーブルを更新
+      const { error: updateError } = await supabase
+        .from("reagents")
+        .update({
+          used: true,
+          used_at: now,
+          used_by: user.id
+        })
+        .eq("id", reagentId)
+        .eq("facility_id", profile.facility_id);
+
+      if (updateError) {
+        console.error("ReagentDash: 使用開始更新エラー:", updateError);
+        throw updateError;
+      }
+
+      console.log("ReagentDash: 使用開始処理成功");
+      
+      // データを再取得
+      await fetchReagents();
+    } catch (error) {
+      console.error("ReagentDash: 使用開始処理エラー:", error);
+      alert("使用開始の処理中にエラーが発生しました。");
+    }
+  }, [user?.id, profile?.facility_id, fetchReagents]);
+
+  // 使用終了処理
+  const handleUsageEnd = useCallback(async (reagentId: number) => {
+    if (!user?.id || !profile?.facility_id) return;
+
+    try {
+      console.log("ReagentDash: 使用終了処理", { reagentId });
+      
+      const now = getJstTimestamp();
+      
+      // reagentsテーブルを更新
+      const { error: updateError } = await supabase
+        .from("reagents")
+        .update({
+          ended_at: now,
+          ended_by: user.id
+        })
+        .eq("id", reagentId)
+        .eq("facility_id", profile.facility_id);
+
+      if (updateError) {
+        console.error("ReagentDash: 使用終了更新エラー:", updateError);
+        throw updateError;
+      }
+
+      // 関連するreagent_itemsも終了させる
+      const { error: itemsError } = await supabase
+        .from("reagent_items")
+        .update({
+          ended_at: now,
+          ended_by: user.id
+        })
+        .eq("reagent_package_id", reagentId)
+        .eq("facility_id", profile.facility_id)
+        .is("ended_at", null);
+
+      if (itemsError) {
+        console.error("ReagentDash: アイテム終了更新エラー:", itemsError);
+      }
+
+      console.log("ReagentDash: 使用終了処理成功");
+      
+      // データを再取得
+      await fetchReagents();
+    } catch (error) {
+      console.error("ReagentDash: 使用終了処理エラー:", error);
+      alert("使用終了の処理中にエラーが発生しました。");
+    }
+  }, [user?.id, profile?.facility_id, fetchReagents]);
+
+  // 試薬アイテムの使用終了処理
+  const handleItemUsageEnd = useCallback(async (itemId: number) => {
+    if (!user?.id || !profile?.facility_id) return;
+
+    try {
+      console.log("ReagentDash: アイテム使用終了処理", { itemId });
+      
+      const now = getJstTimestamp();
+      
+      // reagent_itemsテーブルを更新
+      const { error: updateError } = await supabase
+        .from("reagent_items")
+        .update({
+          ended_at: now,
+          ended_by: user.id
+        })
+        .eq("id", itemId)
+        .eq("facility_id", profile.facility_id);
+
+      if (updateError) {
+        console.error("ReagentDash: アイテム使用終了更新エラー:", updateError);
+        throw updateError;
+      }
+
+      console.log("ReagentDash: アイテム使用終了処理成功");
+      
+      // データを再取得
+      await fetchReagentItems();
+    } catch (error) {
+      console.error("ReagentDash: アイテム使用終了処理エラー:", error);
+      alert("使用終了の処理中にエラーが発生しました。");
+    }
+  }, [user?.id, profile?.facility_id, fetchReagentItems]);
+
+  // メインのuseEffect
+  useEffect(() => {
+    console.log("ReagentDash: メインuseEffect実行", { 
+      hasProfile: !!profile,
+      facilityId: profile?.facility_id || 'なし',
+      isLoading: loading
     });
-    return Array.from(deps);
-  }, [reagents]);
+    
+    if (loading) {
+      console.log("ReagentDash: 認証情報ロード中のため、データ取得を延期");
+      return;
+    }
+    
+    if (!profile?.facility_id) {
+      console.log("ReagentDash: 施設IDがないため、データ取得をスキップ");
+      return;
+    }
+    
+    setIsLoading(true);
+    setError(null);
+    setLoadingStartTime(Date.now());
+    
+    console.log("ReagentDash: マスターデータとデータの取得を開始");
+    
+    const fetchData = async () => {
+      try {
+        await loadReagentMasterData();
+        await fetchDepartments();
+        await fetchCurrentUserProfile();
+        await fetchReagents();
+        
+        setIsLoading(false);
+        setLoadingStartTime(null);
+        if (autoReloadTimerId) {
+          clearTimeout(autoReloadTimerId);
+          setAutoReloadTimerId(null);
+        }
+      } catch (err) {
+        console.error("ReagentDash: データ取得中にエラーが発生:", err);
+        setError("データの取得中にエラーが発生しました。");
+        setIsLoading(false);
+        setLoadingStartTime(null);
+        if (autoReloadTimerId) {
+          clearTimeout(autoReloadTimerId);
+          setAutoReloadTimerId(null);
+        }
+      }
+    };
+    
+    fetchData();
+  }, [loading, profile?.facility_id, fetchDepartments]);
+
+  // 自動リロード用のuseEffect
+  useEffect(() => {
+    if (loadingStartTime && isLoading) {
+      const timerId = setTimeout(() => {
+        console.log("ReagentDash: データ読み込みが長時間かかっているため、ページを自動リロードします");
+        window.location.reload();
+      }, 15000);
+
+      setAutoReloadTimerId(timerId);
+
+      return () => {
+        if (timerId) {
+          clearTimeout(timerId);
+        }
+      };
+    }
+  }, [loadingStartTime, isLoading]);
+
+  // 部署一覧の取得（部署マスターから取得）
+  const departmentOptions = useMemo(() => {
+    return departments;
+  }, [departments]);
 
   // 試薬パッケージごとにアイテムをグループ化
   const reagentsWithItems = useMemo(() => {
@@ -625,189 +615,18 @@ export default function ReagentDashboardClient() {
     });
   }, [reagentsWithItems, selectedDepartment, showEnded]);
 
-  // 試薬アイテムの使用終了処理
-  const handleItemUsageEnd = async (itemId: number, e: React.MouseEvent) => {
-    e.stopPropagation(); // イベントの伝播を停止
-    
-    if (!confirm("この試薬アイテムの使用を終了しますか？")) {
-      return;
-    }
-    
-    try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) {
-        console.error("Error getting user:", userError);
-        return;
-      }
-      
-      const userId = userData.user.id;
-      
-      const { error } = await supabase
-        .from("reagent_items")
-        .update({
-          ended_at: getJstTimestamp(),
-          ended_by: userId,
-        })
-        .eq("id", itemId)
-        .eq("facility_id", profile?.facility_id); // 施設IDによる制限を追加
-        
-      if (error) {
-        console.error("Error ending item usage:", error);
-      } else {
-        // 試薬アイテム一覧を再取得
-        fetchReagentItems();
-      }
-    } catch (error) {
-      console.error("Error in handleItemUsageEnd:", error);
-    }
-  };
-
-  // 試薬の使用開始処理
-  const handleUsageStart = async (reagentId: number) => {
-    if (!confirm("この試薬の使用を開始しますか？")) {
-      return;
-    }
-    
-    try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) {
-        console.error("Error getting user:", userError);
-        return;
-      }
-      
-      const userId = userData.user.id;
-      
-      const { error } = await supabase
-        .from("reagents")
-        .update({
-          used: true,
-          used_at: getJstTimestamp(),
-          used_by: userId,
-        })
-        .eq("id", reagentId)
-        .eq("facility_id", profile?.facility_id); // 施設IDによる制限を追加
-        
-      if (error) {
-        console.error("Error starting usage:", error);
-      } else {
-        // 試薬一覧を再取得
-        fetchReagents();
-      }
-    } catch (error) {
-      console.error("Error in handleUsageStart:", error);
-    }
-  };
-
-  // 試薬の使用終了処理
-  const handleUsageEnd = async (reagentId: number) => {
-    if (!confirm("この試薬の使用を終了しますか？")) {
-      return;
-    }
-    
-    try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) {
-        console.error("Error getting user:", userError);
-        return;
-      }
-      
-      const userId = userData.user.id;
-      
-      const { error } = await supabase
-        .from("reagents")
-        .update({
-          ended_at: getJstTimestamp(),
-          ended_by: userId,
-        })
-        .eq("id", reagentId)
-        .eq("facility_id", profile?.facility_id); // 施設IDによる制限を追加
-        
-      if (error) {
-        console.error("Error ending usage:", error);
-      } else {
-        // 試薬一覧を再取得
-        fetchReagents();
-      }
-    } catch (error) {
-      console.error("Error in handleUsageEnd:", error);
-    }
-  };
-
-  // すべての行を展開する
-  const expandAllRows = () => {
-    if (allExpanded) {
-      // すでに全展開状態なら折りたたむ
-      setExpandedReagents({});
-      setAllExpanded(false);
-    } else {
-      // 全展開する
-      const expandedState: Record<number, boolean> = {};
-      reagents.forEach(reagent => {
-        const items = reagentItems.filter(item => item.reagent_package_id === reagent.id);
-        if (items.length > 0) {
-          expandedState[reagent.id] = true;
-        }
-      });
-      setExpandedReagents(expandedState);
-      setAllExpanded(true);
-    }
-  };
-
-  // セッション確認と復元処理
-  useEffect(() => {
-    const checkAndRestoreSession = async () => {
-      try {
-        console.log("ReagentDash: セッション確認を開始");
-        
-        // 現在のセッションを確認
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-        
-        console.log("ReagentDash: セッション確認結果:", { 
-          hasSession: !!sessionData.session,
-          userId: sessionData.session?.user?.id || "なし",
-          error: sessionError?.message || "なし"
-        });
-        
-        if (sessionError) {
-          console.error("ReagentDash: セッション確認エラー:", sessionError);
-          router.push('/login');
-          return;
-        }
-        
-        if (!sessionData.session) {
-          console.log("ReagentDash: セッションなし、ログインページへリダイレクト");
-          router.push('/login');
-          return;
-        }
-        
-        console.log("ReagentDash: 有効なセッションを確認:", sessionData.session.user.id);
-        
-        // ユーザー情報あり
-        if (user) {
-          console.log("ReagentDash: ユーザー情報あり:", user.id);
-        } else {
-          console.log("ReagentDash: ユーザー情報なし、認証コンテキストと不一致");
-        }
-      } catch (e) {
-        console.error("ReagentDash: セッション確認中にエラー発生:", e);
-        router.push('/login');
-      }
-    };
-    
-    // ページロード時にセッション確認を実行
-    checkAndRestoreSession();
-  }, [router, user]);
+  if (loading) {
+    return <LoadingSpinner message="データを読み込み中..." fullScreen />;
+  }
 
   return (
     <div className="min-h-screen bg-white">
-      {/* AppHeaderコンポーネントを使用 */}
       <AppHeader 
         title="Clinical Reagent Manager" 
         showBackButton={true}
         icon={<FlaskRound className="h-6 w-6 text-pink-500" />}
       />
-
-      {/* メインコンテンツ - 幅を調整 */}
+      
       <main className="container max-w-7xl mx-auto px-4 py-6">
         {/* ユーザー情報表示 */}
         <div className="w-full mb-4">
@@ -889,9 +708,8 @@ export default function ReagentDashboardClient() {
 
         {/* ローディング中の表示 */}
         {isLoading && (
-          <div className="bg-white shadow-sm border rounded-md p-8 text-center my-6">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-            <p className="mt-4 text-gray-500">データを読み込み中...</p>
+          <div className="bg-white shadow-sm border rounded-md my-6">
+            <CompactLoadingSpinner message="データを読み込み中..." />
           </div>
         )}
 
@@ -923,7 +741,7 @@ export default function ReagentDashboardClient() {
           </div>
         )}
 
-        {/* フィルターコントロール - TemperatureManagementClientに合わせたデザイン */}
+        {/* フィルターコントロール */}
         <div className="mb-6 bg-white p-4 rounded-lg shadow-sm">
           <div className="flex flex-col md:flex-row gap-4">
             <div className="flex-1">
@@ -946,8 +764,8 @@ export default function ReagentDashboardClient() {
                 <SelectContent>
                   <SelectItem value="all">すべての部署</SelectItem>
                   {departmentOptions.map((dept) => (
-                    <SelectItem key={dept} value={dept}>
-                      {dept}
+                    <SelectItem key={dept.id} value={dept.id}>
+                      {dept.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -965,7 +783,7 @@ export default function ReagentDashboardClient() {
             </div>
           </div>
         </div>
-        
+
         {/* 表示コントロール */}
         <div className="mb-6 flex justify-between">
           <div className="flex space-x-2">
@@ -988,7 +806,22 @@ export default function ReagentDashboardClient() {
             <Button
               variant="outline"
               size="sm"
-              onClick={expandAllRows}
+              onClick={() => {
+                if (allExpanded) {
+                  setExpandedReagents({});
+                  setAllExpanded(false);
+                } else {
+                  const expandedState: Record<number, boolean> = {};
+                  reagents.forEach(reagent => {
+                    const items = reagentItems.filter(item => item.reagent_package_id === reagent.id);
+                    if (items.length > 0) {
+                      expandedState[reagent.id] = true;
+                    }
+                  });
+                  setExpandedReagents(expandedState);
+                  setAllExpanded(true);
+                }
+              }}
               className="flex items-center"
             >
               {allExpanded ? (
@@ -1032,131 +865,155 @@ export default function ReagentDashboardClient() {
               </TableHeader>
               <TableBody>
                 {filteredReagents.map((reagent) => {
-                  // この試薬パッケージに関連するアイテムを取得
-                  const items = reagentItems.filter(item => item.reagent_package_id === reagent.id);
-                  const hasItems = items.length > 0;
+                  const isExpired = new Date(reagent.expirationDate) < new Date();
+                  const isExpiringSoon = expiryNotifications.some(n => n.id === reagent.id);
+                  const hasItems = reagent.items && reagent.items.length > 0;
                   const isExpanded = expandedReagents[reagent.id] || false;
-                  
+
                   return (
                     <React.Fragment key={reagent.id}>
                       <TableRow
-                        onClick={() => handleRowClick(reagent)}
-                        className={`cursor-pointer hover:bg-gray-50 whitespace-nowrap ${compactMode ? 'h-8' : ''}`}
+                        className={`
+                          ${isExpired ? "bg-red-50" : ""}
+                          ${isExpiringSoon && !isExpired ? "bg-yellow-50" : ""}
+                          ${reagent.ended_at ? "opacity-50" : ""}
+                          hover:bg-muted/50 transition-colors
+                        `}
                       >
-                        <TableCell>
+                        <TableCell className="text-center">
                           {hasItems && (
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              className="p-0 h-6 w-6"
-                              onClick={(e) => toggleReagentExpand(reagent.id, e)}
-                            >
-                              {isExpanded ? '−' : '+'}
-                            </Button>
-                          )}
-                        </TableCell>
-                        <TableCell>{reagent.name}</TableCell>
-                        <TableCell>{reagent.lotNo}</TableCell>
-                        <TableCell>{reagent.specification}</TableCell>
-                        <TableCell>{reagent.unit || "-"}</TableCell>
-                        <TableCell>{formatDateTime(reagent.expirationDate)}</TableCell>
-                        <TableCell>{formatDateTime(reagent.used_at)}</TableCell>
-                        <TableCell>{formatDateTime(reagent.ended_at)}</TableCell>
-                        <TableCell>
-                          {reagent.used_by
-                            ? typeof reagent.used_by === "object"
-                              ? reagent.used_by.fullname
-                              : reagent.used_by
-                            : "-"}
-                        </TableCell>
-                        <TableCell>
-                          {reagent.ended_by
-                            ? typeof reagent.ended_by === "object"
-                              ? reagent.ended_by.fullname
-                              : reagent.ended_by
-                            : "-"}
-                        </TableCell>
-                        <TableCell>{formatDateTime(reagent.registrationDate)}</TableCell>
-                        <TableCell>
-                          {typeof reagent.registeredBy === "object"
-                            ? reagent.registeredBy.fullname
-                            : reagent.registeredBy}
-                        </TableCell>
-                        <TableCell className="space-x-1 whitespace-nowrap">
-                          {!reagent.used && (
                             <Button
+                              variant="ghost"
                               size="sm"
-                              variant="outline"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleUsageStart(reagent.id);
-                              }}
+                              onClick={() => toggleReagentExpand(reagent.id)}
+                              className="h-6 w-6 p-0"
                             >
-                              使用開始
+                              {isExpanded ? (
+                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                              ) : (
+                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                </svg>
+                              )}
                             </Button>
                           )}
-                          {reagent.used && !reagent.ended_at && (
+                        </TableCell>
+                        <TableCell className={`font-medium ${compactMode ? "text-xs" : ""}`}>
+                          <div className="flex items-center gap-2">
+                            <span className="truncate" title={reagent.name}>
+                              {reagent.name}
+                            </span>
+                            {hasItems && (
+                              <span className="text-xs text-muted-foreground">
+                                ({reagent.items.length})
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className={compactMode ? "text-xs" : ""}>{reagent.lotNo}</TableCell>
+                        <TableCell className={compactMode ? "text-xs" : ""}>{reagent.specification}</TableCell>
+                        <TableCell className={compactMode ? "text-xs" : ""}>{reagent.unit}</TableCell>
+                        <TableCell className={compactMode ? "text-xs" : ""}>
+                          <span className={isExpired ? "text-red-600 font-semibold" : ""}>
+                            {formatDateTime(reagent.expirationDate)}
+                          </span>
+                        </TableCell>
+                        <TableCell className={compactMode ? "text-xs" : ""} style={{ backgroundColor: reagent.used_at ? 'rgba(var(--primary), 0.05)' : '' }}>
+                          {reagent.used_at ? formatDateTime(reagent.used_at) : "-"}
+                        </TableCell>
+                        <TableCell className={compactMode ? "text-xs" : ""} style={{ backgroundColor: reagent.ended_at ? 'rgba(var(--primary), 0.05)' : '' }}>
+                          {reagent.ended_at ? formatDateTime(reagent.ended_at) : "-"}
+                        </TableCell>
+                        <TableCell className={compactMode ? "text-xs" : ""}>
+                          {reagent.used_by || "-"}
+                        </TableCell>
+                        <TableCell className={compactMode ? "text-xs" : ""}>
+                          {reagent.ended_by || "-"}
+                        </TableCell>
+                        <TableCell className={compactMode ? "text-xs" : ""}>
+                          {formatDateTime(reagent.registrationDate)}
+                        </TableCell>
+                        <TableCell className={compactMode ? "text-xs" : ""}>
+                          {reagent.registeredBy}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            {!reagent.used && !reagent.ended_at && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleUsageStart(reagent.id)}
+                                className="w-full bg-green-50 hover:bg-green-100 text-green-700 border-green-300"
+                              >
+                                使用開始
+                              </Button>
+                            )}
+                            {reagent.used && !reagent.ended_at && (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => router.push(`/reagent/use?reagentId=${reagent.id}`)}
+                                  className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-300"
+                                >
+                                  アイテム追加
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleUsageEnd(reagent.id)}
+                                  className="w-full bg-red-50 hover:bg-red-100 text-red-700 border-red-300"
+                                >
+                                  使用終了
+                                </Button>
+                              </>
+                            )}
                             <Button
-                              size="sm"
                               variant="outline"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleUsageEnd(reagent.id);
-                              }}
+                              size="sm"
+                              onClick={() => router.push(`/reagent/${reagent.id}`)}
+                              className="w-full"
                             >
-                              使用終了
+                              詳細
                             </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              router.push(`/reagent/${reagent.id}`);
-                            }}
-                            className="ml-1"
-                          >
-                            アイテム追加
-                          </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                       
-                      {/* アイテム行（展開時のみ表示） */}
-                      {isExpanded && items.map(item => (
-                        <TableRow key={`item-${item.id}`} className={`bg-gray-50 whitespace-nowrap ${compactMode ? 'h-7 text-xs' : ''}`}>
+                      {/* 展開されたアイテムの表示 */}
+                      {isExpanded && reagent.items && reagent.items.map((item, index) => (
+                        <TableRow key={`item-${item.id}`} className="bg-gray-50">
                           <TableCell></TableCell>
-                          <TableCell className="pl-8 font-medium text-sm">
-                            └ {item.name}
+                          <TableCell colSpan={5} className={`pl-12 ${compactMode ? "text-xs" : ""}`}>
+                            <div className="flex items-center gap-2">
+                              <span className="text-muted-foreground">└</span>
+                              <span>アイテム {index + 1}</span>
+                            </div>
                           </TableCell>
-                          <TableCell colSpan={3}></TableCell>
-                          <TableCell className="text-sm">
-                            {item.usagestartdate
-                              ? new Date(item.usagestartdate).toLocaleString()
-                              : "未設定"}
+                          <TableCell className={compactMode ? "text-xs" : ""}>
+                            {formatDateTime(item.usagestartdate)}
                           </TableCell>
-                          <TableCell className="text-sm">
-                            {item.ended_at
-                              ? new Date(item.ended_at).toLocaleString()
-                              : ""}
+                          <TableCell className={compactMode ? "text-xs" : ""}>
+                            {item.ended_at ? formatDateTime(item.ended_at) : "-"}
                           </TableCell>
-                          <TableCell className="text-sm">
+                          <TableCell className={compactMode ? "text-xs" : ""}>
                             {item.user_fullname || item.user}
                           </TableCell>
-                          <TableCell className="text-sm">
-                            {item.ended_by_fullname || (item.ended_by ? item.ended_by : "")}
+                          <TableCell className={compactMode ? "text-xs" : ""}>
+                            {item.ended_by_fullname || item.ended_by || "-"}
                           </TableCell>
-                          <TableCell className="text-sm">
-                            {new Date(item.created_at).toLocaleString()}
-                          </TableCell>
-                          <TableCell></TableCell>
-                          <TableCell className="space-x-1 whitespace-nowrap">
+                          <TableCell colSpan={2}></TableCell>
+                          <TableCell>
                             {!item.ended_at && (
                               <Button
-                                size="sm"
                                 variant="outline"
-                                onClick={(e) => handleItemUsageEnd(item.id, e)}
+                                size="sm"
+                                onClick={() => handleItemUsageEnd(item.id)}
+                                className="w-full bg-red-50 hover:bg-red-100 text-red-700 border-red-300"
                               >
-                                使用終了
+                                終了
                               </Button>
                             )}
                           </TableCell>

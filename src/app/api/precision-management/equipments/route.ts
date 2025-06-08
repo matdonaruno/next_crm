@@ -1,104 +1,86 @@
+// src/app/api/precision-management/equipments/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
-import { cookies } from 'next/headers';
+import { createServerClient } from '@/lib/supabase/server';
 
-export async function GET(request: NextRequest) {
-  try {
-    const searchParams = request.nextUrl.searchParams;
-    const departmentId = searchParams.get('department_id');
-    
-    console.log(`API: equipments - リクエスト開始, department_id=${departmentId}`);
+export async function GET(req: NextRequest) {
+  const supa = await createServerClient();
 
-    const cookieStore = cookies();
-    const supabase = await createClient(cookieStore);
-    
-    console.log('API: Supabaseクライアント作成完了');
+  let q = supa
+    .from('precision_management_equipments')
+    .select('*')
+    .eq('is_active', true)
+    .order('equipment_name');
 
-    // テーブル構造を確認
-    try {
-      const { data: sampleData, error: sampleError } = await supabase
-        .from('precision_management_equipments')
-        .select('*')
-        .limit(1);
-
-      if (sampleError) {
-        console.error('API: precision_management_equipments テーブル構造確認エラー:', sampleError);
-      } else {
-        console.log('API: precision_management_equipments テーブル構造:', sampleData && sampleData.length > 0 ? Object.keys(sampleData[0]) : []);
-      }
-    } catch (e) {
-      console.error('API: テーブル構造確認中の予期せぬエラー:', e);
+  const depParam = req.nextUrl.searchParams.get('department_id');
+  if (depParam) {
+    const departmentId = parseInt(depParam, 10);
+    if (!Number.isNaN(departmentId)) {
+      q = q.eq('department_id', departmentId as any);
+    } else {
+      return NextResponse.json(
+        { error: 'Invalid department_id' },
+        { status: 400 },
+      );
     }
-
-    // クエリを構築
-    let query = supabase.from('precision_management_equipments').select('*');
-    
-    if (departmentId) {
-      query = query.eq('department_id', departmentId);
-    }
-    
-    // アクティブな機器のみを返す
-    query = query.eq('is_active', true);
-    
-    // 名前でソート
-    query = query.order('equipment_name', { ascending: true });
-    
-    const { data, error } = await query;
-
-    if (error) {
-      console.error('API: 機器データ取得エラー:', error);
-      return NextResponse.json({ 
-        error: error.message,
-        details: error.details,
-        code: error.code
-      }, { status: 500 });
-    }
-
-    console.log('API: 機器データ取得完了', data?.length || 0, '件');
-    return NextResponse.json(data || []);
-  } catch (error) {
-    console.error('API: 予期せぬエラー:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : '不明なエラーが発生しました' }, 
-      { status: 500 }
-    );
   }
+
+  const { data, error } = await q;
+  if (error)
+    return NextResponse.json(
+      { error: error.message, detail: error.details },
+      { status: 500 },
+    );
+  return NextResponse.json(data);
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const cookieStore = cookies();
-    const supabase = await createClient(cookieStore);
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  type EquipBody = {
+    equipment_name: string;
+    department_id: string;
+    model_number?: string;
+    serial_number?: string;
+    installation_date?: string;
+    maintenance_interval?: number;
+    is_active?: boolean;
+  };
 
-    const { data, error } = await (await supabase.from('precision_management_equipments'))
-      .insert({
-        equipment_name: body.equipment_name,
-        department_id: body.department_id,
-        model_number: body.model_number,
-        serial_number: body.serial_number,
-        installation_date: body.installation_date,
-        maintenance_interval: body.maintenance_interval,
-        is_active: body.is_active ?? true
-      })
-      .select();
+  const {
+    equipment_name,
+    department_id,
+    model_number,
+    serial_number,
+    installation_date,
+    maintenance_interval,
+    is_active = true,
+  } = body as EquipBody;
 
-    if (error) {
-      console.error('API: 機器登録エラー:', error);
-      return NextResponse.json({ 
-        error: error.message,
-        details: error.details,
-        code: error.code
-      }, { status: 500 });
-    }
-
-    console.log('API: 機器登録完了', data?.length || 0, '件');
-    return NextResponse.json(data || []);
-  } catch (error) {
-    console.error('API: 予期せぬエラー:', error);
+  if (!equipment_name || !department_id) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : '不明なエラーが発生しました' }, 
-      { status: 500 }
+      { error: 'equipment_name and department_id are required' },
+      { status: 400 },
     );
   }
-} 
+
+  const supa = await createServerClient();
+
+  const { data, error } = await supa
+    .from('precision_management_equipments')
+    .insert({
+      equipment_name,
+      department_id,
+      model_number,
+      serial_number,
+      installation_date,
+      maintenance_interval,
+      is_active,
+    })
+    .select();
+
+  if (error)
+    return NextResponse.json(
+      { error: error.message, detail: error.details },
+      { status: 500 },
+    );
+  return NextResponse.json(data);
+}

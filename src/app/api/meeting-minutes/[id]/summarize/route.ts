@@ -1,97 +1,96 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+// src/app/api/meeting-minutes/[id]/summarize/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import OpenAI from 'openai';
+import { createClient } from '@supabase/supabase-js';
+import type { Database } from '@/types/supabase';
 
-// OpenAIクライアントの初期化
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+type SummaryResp = { id: string; summary: string };
 
-// 会議議事録の要約生成API
+export const dynamic = 'force-dynamic'; // 🍪 を使うので動的に
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+
 export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } }
+  req: NextRequest,
+  { params }: { params: { id: string } },
 ) {
+  const { id } = params; // params は Promise ではないのでそのまま
+
+  /* 1) Service‑role 認証（Authorization: Bearer <SERVICE_ROLE_KEY>） */
+  const authHeader = req.headers.get('Authorization') || '';
+  if (!authHeader.startsWith('Bearer ')) {
+    return NextResponse.json({ error: 'unauthorized', stage: 'auth' }, { status: 401 });
+  }
+  const serviceKey = authHeader.replace('Bearer ', '').trim();
+
+  // Service Role Key で Supabase クライアントを生成（cookie 不要）
+  const supabase = createClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    serviceKey,
+    { auth: { persistSession: false } }
+  );
+
+  /* 2) 本文解析 */
+  let content: unknown;
   try {
-    const id = await params.id;
-    
-    // APIキーが設定されているか確認
-    if (!process.env.OPENAI_API_KEY) {
-      console.error('API: OpenAIのAPIキーが設定されていません');
-      return NextResponse.json({ 
-        error: 'OpenAI APIキーが設定されていません。サーバー環境変数OPENAI_API_KEYを確認してください。' 
-      }, { status: 500 });
+    const raw = await req.json();
+    if (typeof raw !== 'object' || raw === null) {
+      return NextResponse.json({ error: 'invalid_json', stage: 'validation' }, { status: 400 });
     }
-    
-    // Supabaseクライアントの初期化
-    const cookieStore = cookies();
-    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
-    
-    // 認証情報の確認
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError || !session) {
-      console.error('API: セッション取得エラー:', sessionError);
-      return NextResponse.json({ error: '認証セッションが無効です' }, { status: 401 });
-    }
+    content = (raw as { content?: unknown }).content;
+  } catch (e) {
+    console.error('[summarize] json_parse error:', e);
+    return NextResponse.json({ error: 'json_parse_error', stage: 'validation' }, { status: 400 });
+  }
+  if (typeof content !== 'string' || !content.trim()) {
+    return NextResponse.json({ error: 'content_required', stage: 'validation' }, { status: 400 });
+  }
 
-    // リクエストボディの解析
-    const body = await request.json();
-    const content = body.content;
-    
-    if (!content) {
-      return NextResponse.json({ error: '要約する内容が提供されていません' }, { status: 400 });
-    }
-
-    console.log(`API: 議事録ID ${id} の要約を生成します`);
-
-    // OpenAIを使用して要約を生成
-    const response = await openai.chat.completions.create({
-      model: "gpt-4-turbo",
+  /* 3) OpenAI 要約（テキストを渡す） */
+  let summary: string;
+  try {
+    const completion = await openai.chat.completions.create({
+      model: process.env.OPENAI_SUMMARY_MODEL ?? 'gpt-4o',
+      temperature: 0.3,
+      max_tokens: 400,
       messages: [
         {
-          role: "system",
-          content: "あなたは会議の内容を簡潔かつ正確に要約する専門家です。重要なポイント、決定事項、アクションアイテムなどを抽出して、わかりやすく整理してください。"
+          role: 'system',
+          content:
+            'あなたは熟練の議事録要約者です。会議内容を300文字以内で簡潔に要約し、JSON形式で返してください。',
         },
-        {
-          role: "user",
-          content: `以下の会議の内容を300字程度で要約してください。重要な決定事項とアクションアイテムを含めてください。\n\n${content}`
-        }
+        { role: 'user', content: content as string },
       ],
-      temperature: 0.5,
-      max_tokens: 500,
     });
+    summary = completion.choices[0]?.message?.content ?? '';
+  } catch (e) {
+    console.error('[summarize] openai error:', e);
+    return NextResponse.json({ error: 'openai_error', stage: 'openai' }, { status: 500 });
+  }
 
-    const summary = response.choices[0]?.message?.content || "要約の生成に失敗しました。";
-    
-    // 生成された要約をデータベースに保存
-    const { data, error } = await supabase
+  /* 4) 保存 */
+  let updateErr;
+  try {
+    const updateRes = await supabase
       .from('meeting_minutes')
       .update({ summary })
       .eq('id', id)
-      .select('id, summary')
-      .single();
-
-    if (error) {
-      console.error(`API: 議事録ID ${id} の要約保存エラー:`, error);
-      // 要約は生成できたが保存に失敗した場合は、要約だけ返す
-      return NextResponse.json(
-        { summary, error: 'データベースへの保存に失敗しました', details: error }, 
-        { status: 200 }
-      );
-    }
-
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error('API: 予期しないエラー:', error);
-    
-    // OpenAI APIキーが設定されていない場合のエラーメッセージ
-    if (error instanceof Error && error.message.includes('API key')) {
-      return NextResponse.json({ 
-        error: 'OpenAI APIキーが設定されていません。環境変数OPENAI_API_KEYを確認してください。' 
-      }, { status: 500 });
-    }
-    
-    return NextResponse.json({ error: '内部サーバーエラー' }, { status: 500 });
+      .select();
+    updateErr = updateRes.error;
+  } catch (e) {
+    console.error('[summarize] db_update error:', e);
+    return NextResponse.json({ error: 'db_update_error', stage: 'db_update' }, { status: 500 });
   }
-} 
+  if (updateErr) {
+    console.error('[summarize] updateErr:', updateErr);
+    // 要約は返すが保存に失敗した場合
+    return NextResponse.json(
+      { id, summary, warn: 'save_failed', details: updateErr.message } as SummaryResp,
+      { status: 200 }
+    );
+  }
+  return NextResponse.json<SummaryResp>({ id, summary }, {
+    status: 200,
+    headers: { 'Cache-Control': 'public, max-age=300' },
+  });
+}

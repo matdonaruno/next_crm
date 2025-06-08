@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { ja } from 'date-fns/locale';
-import supabase from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseBrowser';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import {
@@ -280,7 +280,7 @@ export function IncidentList({
             <AlertTriangle className="h-5 w-5 mr-2 text-red-500" />
             温度異常対応履歴
           </h3>
-          <div className="flex items-center">
+          <div className="flex items-center gap-3">
             <Button 
               variant="outline" 
               size="sm"
@@ -297,7 +297,6 @@ export function IncidentList({
             <Button
               variant="ghost"
               size="icon"
-              className="ml-2"
               onClick={(e) => {
                 e.stopPropagation();
                 setIsExpanded(!isExpanded);

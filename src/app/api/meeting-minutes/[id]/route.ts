@@ -1,186 +1,266 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { createClient } from '@/utils/supabase/server';
 
-// 特定の会議議事録を取得するAPI
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * GET /api/meeting-minutes/[id]
+ * 1. 認証 → facility_id を取得
+ * 2. facility が一致する議事録を 1 件取得して返却
+ */
 export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
+  req: NextRequest,
+  { params }: { params: { id: string } },
 ) {
+  const { id } = await params;
+  const supabase = await createClient();
+
+  /* -------- 1) 認証 -------- */
+  let user, authErr;
   try {
-    const id = await params.id;
-    
-    // Supabaseクライアントの初期化
-    const cookieStore = cookies();
-    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
-    
-    // 認証情報の確認
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError || !session) {
-      console.error('API: セッション取得エラー:', sessionError);
-      return NextResponse.json({ error: '認証セッションが無効です' }, { status: 401 });
-    }
-
-    console.log(`API: 議事録ID ${id} の詳細を取得します`);
-
-    // 対象の議事録データを取得
-    const { data, error } = await supabase
-      .from('meeting_minutes')
-      .select(`
-        id,
-        meeting_type_id,
-        title,
-        meeting_date,
-        recorded_by,
-        facility_id,
-        department_id,
-        attendees,
-        content,
-        summary,
-        audio_file_path,
-        is_transcribed,
-        keywords,
-        created_at,
-        updated_at,
-        segments,
-        speakers,
-        meeting_types(name)
-      `)
-      .eq('id', id)
-      .single();
-
-    if (error) {
-      console.error(`API: 議事録ID ${id} の取得エラー:`, error);
-      
-      if (error.code === 'PGRST116') {
-        return NextResponse.json({ error: '議事録が見つかりません' }, { status: 404 });
-      }
-      
-      return NextResponse.json(
-        { error: 'データ取得中にエラーが発生しました', details: error }, 
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error('API: 予期しないエラー:', error);
-    return NextResponse.json({ error: '内部サーバーエラー' }, { status: 500 });
+    const authRes = await supabase.auth.getUser();
+    user = authRes.data.user;
+    authErr = authRes.error;
+  } catch (e) {
+    console.error('[minutes/get] auth_get_user:', e);
+    return NextResponse.json(
+      { error: 'auth_error', stage: 'auth_get_user' },
+      { status: 500 },
+    );
   }
+  if (authErr || !user) {
+    return NextResponse.json(
+      { error: 'unauthorized', stage: 'auth' },
+      { status: 401 },
+    );
+  }
+
+  /* -------- 2) プロファイル取得 & facility_id -------- */
+  const { data: profile, error: profileErr } = await supabase
+    .from('profiles')
+    .select('facility_id, role')
+    .eq('id', user.id)
+    .single();
+
+  if (profileErr || !profile?.facility_id) {
+    console.error('[minutes/get] profile_error:', profileErr);
+    return NextResponse.json(
+      { error: 'profile_error', stage: 'profile' },
+      { status: 403 },
+    );
+  }
+
+  /* -------- 3) 議事録取得（facility 所有チェック込み） -------- */
+  const { data: minute, error: getErr } = await supabase
+    .from('meeting_minutes')
+    .select(
+      `
+        *,
+        profiles!meeting_minutes_recorded_by_fkey ( fullname ),
+        meeting_types ( name )
+      `,
+    )
+    .eq('id', id)
+    .eq('facility_id', profile.facility_id)
+    .single();
+
+  if (getErr) {
+    console.error('[minutes/get] get_error:', getErr);
+    return NextResponse.json(
+      { error: 'not_found', stage: 'get' },
+      { status: 404 },
+    );
+  }
+
+  // レスポンスに権限情報を追加
+  return NextResponse.json({
+    ...minute,
+    canDelete: profile.role !== 'user', // 一般ユーザー以外は削除可能
+  }, { status: 200 });
 }
 
-// 特定の会議議事録を更新するAPI
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const id = await params.id;
-    
-    // Supabaseクライアントの初期化
-    const cookieStore = cookies();
-    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
-    
-    // 認証情報の確認
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError || !session) {
-      console.error('API: セッション取得エラー:', sessionError);
-      return NextResponse.json({ error: '認証セッションが無効です' }, { status: 401 });
-    }
-
-    // リクエストボディの解析
-    const body = await request.json();
-    
-    console.log(`API: 議事録ID ${id} を更新します:`, Object.keys(body));
-
-    // 更新するデータを準備
-    const updateData: Record<string, any> = {};
-    
-    // 許可されたフィールドのみ更新
-    const allowedFields = [
-      'title', 'meeting_date', 'attendees', 'content', 
-      'summary', 'keywords', 'is_transcribed', 'segments', 'speakers'
-    ];
-    
-    allowedFields.forEach(field => {
-      if (body[field] !== undefined) {
-        // JSONフィールドの処理（speakersとsegments）
-        if ((field === 'segments' || field === 'speakers') && body[field] !== null) {
-          updateData[field] = typeof body[field] === 'string' 
-            ? body[field] 
-            : JSON.stringify(body[field]);
-        } else {
-          updateData[field] = body[field];
-        }
-      }
-    });
-
-    // データが空の場合は更新しない
-    if (Object.keys(updateData).length === 0) {
-      return NextResponse.json({ error: '更新するデータがありません' }, { status: 400 });
-    }
-
-    // 更新を実行
-    const { data, error } = await supabase
-      .from('meeting_minutes')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      console.error(`API: 議事録ID ${id} の更新エラー:`, error);
-      return NextResponse.json(
-        { error: 'データ更新中にエラーが発生しました', details: error }, 
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error('API: 予期しないエラー:', error);
-    return NextResponse.json({ error: '内部サーバーエラー' }, { status: 500 });
-  }
-}
-
-// 特定の会議議事録を削除するAPI
 export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
+  req: NextRequest,
+  { params }: { params: { id: string } },
 ) {
+  const { id } = await params;
+  const supabase = await createClient();
+
+  /* -------- 1) 認証 -------- */
+  let user, authErr;
   try {
-    const id = await params.id;
-    
-    // Supabaseクライアントの初期化
-    const cookieStore = cookies();
-    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
-    
-    // 認証情報の確認
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError || !session) {
-      console.error('API: セッション取得エラー:', sessionError);
-      return NextResponse.json({ error: '認証セッションが無効です' }, { status: 401 });
-    }
-
-    console.log(`API: 議事録ID ${id} を削除します`);
-
-    // 削除を実行
-    const { error } = await supabase
-      .from('meeting_minutes')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error(`API: 議事録ID ${id} の削除エラー:`, error);
-      return NextResponse.json(
-        { error: 'データ削除中にエラーが発生しました', details: error }, 
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('API: 予期しないエラー:', error);
-    return NextResponse.json({ error: '内部サーバーエラー' }, { status: 500 });
+    const authRes = await supabase.auth.getUser();
+    user = authRes.data.user;
+    authErr = authRes.error;
+  } catch (e) {
+    console.error('[minutes/delete] auth_get_user:', e);
+    return NextResponse.json({ error: 'auth_error', stage: 'auth_get_user' }, { status: 500 });
   }
-} 
+  if (authErr || !user) {
+    return NextResponse.json({ error: 'unauthorized', stage: 'auth' }, { status: 401 });
+  }
+
+  /* -------- 2) プロファイル取得 & facility_id & 権限チェック -------- */
+  const { data: profile, error: profileErr } = await supabase
+    .from('profiles')
+    .select('facility_id, role')
+    .eq('id', user.id)
+    .single();
+
+  if (profileErr || !profile?.facility_id) {
+    console.error('[minutes/delete] profile_error:', profileErr);
+    return NextResponse.json({ error: 'profile_error', stage: 'profile' }, { status: 403 });
+  }
+
+  // 権限チェック：一般ユーザー以外のみ削除可能
+  if (profile.role === 'user') {
+    return NextResponse.json({ error: 'insufficient_permissions', message: '削除権限がありません' }, { status: 403 });
+  }
+
+  /* -------- 3) 議事録データ取得（音声ファイル削除のため） -------- */
+  const { data: minuteToDelete, error: getErr } = await supabase
+    .from('meeting_minutes')
+    .select('audio_file_path')
+    .eq('id', id)
+    .eq('facility_id', profile.facility_id)
+    .single();
+
+  if (getErr) {
+    console.error('[minutes/delete] get_error:', getErr);
+    return NextResponse.json({ error: 'not_found', stage: 'get' }, { status: 404 });
+  }
+
+  /* -------- 4) 音声ファイル削除 -------- */
+  if (minuteToDelete.audio_file_path) {
+    try {
+      const { error: storageErr } = await supabase.storage
+        .from('minutesaudio')
+        .remove([minuteToDelete.audio_file_path]);
+      
+      if (storageErr) {
+        console.warn('[minutes/delete] 音声ファイル削除エラー:', storageErr);
+        // 音声ファイル削除エラーでも処理続行
+      } else {
+        console.log('[minutes/delete] 音声ファイル削除完了:', minuteToDelete.audio_file_path);
+      }
+    } catch (e) {
+      console.warn('[minutes/delete] 音声ファイル削除例外:', e);
+    }
+  }
+
+  /* -------- 5) 議事録削除 -------- */
+  const { data: deleted, error: delErr } = await supabase
+    .from('meeting_minutes')
+    .delete()
+    .eq('id', id)
+    .eq('facility_id', profile.facility_id)
+    .select(); // 返却データで削除有無を確認
+
+  if (delErr) {
+    console.error('[minutes/delete] delete_error:', delErr);
+    return NextResponse.json({ error: 'delete_error', stage: 'delete' }, { status: 500 });
+  }
+
+  if (!deleted || deleted.length === 0) {
+    // 他施設 or 存在しない
+    return NextResponse.json({ error: 'not_found_or_forbidden', stage: 'delete' }, { status: 404 });
+  }
+
+  return NextResponse.json({ success: true });
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: { id: string } },
+) {
+  console.log('[PATCH] === 議事録更新API開始 ===', { 
+    url: req.url,
+    method: req.method,
+    headers: Object.fromEntries(req.headers.entries()),
+    params 
+  });
+  const { id } = await params;
+  console.log('[PATCH] 議事録ID:', id);
+  const supabase = await createClient();
+
+  /* -------- 1) 認証 -------- */
+  let user, authErr;
+  try {
+    const authRes = await supabase.auth.getUser();
+    user = authRes.data.user;
+    authErr = authRes.error;
+  } catch (e) {
+    console.error('[minutes/patch] auth_get_user:', e);
+    return NextResponse.json({ error: 'auth_error', stage: 'auth_get_user' }, { status: 500 });
+  }
+  if (authErr || !user) {
+    return NextResponse.json({ error: 'unauthorized', stage: 'auth' }, { status: 401 });
+  }
+
+  /* -------- 2) プロファイル取得 & facility_id -------- */
+  const { data: profile, error: profileErr } = await supabase
+    .from('profiles')
+    .select('facility_id, role')
+    .eq('id', user.id)
+    .single();
+
+  if (profileErr || !profile?.facility_id) {
+    console.error('[minutes/patch] profile_error:', profileErr);
+    return NextResponse.json({ error: 'profile_error', stage: 'profile' }, { status: 403 });
+  }
+
+  /* -------- 3) 現在の議事録データ取得（権限確認のため） -------- */
+  const { data: currentMinute, error: getErr } = await supabase
+    .from('meeting_minutes')
+    .select('recorded_by, is_confirmed')
+    .eq('id', id)
+    .eq('facility_id', profile.facility_id)
+    .single();
+
+  if (getErr) {
+    console.error('[minutes/patch] get_error:', getErr);
+    return NextResponse.json({ error: 'not_found', stage: 'get' }, { status: 404 });
+  }
+
+  // 権限チェック：作成者または管理者のみ編集可能
+  const canEdit = currentMinute.recorded_by === user.id || profile.role !== 'user';
+  if (!canEdit) {
+    return NextResponse.json({ 
+      error: 'insufficient_permissions', 
+      message: '編集権限がありません' 
+    }, { status: 403 });
+  }
+
+  // 確定済みの議事録は編集不可
+  if (currentMinute.is_confirmed) {
+    return NextResponse.json({ 
+      error: 'already_confirmed', 
+      message: '確定済みの議事録は編集できません' 
+    }, { status: 400 });
+  }
+
+  /* -------- 4) リクエストボディ取得 -------- */
+  let updateData;
+  try {
+    updateData = await req.json();
+  } catch (e) {
+    return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
+  }
+
+  /* -------- 5) 更新実行 -------- */
+  const { data: updated, error: updateErr } = await supabase
+    .from('meeting_minutes')
+    .update(updateData)
+    .eq('id', id)
+    .eq('facility_id', profile.facility_id)
+    .select()
+    .single();
+
+  if (updateErr) {
+    console.error('[minutes/patch] update_error:', updateErr);
+    return NextResponse.json({ error: 'update_error', details: updateErr }, { status: 500 });
+  }
+
+  return NextResponse.json(updated);
+}

@@ -1,19 +1,21 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { CheckCircle, Circle, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
+import { CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns';
 import { ja } from 'date-fns/locale';
-import { useToast } from '@/hooks/use-toast';
-import { useRouter } from 'next/navigation';
-import supabase from '@/lib/supabaseClient';
+import { useToast } from '@/components/ui/use-toast';
+import { useSupabase } from '@/components/SupabaseProvider';
+import { useAuth } from '@/contexts/AuthContext';
+import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import Link from 'next/link';
+// Link を削除 (Link from 'next/link';)
 import { AppHeader } from '@/components/ui/app-header';
+import { useRouter } from 'next/navigation';
 
 interface WeeklyStatus {
   weekStartDate: string;
@@ -50,9 +52,10 @@ export function WeeklyVerificationClient({
   const [comments, setComments] = useState('');
   const [hasAnomalies, setHasAnomalies] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<WeeklyStatus | null>(null);
-  const [userProfile, setUserProfile] = useState<any>(null);
   const { toast } = useToast();
   const router = useRouter();
+  const supabase = useSupabase();
+  const { user, profile } = useAuth();
 
   // 初期データの読み込み
   useEffect(() => {
@@ -60,17 +63,8 @@ export function WeeklyVerificationClient({
       setLoading(true);
       
       try {
-        // ユーザープロフィールの取得
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', userId)
-          .single();
-          
-        if (profileData) {
-          setUserProfile(profileData);
-          console.log("ユーザープロフィール:", profileData);
-        }
+        // AuthContextからプロフィールを使用（重複削除）
+        console.log("ユーザープロフィール:", profile);
         
         // 週のデータが指定されていない場合は現在の週を使用
         const currentWeekStart = weekStart 
@@ -198,7 +192,7 @@ export function WeeklyVerificationClient({
     };
     
     loadData();
-  }, [departmentId, facilityId, userId, weekStart, weekEnd, toast]);
+  }, [departmentId, facilityId, userId, weekStart, weekEnd, toast, supabase]); // supabase を依存配列に追加
   
   // 週の確認処理
   const handleVerifyWeek = async () => {
@@ -309,12 +303,7 @@ export function WeeklyVerificationClient({
   };
   
   if (loading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
-        <span className="ml-2 text-gray-500">データを読み込んでいます...</span>
-      </div>
-    );
+    return <LoadingSpinner message="データを読み込んでいます..." fullScreen />;
   }
   
   if (!verificationStatus) {
@@ -478,4 +467,4 @@ export function WeeklyVerificationClient({
       </div>
     </>
   );
-} 
+}

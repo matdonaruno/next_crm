@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { ja } from 'date-fns/locale';
 import { CalendarIcon, AlertCircle } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,7 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from '@/lib/utils';
-import supabase from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseBrowser';
 import { Calendar } from '@/components/ui/calendar';
 import { Separator } from '@/components/ui/separator';
 
@@ -69,7 +68,7 @@ export function IncidentLogForm({
   incidentId,
   onSuccess
 }: IncidentLogFormProps) {
-  const router = useRouter();
+  // const router = useRouter(); // router の初期化を削除
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const isAdmin = ['superuser', 'facility_admin', 'approver'].includes(userRole);
@@ -153,7 +152,12 @@ export function IncidentLogForm({
       if (!detectedTemperature || !thresholdMin || !thresholdMax || !responseTaken) {
         toast({
           title: "入力エラー",
-          description: "必須項目をすべて入力してください。",
+          description: (
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <AlertCircle className="mr-2 h-5 w-5 text-destructive" />
+              必須項目をすべて入力してください。
+            </div>
+          ),
           variant: "destructive",
         });
         setSubmitting(false);
@@ -168,7 +172,12 @@ export function IncidentLogForm({
       if (isNaN(tempDetected) || isNaN(tempMin) || isNaN(tempMax)) {
         toast({
           title: "入力エラー",
-          description: "温度は有効な数値で入力してください。",
+          description: (
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <AlertCircle className="mr-2 h-5 w-5 text-destructive" />
+              温度は有効な数値で入力してください。
+            </div>
+          ),
           variant: "destructive",
         });
         setSubmitting(false);
@@ -534,4 +543,4 @@ export function IncidentLogForm({
       </DialogContent>
     </Dialog>
   );
-} 
+}

@@ -1,347 +1,173 @@
-import { createClient } from '@/utils/supabase/server';
-import { cookies } from 'next/headers';
+// src/app/api/invitations/verify/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@/types/supabase';
+import { createServerClient } from '@/lib/supabase/server';
 
-// GET: 招待トークンの検証
-export async function GET(request: NextRequest) {
-  try {
-    const supabase = createClient(cookies());
-    
-    // URLからトークンを取得
-    const token = request.nextUrl.searchParams.get('token');
-    
-    if (!token) {
-      return NextResponse.json({ error: '招待トークンが必要です' }, { status: 400 });
-    }
-    
-    console.log('招待トークン検証:', token);
-    
-    // トークンの有効性を確認
-    const { data, error } = await supabase
-      .from('user_invitations')
-      .select('*, facilities(name), departments(name)')
-      .eq('invitation_token', token)
-      .eq('is_used', false)
-      .gt('expires_at', new Date().toISOString())
-      .single();
-    
-    console.log('検証結果:', { hasData: !!data, error });
-    
-    if (error || !data) {
-      return NextResponse.json({ 
-        error: '無効な招待トークンです。期限切れか、既に使用済みの可能性があります。' 
-      }, { status: 400 });
-    }
-    
-    // トークンが有効な場合、招待情報を返す
-    return NextResponse.json({
-      valid: true,
-      invitation: {
-        email: data.email,
-        role: data.role,
-        facility: data.facilities?.name,
-        department: data.departments?.name,
-        expires_at: data.expires_at,
-        facility_id: data.facility_id,
-        department_id: data.department_id
-      }
-    });
-    
-  } catch (error) {
-    console.error('招待トークン検証エラー:', error);
-    return NextResponse.json({ error: '招待トークンの検証中にエラーが発生しました' }, { status: 500 });
+const json = (body: unknown, status = 200) =>
+  NextResponse.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
+
+/* ----------------------------- GET ------------------------------ */
+export async function GET(req: NextRequest) {
+  const token = req.nextUrl.searchParams.get('token');
+  if (!token) return json({ error: '招待トークンが必要です' }, 400);
+
+  const supabase = await createServerClient();
+  const now = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from('user_invitations')
+    .select(`
+      id, email, role, facility_id, department_id,
+      expires_at, facilities(name), departments(name)
+    `)
+    .eq('invitation_token', token)
+    .eq('is_used', false)
+    .gt('expires_at', now)
+    .single();
+
+  if (error || !data) {
+    return json({ error: '無効、または期限切れの招待トークンです' }, 400);
   }
+
+  return json({
+    valid: true,
+    invitation: {
+      id: data.id,
+      email: data.email,
+      role: data.role,
+      facilityId: data.facility_id,
+      departmentId: data.department_id,
+      facilityName: data.facilities?.name ?? '',
+      departmentName: data.departments?.name ?? '',
+      expiresAt: data.expires_at,
+    },
+  });
 }
 
-// POST: 招待の受諾と新規ユーザー登録
-export async function POST(request: NextRequest) {
-  try {
-    const supabase = createClient(cookies());
-    const { token, password, fullName } = await request.json();
-    
-    if (!token || !password) {
-      return NextResponse.json({ error: 'トークンとパスワードは必須です' }, { status: 400 });
-    }
-    
-    console.log('受信したトークン:', token);
-    
-    // トークンの有効性を確認
-    const { data: invitation, error: invitationError } = await supabase
-      .from('user_invitations')
-      .select('*')
-      .eq('invitation_token', token)
-      .eq('is_used', false)
-      .gt('expires_at', new Date().toISOString())
-      .single();
-    
-    if (invitationError || !invitation) {
-      console.error('招待検証エラー:', invitationError);
-      return NextResponse.json({ 
-        error: '無効な招待トークンです。期限切れか、既に使用済みの可能性があります。' 
-      }, { status: 400 });
-    }
-    
-    // 既存のユーザーを確認（メールアドレスで検索）
-    const supabaseServiceRole = process.env.SUPABASE_SERVICE_ROLE;
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    
-    if (!supabaseServiceRole || !supabaseUrl) {
-      console.error('Supabase service role key missing');
-      return NextResponse.json({ 
-        error: 'サーバー設定が正しくありません。管理者に連絡してください。' 
-      }, { status: 500 });
-    }
-    
-    // サービスロールクライアントを作成
-    const supabaseAdmin = createSupabaseClient(
-      supabaseUrl,
-      supabaseServiceRole
-    );
-    
-    // 既存ユーザーを確認
-    let existingUser = null;
-    try {
-      const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers();
-      if (!error && users) {
-        existingUser = users.find(user => user.email === invitation.email);
-      }
-      if (existingUser) {
-        console.log('既存ユーザーを発見:', existingUser.id);
-      }
-    } catch (error) {
-      console.error('ユーザー検索エラー:', error);
-      // エラーの場合は新規ユーザーとして処理を続行
-    }
-    
-    let userId;
-    
-    if (existingUser) {
-      // 既存ユーザーの場合はパスワードを更新
-      console.log('既存ユーザーを更新:', existingUser.id);
-      try {
-        const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
-          existingUser.id,
-          { password }
-        );
-        
-        if (updateError) {
-          console.error('パスワード更新エラー:', updateError);
-          return NextResponse.json({ 
-            error: 'パスワードの更新に失敗しました', 
-            details: updateError 
-          }, { status: 500 });
-        }
-        
-        userId = existingUser.id;
-        
-        // 既存ユーザーのプロフィール情報を insert で試行
-        console.log('[Verify API] 既存ユーザーのプロフィール insert を試行します:', { userId, fullName });
-        const profileDataForInsert = {
-          id: userId,
-          fullname: fullName,
-          role: invitation.role,
-          facility_id: invitation.facility_id,
-          email: invitation.email,
-          is_active: true, // is_active も設定 (テーブル定義に合わせて)
-          created_at: new Date().toISOString()
-        };
-
-        try {
-          console.log('[Verify API] insert実行直前:', profileDataForInsert);
-          const { data: insertedProfile, error: profileInsertError } = await supabaseAdmin
-            .from('profiles')
-            .insert(profileDataForInsert)
-            .select(); // .select() で結果を取得
-
-          console.log('[Verify API] insert実行直後:', { insertedProfile, profileInsertError });
-
-          if (profileInsertError) {
-            console.error('[Verify API] プロフィールinsertエラー:', profileInsertError);
-            // ★ 一意性制約違反(23505)は、レコードが既に存在することを示す。他のエラーとは区別する。
-            if (profileInsertError.code === '23505') {
-              console.warn('[Verify API] プロフィールレコードは既に存在します。更新を試みます。');
-              // レコードが既に存在する場合は更新を試みる
-              const { data: updatedData, error: updateError } = await supabaseAdmin
-                .from('profiles')
-                .update({ 
-                    fullname: fullName, 
-                    role: invitation.role, 
-                    facility_id: invitation.facility_id 
-                    // updated_at はDBトリガーに任せる想定
-                }) 
-                .eq('id', userId)
-                .select();
-              if (updateError) {
-                 console.error('[Verify API] 既存プロファイルの更新エラー:', updateError);
-              } else {
-                 console.log('[Verify API] 既存プロファイルの更新完了:', updatedData);
-              }
-            } else {
-              // 23505以外のエラー
-              console.error('[Verify API] 予期せぬinsertエラーです。');
-            }
-            // エラーがあっても招待プロセスは続行させる場合が多いが、状況に応じてエラー応答を返すことも検討
-          } else {
-            console.log('[Verify API] プロフィールinsert成功、結果:', insertedProfile);
-          }
-        } catch (insertCatchError: any) {
-            console.error('[Verify API] プロフィールinsert処理中に予期せぬ例外が発生:', insertCatchError);
-            console.error('[Verify API] 例外詳細:', { message: insertCatchError.message, stack: insertCatchError.stack });
-        }
-
-      } catch (error) {
-        console.error('ユーザー更新処理エラー:', error);
-        return NextResponse.json({ 
-          error: 'ユーザー情報の更新中にエラーが発生しました',
-          details: error instanceof Error ? error.message : String(error)
-        }, { status: 500 });
-      }
-    } else {
-      // 新規ユーザー登録
-      try {
-        console.log('新規ユーザー登録を実行:', { email: invitation.email });
-        
-        // サービスロールを使用して管理者APIから直接ユーザーを作成
-        const { data: userData, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
-          email: invitation.email,
-          password: password,
-          email_confirm: true, // メール確認済みとしてマーク
-          user_metadata: {
-            full_name: fullName || invitation.email.split('@')[0],
-            role: invitation.role,
-            facility_id: invitation.facility_id,
-            invited_by: invitation.invited_by,
-            facility_name: invitation.facility_name
-          }
-        });
-        
-        if (createUserError || !userData.user) {
-          console.error('ユーザー登録エラー:', createUserError);
-          return NextResponse.json({ 
-            error: 'ユーザー登録に失敗しました', 
-            details: createUserError 
-          }, { status: 500 });
-        }
-        
-        userId = userData.user.id;
-        console.log('新規ユーザー登録が完了:', userId);
-        
-        // 新規ユーザーのプロフィール情報を明示的に更新
-        console.log('新規ユーザーのプロフィール情報を更新:', { userId, fullName });
-        const profileData = {
-          id: userId,
-          fullname: fullName,
-          role: invitation.role,
-          facility_id: invitation.facility_id,
-          email: invitation.email,
-          created_at: new Date().toISOString()
-        };
-
-        // まずはupsertを試す - 管理者権限でプロファイルを作成
-        const { data: upsertedNewProfile, error: upsertError } = await supabaseAdmin
-          .from('profiles')
-          .upsert(profileData)
-          .select();
-        
-        if (upsertError) {
-          console.warn('プロフィールupsertエラー、insertを試みます:', upsertError);
-          
-          // upsertに失敗した場合はinsertを試す - 管理者権限で
-          const { data: insertedNewProfile, error: insertError } = await supabaseAdmin
-            .from('profiles')
-            .insert(profileData)
-            .select();
-          
-          if (insertError) {
-            console.error('新規ユーザーのプロフィール挿入エラー:', insertError);
-            // プロフィール更新に失敗してもユーザー登録自体は成功とする
-          } else {
-            console.log('新規ユーザーのプロフィール挿入が完了、結果:', insertedNewProfile);
-          }
-        } else {
-          console.log('新規ユーザーのプロフィールupsertが完了、結果:', upsertedNewProfile);
-        }
-      } catch (error) {
-        console.error('ユーザー登録処理エラー:', error);
-        return NextResponse.json({ 
-          error: 'ユーザー登録処理中にエラーが発生しました',
-          details: error instanceof Error ? error.message : String(error)
-        }, { status: 500 });
-      }
-    }
-    
-    // 招待を使用済みにマーク
-    try {
-      const { error: updateError } = await supabase
-        .from('user_invitations')
-        .update({ 
-          is_used: true,
-          accepted_at: new Date().toISOString()
-        })
-        .eq('id', invitation.id);
-        
-      if (updateError) {
-        console.error('招待使用済み更新エラー:', updateError);
-        // 招待更新エラーはユーザー作成の成功に影響させない
-      }
-    } catch (error) {
-      console.error('招待更新エラー:', error);
-      // 招待更新エラーはユーザー作成の成功に影響させない
-    }
-    
-    // アクティビティログを記録
-    try {
-      await supabase.from('user_activity_logs').insert({
-        user_id: userId,
-        action_type: 'user_registration_completed',
-        action_details: { 
-          invitation_id: invitation.id,
-          email: invitation.email,
-          role: invitation.role,
-          is_existing_user: !!existingUser
-        },
-        performed_by: userId
-      });
-      
-      console.log('アクティビティログ記録完了');
-    } catch (logError) {
-      console.error('アクティビティログ記録エラー:', logError);
-      // ログ記録失敗はユーザー登録に影響しないように処理を続行
-    }
-    
-    // 招待した管理者に通知
-    try {
-      if (invitation.invited_by) {
-        await supabase.from('user_notifications').insert({
-          user_id: invitation.invited_by,
-          title: 'ユーザー登録完了',
-          message: `${fullName || invitation.email}さんが招待を受け入れ、アカウントを作成しました。`,
-          notification_type: 'user_registration',
-          related_data: {
-            user_id: userId,
-            email: invitation.email
-          }
-        });
-        
-        console.log('管理者通知記録完了');
-      }
-    } catch (notifyError) {
-      console.error('通知作成エラー:', notifyError);
-      // 通知失敗はユーザー登録に影響しないように処理を続行
-    }
-    
-    return NextResponse.json({ 
-      success: true, 
-      message: 'アカウント作成が完了しました。ログインしてください。',
-      isExistingUser: !!existingUser
-    });
-    
-  } catch (error) {
-    console.error('ユーザー登録エラー:', error);
-    return NextResponse.json({ 
-      error: 'ユーザー登録中にエラーが発生しました',
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
+/* ----------------------------- POST ----------------------------- */
+export async function POST(req: NextRequest) {
+  const { token, password, fullName, policyAgreed } = (await req.json()) as {
+    token?: string;
+    password?: string;
+    fullName?: string;
+    policyAgreed?: boolean;
+  };
+  if (!token || !password) {
+    return json({ error: 'token と password は必須です' }, 400);
   }
-} 
+
+  const supabase = await createServerClient();
+  const now = new Date().toISOString();
+
+  /* 1) 招待レコード */
+  const { data: invite, error: invErr } = await supabase
+    .from('user_invitations')
+    .select('*')
+    .eq('invitation_token', token)
+    .eq('is_used', false)
+    .gt('expires_at', now)
+    .single();
+
+  if (invErr || !invite) {
+    return json({ error: '無効、または期限切れの招待トークンです' }, 400);
+  }
+
+  /* 2) service_role クライアント */
+  const admin = createSupabaseClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  );
+
+  /* 3) 同施設+同メールの既存ユーザー */
+  const { data: existing } = await admin
+    .from('profiles')
+    .select('id, fullname')
+    .eq('facility_id', invite.facility_id)
+    .eq('email', invite.email)
+    .maybeSingle();
+
+  const isExisting = !!existing;
+  let userId: string;
+
+  if (isExisting && existing) {
+    userId = existing.id;
+    await admin.auth.admin.updateUserById(userId, { password });
+    await admin.from('profiles').upsert({
+      id: userId,
+      fullname: fullName ?? existing.fullname,
+      email: invite.email,
+      facility_id: invite.facility_id,
+      department_id: invite.department_id,
+      role: invite.role,
+      is_active: true,
+    });
+  } else {
+    const { data: signUp, error } = await admin.auth.admin.createUser({
+      email: invite.email,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        full_name: fullName ?? invite.email.split('@')[0],
+        role: invite.role,
+        facility_id: invite.facility_id,
+        department_id: invite.department_id,
+      },
+    });
+    if (error || !signUp?.user)
+      return json({ error: error?.message ?? 'ユーザー作成エラー' }, 500);
+
+    userId = signUp.user.id;
+    await admin.from('profiles').insert({
+      id: userId,
+      fullname: fullName ?? signUp.user.user_metadata.full_name,
+      email: invite.email,
+      facility_id: invite.facility_id,
+      department_id: invite.department_id,
+      role: invite.role,
+      is_active: true,
+    });
+  }
+
+  /* 同意記録 (任意失敗) */
+  if (policyAgreed) {
+    try {
+      await admin
+        .from('user_policy_consents' as any) // table is not in generated types
+        .insert(
+          [
+            {
+              user_id: userId,
+              policy_type: 'tos_privacy',
+              created_at: now,
+            },
+          ] as any,
+        );
+    } catch (e: any) {
+      console.error('[verify][policy] consent insert error:', { name: e.name, message: e.message });
+      // 同意保存の失敗は致命的ではないため続行
+    }
+  }
+
+  /* 4) 招待レコード更新 & ログ */
+  await admin.from('user_invitations')
+    .update({ is_used: true, used_at: now })
+    .eq('id', invite.id);
+
+  await admin.from('user_activity_logs').insert({
+    user_id: userId,
+    action_type: 'user_registration_completed',
+    action_details: {
+      invitation_id: invite.id,
+      email: invite.email,
+      role: invite.role,
+      is_existing_user: isExisting,
+    },
+    performed_by: userId,
+  });
+
+  return json(
+    { success: true, isExistingUser: isExisting, message: '登録完了。ログインしてください。' },
+    201,
+  );
+}

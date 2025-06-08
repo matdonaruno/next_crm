@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
-import supabase from "@/lib/supabaseClient";
+import { useSupabase } from '@/app/_providers/supabase-provider';
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -14,7 +14,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useForm } from "react-hook-form";
 import { Home } from "lucide-react";
-import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { getJstTimestamp } from "@/lib/utils";
 
 type ReagentItemFormValues = {
@@ -26,39 +25,41 @@ type ReagentItemFormValues = {
 interface Reagent {
   id: number;
   name: string;
-  department: string;
-  lotNo: string;
-  specification: string;
-  expirationDate: string;
-  registrationDate: string;
-  registeredBy: string;
-  used_at: string;
-  ended_at: string;
-  used: boolean;
-  facility_id: string;
+  department: string | null;
+  lotNo: string | null;
+  specification: string | null;
+  expirationDate: string | null;
+  registrationDate: string | null;
+  registeredBy: string | null;
+  used_at: string | null;
+  ended_at: string | null;
+  used: boolean | null;
+  facility_id: string | null;
 }
 
 interface ItemType {
   id: number;
   name: string;
-  usagestartdate: string;
-  user: string;
-  user_fullname?: string;
-  created_at: string;
-  facility_id: string;
+  usagestartdate: string | null;
+  user: string | null;
+  user_fullname?: string | null;
+  created_at: string | null;
+  facility_id: string | null;
 }
 
 export default function ReagentDetailPage() {
-    useRequireAuth();
+  const { supabase, session } = useSupabase();
   const router = useRouter();
   const params = useParams();
-  const reagentId = params?.id;
+  const idParam = params?.id;
+  if (!idParam || Array.isArray(idParam)) {
+    return <p>無効な試薬IDです。</p>;
+  }
+  const reagentId = Number(idParam);
   const [reagent, setReagent] = useState<Reagent | null>(null);
   const [items, setItems] = useState<ItemType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [currentUser, setCurrentUser] = useState<string>("");
-  const [currentUserId, setCurrentUserId] = useState<string>("");
   
   // 今日の日付をYYYY-MM-DD形式で取得
   const today = new Date().toISOString().split('T')[0];
@@ -75,20 +76,19 @@ export default function ReagentDetailPage() {
 
   const fetchReagent = useCallback(async () => {
     setLoading(true);
-    
-    // ユーザーの施設IDを取得
-    const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) {
+
+    if (!session?.user) {
       setError("ユーザー情報の取得に失敗しました");
       setLoading(false);
       return;
     }
+    const userId = session.user.id;
     
     // ユーザーのプロファイルから施設IDを取得
     const { data: profileData, error: profileError } = await supabase
       .from("profiles")
       .select("facility_id")
-      .eq("id", userData.user.id)
+      .eq("id", userId)
       .single();
       
     if (profileError || !profileData?.facility_id) {
@@ -109,23 +109,34 @@ export default function ReagentDetailPage() {
       setError(error.message);
       setLoading(false);
     } else {
-      setReagent(data);
+      setReagent({
+        ...data,
+        department: data.department ?? null,
+        lotNo: data.lotNo ?? null,
+        specification: data.specification ?? null,
+        expirationDate: data.expirationDate ?? null,
+        registrationDate: data.registrationDate ?? null,
+        registeredBy: data.registeredBy ?? null,
+        used_at: data.used_at ?? null,
+        ended_at: data.ended_at ?? null,
+        facility_id: data.facility_id ?? null,
+        used: data.used ?? null,
+      });
       setLoading(false);
     }
-  }, [reagentId]);
+  }, [reagentId, supabase, session]);
 
   const fetchItems = useCallback(async () => {
-    // ユーザーのプロファイルから施設IDを取得
-    const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) {
+    if (!session?.user) {
       console.error("ユーザー情報の取得に失敗しました");
       return;
     }
+    const userId = session.user.id;
     
     const { data: profileData, error: profileError } = await supabase
       .from("profiles")
       .select("facility_id")
-      .eq("id", userData.user.id)
+      .eq("id", userId)
       .single();
       
     if (profileError || !profileData?.facility_id) {
@@ -155,7 +166,10 @@ export default function ReagentDetailPage() {
           if (!profileError && profileData) {
             return {
               ...item,
-              user_fullname: profileData.fullname
+              usagestartdate: item.usagestartdate ?? null,
+              user: item.user ?? null,
+              facility_id: item.facility_id ?? null,
+              user_fullname: profileData.fullname ?? null,
             };
           }
         }
@@ -164,39 +178,7 @@ export default function ReagentDetailPage() {
       
       setItems(itemsWithUserInfo);
     }
-  }, [reagentId]);
-
-  // カレントユーザー情報を取得
-  useEffect(() => {
-    const fetchCurrentUser = async () => {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) {
-        setError("ユーザー情報の取得に失敗しました");
-        return;
-      }
-      
-      // ユーザーIDを保存
-      setCurrentUserId(userData.user.id);
-      
-      // プロフィール情報を取得
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("fullname")
-        .eq("id", userData.user.id)
-        .single();
-        
-      if (profileError) {
-        console.error("Error fetching profile:", profileError);
-        return;
-      }
-      
-      if (profileData) {
-        setCurrentUser(profileData.fullname);
-      }
-    };
-    
-    fetchCurrentUser();
-  }, []);
+  }, [reagentId, supabase, session]);
 
   useEffect(() => {
     if (reagentId) {
@@ -208,17 +190,16 @@ export default function ReagentDetailPage() {
   // 使用終了ボタン押下時の処理
   const handleUsageEnd = async () => {
     try {
-      // ユーザーの施設IDを取得
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) {
+      if (!session?.user) {
         setError("ユーザー情報の取得に失敗しました");
         return;
       }
+      const userId = session.user.id;
       
       const { data: profileData, error: profileError } = await supabase
         .from("profiles")
         .select("facility_id")
-        .eq("id", userData.user.id)
+        .eq("id", userId)
         .single();
         
       if (profileError || !profileData?.facility_id) {
@@ -231,7 +212,7 @@ export default function ReagentDetailPage() {
         .from("reagents")
         .update({
           ended_at: getJstTimestamp(),
-          ended_by: currentUserId,
+          ended_by: userId,
         })
         .eq("id", reagentId)
         .eq("facility_id", profileData.facility_id);
@@ -254,6 +235,11 @@ export default function ReagentDetailPage() {
         setError("試薬情報の取得に失敗しました");
         return;
       }
+      if (!session?.user) {
+        setError("ユーザー情報の取得に失敗しました");
+        return;
+      }
+      const userId = session.user.id;
       
       // 試薬アイテムの登録
       const { error } = await supabase.from("reagent_items").insert([
@@ -261,7 +247,7 @@ export default function ReagentDetailPage() {
           name: data.name,
           usagestartdate: data.usageStartDate,
           reagent_package_id: reagent.id,
-          user: currentUserId,
+          user: userId,
           facility_id: reagent.facility_id,
           created_at: getJstTimestamp() // 日本時間のタイムスタンプ
         },
@@ -321,7 +307,7 @@ export default function ReagentDetailPage() {
           </p>
           <p>
             <strong>登録日:</strong>{" "}
-            {new Date(reagent.registrationDate).toLocaleString()}
+            {reagent.registrationDate ? new Date(reagent.registrationDate).toLocaleString() : ""}
           </p>
           <p>
             <strong>登録者:</strong> {reagent.registeredBy}
@@ -369,8 +355,8 @@ export default function ReagentDetailPage() {
             </div>
             <div>
               <Label htmlFor="user">利用者</Label>
-              <p className="text-sm text-gray-600 mt-1">{currentUser}</p>
-              <input type="hidden" {...register("user")} value={currentUserId} />
+              <p className="text-sm text-gray-600 mt-1">{session?.user?.email || ''}</p>
+              <input type="hidden" {...register("user")} value={session?.user?.id || ''} />
             </div>
             <Button type="submit" className="w-full">
               アイテム追加
@@ -405,7 +391,7 @@ export default function ReagentDetailPage() {
                   </p>
                   <p>
                     <strong>登録日時:</strong>{" "}
-                    {new Date(item.created_at).toLocaleString()}
+                    {item.created_at ? new Date(item.created_at).toLocaleString() : ""}
                   </p>
                 </li>
               ))}

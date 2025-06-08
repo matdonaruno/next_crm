@@ -2,15 +2,29 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ThermometerSnowflake, Wrench, ChartLine, FlaskRound, AlertTriangle, FileText } from 'lucide-react';
+import {
+  ThermometerSnowflake,
+  Wrench,
+  ChartLine,
+  FlaskRound,
+  AlertTriangle,
+} from 'lucide-react';
 import { Card } from '@/components/ui/card';
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from '@/components/ui/tooltip';
 import { useState, useEffect, useCallback } from 'react';
 import { AppHeader } from '@/components/ui/app-header';
-import { supabase } from '@/lib/supabaseClient'; 
 import { useAuth } from '@/contexts/AuthContext';
+import type { Session, User } from '@supabase/supabase-js';
+import { useUserProfile } from '@/hooks/use-user-profile';
+import { useFacilityName } from '@/hooks/use-facility';
+import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 
-// 通知の型定義
+// --- 型定義 ---
 interface Notification {
   id: number;
   type: 'info' | 'warning' | 'error';
@@ -18,19 +32,26 @@ interface Notification {
   timestamp: Date;
 }
 
-// カスタムツールチップスタイル
-const tooltipContentClass = "bg-primary border-primary";
-const tooltipStyle = { backgroundColor: '#8167a9', color: 'white', border: '1px solid #8167a9' };
-const tooltipTextStyle = { color: 'white' };
+// AuthContextから取得されるuser型は既に適切に型付けされているため、削除
 
-const menuItems = [
+// メニューアイテム型
+interface MenuItem {
+  title: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  path: string;
+  color: string;
+  tooltip: string;
+}
+
+const menuItems: MenuItem[] = [
   {
     title: 'Temperature Records & Monitoring',
     description: 'Monitor and record temperature data',
     icon: ThermometerSnowflake,
     path: '/temperature',
     color: 'bg-dashboard-pink',
-    tooltip: '温度記録の管理'
+    tooltip: '温度記録の管理',
   },
   {
     title: 'Equipment Maintenance',
@@ -38,7 +59,7 @@ const menuItems = [
     icon: Wrench,
     path: '/equipment_dash',
     color: 'bg-dashboard-purple',
-    tooltip: '機器メンテナンス管理'
+    tooltip: '機器メンテナンス管理',
   },
   {
     title: 'Quality Control Management',
@@ -46,7 +67,7 @@ const menuItems = [
     icon: ChartLine,
     path: '/precision-management',
     color: 'bg-dashboard-pink',
-    tooltip: '品質管理プロセス'
+    tooltip: '品質管理プロセス',
   },
   {
     title: 'Clinical Reagent Management',
@@ -54,19 +75,25 @@ const menuItems = [
     icon: FlaskRound,
     path: '/reagent_dash',
     color: 'bg-dashboard-purple',
-    tooltip: '試薬在庫管理'
+    tooltip: '試薬在庫管理',
   },
 ];
 
 export default function TaskPickClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const departmentName = searchParams?.get('department') || 'Department';
-  const departmentId = searchParams?.get('departmentId') || '';
-  const { user, profile } = useAuth();
-  const [currentUserName, setCurrentUserName] = useState("");
-  const [facilityName, setFacilityName] = useState("");
-  // サンプル通知
+  
+  // searchParamsが初期化されるまで待つ
+  const [isReady, setIsReady] = useState(false);
+  
+  // AuthContextからセッション情報を取得
+  const { user, session, loading: authLoading } = useAuth();
+  
+  // fetch user profile and facility
+  const { profile, loading: profileLoading, error: profileError } = useUserProfile();
+  const { name: facilityName, loading: facilityLoading, error: facilityError } = useFacilityName(profile?.facility_id ?? '');
+
+  // サンプル通知 - 条件分岐の前に配置
   const [notifications] = useState<Notification[]>([
     {
       id: 1,
@@ -79,50 +106,53 @@ export default function TaskPickClient() {
       type: 'info',
       message: '新しい試薬が登録されました',
       timestamp: new Date(),
-    }
+    },
   ]);
 
-  // ユーザー情報と施設情報の取得
-  const fetchUserAndFacilityInfo = useCallback(async () => {
-    try {
-      // プロファイル情報からユーザー名を取得
-      if (profile?.fullname) {
-        setCurrentUserName(profile.fullname);
-      }
-      
-      // 施設情報を取得
-      if (profile?.facility_id) {
-        const { data: facilityData, error: facilityError } = await supabase
-          .from("facilities")
-          .select("name")
-          .eq("id", profile.facility_id)
-          .single();
-          
-        if (!facilityError && facilityData) {
-          setFacilityName(facilityData.name);
-        }
-      }
-    } catch (error) {
-      console.error("ユーザーおよび施設情報取得エラー:", error);
-    }
-  }, [profile]);
+  const departmentName = searchParams?.get('department') ?? '';
+  const departmentId = searchParams?.get('departmentId') ?? '';
 
-  // コンポーネントマウント時にユーザー情報と施設情報を取得
   useEffect(() => {
-    fetchUserAndFacilityInfo();
-  }, [fetchUserAndFacilityInfo]);
+    setIsReady(true);
+  }, []);
+
+  // 認証されていない場合はログインページにリダイレクト
+  useEffect(() => {
+    if (isReady && !authLoading && !profileLoading && !session) {
+      router.push('/login');
+    }
+  }, [isReady, authLoading, profileLoading, session, router]);
+
+  // プロファイルがロード中、またはプロファイルがロード済みで施設IDがある場合のみ施設名をロード
+  const shouldWaitForFacility = profileLoading || (profile?.facility_id && facilityLoading);
+  
+  // 初期化待ち
+  if (!isReady) {
+    return <LoadingSpinner message="初期化中..." fullScreen />;
+  }
+  
+  if (authLoading || !session || !user || profileLoading || shouldWaitForFacility) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-pink-100 to-purple-100">
+        <div className="text-center">
+          <LoadingSpinner message="データを読み込み中..." />
+          {profileError && <p className="text-red-500 mt-4">プロファイルの読み込みエラー: {profileError.message}</p>}
+          {facilityError && <p className="text-red-500 mt-4">施設情報の読み込みエラー: {facilityError.message}</p>}
+        </div>
+      </div>
+    );
+  }
 
   const handleCardClick = (path: string) => {
     router.push(
-      `${path}?department=${encodeURIComponent(departmentName)}&departmentId=${departmentId}`
+      `${path}?department=${encodeURIComponent(departmentName)}&departmentId=${encodeURIComponent(
+        departmentId
+      )}`
     );
   };
 
   return (
-    <TooltipProvider 
-      delayDuration={300}
-      skipDelayDuration={0}
-    >
+    <TooltipProvider delayDuration={300} skipDelayDuration={0}>
       <style jsx global>{`
         .tooltip-content {
           background-color: #8167a9 !important;
@@ -133,8 +163,8 @@ export default function TaskPickClient() {
           color: white !important;
         }
       `}</style>
+
       <div className="min-h-screen w-full flex flex-col bg-gradient-to-b from-[#fffafd] to-[#faf8fe]">
-        {/* 共通ヘッダーコンポーネントを使用 */}
         <AppHeader showBackButton={true} />
 
         {/* 通知欄 */}
@@ -147,11 +177,11 @@ export default function TaskPickClient() {
               </h3>
               <div className="max-h-40 overflow-y-auto">
                 <ul className="list-disc pl-5 text-left">
-                  {notifications.map((notification) => (
-                    <li key={`notification-${notification.id}`} className="text-sm text-yellow-700 mb-1">
-                      {notification.message}
+                  {notifications.map((n) => (
+                    <li key={n.id} className="text-sm text-yellow-700 mb-1">
+                      {n.message}
                       <span className="text-xs text-muted-foreground ml-2">
-                        {notification.timestamp.toLocaleString()}
+                        {n.timestamp.toLocaleString()}
                       </span>
                     </li>
                   ))}
@@ -161,23 +191,19 @@ export default function TaskPickClient() {
           </div>
         )}
 
-        {/* ユーザー情報表示 */}
+        {/* ユーザー情報 */}
         <div className="w-full px-4 py-2">
           <div className="text-right">
-            {facilityName && (
-              <p className="text-sm text-gray-600">
-                施設「{facilityName}」
-              </p>
+            {!!facilityName && (
+              <p className="text-sm text-gray-600">施設「{facilityName}」</p>
             )}
-            {currentUserName && (
-              <p className="text-sm text-gray-600">
-                {currentUserName}さんがログインしています！
-              </p>
+            {!!profile?.fullname && (
+              <p className="text-sm text-gray-600">{profile.fullname}さんがログインしています！</p>
             )}
           </div>
         </div>
 
-        {/* メインコンテンツ */}
+        {/* メイン */}
         <div className="flex-grow flex flex-col items-center justify-center py-12 px-4">
           <div className="max-w-7xl mx-auto">
             <div className="text-center mb-10">
@@ -188,8 +214,9 @@ export default function TaskPickClient() {
                 Labo Logbook{' '}
                 <span
                   style={{
-                    color: '#ffffff',
-                    textShadow: '-1px -1px 0 #666, 1px -1px 0 #666, -1px 1px 0 #666, 1px 1px 0 #666',
+                    color: '#fff',
+                    textShadow:
+                      '-1px -1px 0 #666, 1px -1px 0 #666, -1px 1px 0 #666, 1px 1px 0 #666',
                   }}
                 >
                   Dashboard
@@ -207,28 +234,25 @@ export default function TaskPickClient() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {menuItems.map((item, index) => (
+              {menuItems.map((item, idx) => (
                 <Tooltip key={item.title}>
                   <TooltipTrigger asChild>
                     <motion.div
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.1 }}
+                      transition={{ delay: idx * 0.1 }}
                       onClick={() => handleCardClick(item.path)}
                       className="cursor-pointer"
                     >
                       <Card
                         className={`relative overflow-hidden group cursor-pointer transition-all duration-300 hover:shadow-lg ${item.color} hover:bg-dashboard-hover`}
                       >
-                        {/* --- SVG 波形 --- */}
                         <div className="absolute left-0 w-full pointer-events-none z-0 top-auto bottom-0 h-15">
                           <svg
                             className="waves w-full h-auto"
                             xmlns="http://www.w3.org/2000/svg"
-                            xmlnsXlink="http://www.w3.org/1999/xlink"
                             viewBox="0 24 150 28"
                             preserveAspectRatio="none"
-                            shapeRendering="auto"
                           >
                             <defs>
                               <path
@@ -265,7 +289,6 @@ export default function TaskPickClient() {
                             </g>
                           </svg>
                         </div>
-                        {/* --- /SVG 波形 --- */}
 
                         <div className="p-6 flex flex-col items-center text-center gap-4 relative z-10">
                           <div className="relative">
@@ -285,8 +308,8 @@ export default function TaskPickClient() {
                       </Card>
                     </motion.div>
                   </TooltipTrigger>
-                  <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
-                    <p style={tooltipTextStyle}>{item.tooltip}</p>
+                  <TooltipContent className="tooltip-content">
+                    <p>{item.tooltip}</p>
                   </TooltipContent>
                 </Tooltip>
               ))}

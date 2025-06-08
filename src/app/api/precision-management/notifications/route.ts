@@ -1,143 +1,179 @@
+// src/app/api/precision-management/notifications/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
-import { cookies } from 'next/headers';
+import { createServerClient } from '@/lib/supabase/server';
 import { format, subDays } from 'date-fns';
 
-// 未入力の部署と機器を検出し通知を送信するAPIエンドポイント
-export async function GET(request: NextRequest) {
+interface SlackConfig {
+  webhook_url: string;
+}
+
+/* ============================  GET  ============================== */
+/* 未入力の「昨日の記録」を所属施設別に返す */
+export async function GET() {
   try {
-    const cookieStore = cookies();
-    const supabase = await createClient(cookieStore);
-    
-    // 1. 全ての部署と機器の組み合わせを取得
-    const { data: departments, error: deptError } = await supabase.from('departments').select('*');
-    
-    if (deptError) {
-      throw new Error(`部署情報の取得に失敗しました: ${deptError.message}`);
-    }
-    
-    // 各部署の機器情報を取得
-    const departmentEquipments = [];
+    const supa = await createServerClient();
+
+    /* 1) 認証 & プロフィール */
+    const {
+      data: { user },
+    } = await supa.auth.getUser();
+    if (!user) return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
+
+    const { data: profile } = await supa
+      .from('profiles')
+      .select('facility_id')
+      .eq('id', user.id)
+      .single();
+    const facilityId = profile?.facility_id;
+    if (!facilityId)
+      return NextResponse.json({ error: '施設が未設定です' }, { status: 400 });
+
+    /* 2) 施設内の部署一覧 */
+    const { data: departments, error: deptErr } = await supa
+      .from('departments')
+      .select('id,name')
+      .eq('facility_id', facilityId);
+    if (deptErr) throw deptErr;
+
+    /* 3) アクティブ機器を一括取得 */
+    const deptIds = departments.map(d => d.id);
+    const { data: equipments, error: equipErr } = await supa
+      .from('precision_management_equipments')
+      .select('department_id,pm_equipment_id,equipment_name')
+      .in('department_id', deptIds)
+      .eq('is_active', true);
+    if (equipErr) throw equipErr;
+
+    /* 4) 昨日の日付 */
+    const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+
+    /* 5) 未入力抽出 */
+    const missing: {
+      department_id: string;
+      department_name: string;
+      equipment_id: number;
+      equipment_name: string;
+    }[] = [];
+
     for (const dept of departments) {
-      const { data: equipments, error: equipError } = await supabase
-        .from('precision_management_equipments')
-        .select('*')
-        .eq('department_id', dept.id)
-        .eq('is_active', true);
-      
-      if (equipError) {
-        console.error(`${dept.name}の機器情報取得エラー: ${equipError.message}`);
-        continue;
-      }
-      
-      departmentEquipments.push({
-        department: dept,
-        equipments: equipments || []
-      });
-    }
-    
-    // 2. 昨日の日付を取得
-    const yesterday = subDays(new Date(), 1);
-    const yesterdayStr = format(yesterday, 'yyyy-MM-dd');
-    
-    // 3. 昨日の記録が未入力の部署と機器を特定
-    const missingRecords = [];
-    
-    for (const deptEquip of departmentEquipments) {
-      const { department, equipments } = deptEquip;
-      
-      for (const equipment of equipments) {
-        // 特定の機器の昨日の記録を確認
-        const { data: records, error: recordError } = await supabase
+      const deptEquips = equipments.filter(e => e.department_id === dept.id);
+      for (const eq of deptEquips) {
+        const { data: recs } = await supa
           .from('precision_management_records')
-          .select('*')
-          .eq('department_id', department.id)
-          .eq('pm_equipment_id', equipment.pm_equipment_id)
-          .eq('implementation_date', yesterdayStr);
-        
-        if (recordError) {
-          console.error(`記録取得エラー: ${recordError.message}`);
-          continue;
-        }
-        
-        // 記録が存在しない場合は未入力として記録
-        if (!records || records.length === 0) {
-          missingRecords.push({
-            department_id: department.id,
-            department_name: department.name,
-            equipment_id: equipment.pm_equipment_id,
-            equipment_name: equipment.equipment_name,
-            date: yesterdayStr
+          .select('record_id')
+          .eq('department_id', dept.id)
+          .eq('pm_equipment_id', eq.pm_equipment_id as any)
+          .eq('implementation_date', yesterday)
+          .limit(1);
+
+        if (!recs || recs.length === 0) {
+          missing.push({
+            department_id: dept.id,
+            department_name: dept.name,
+            equipment_id: eq.pm_equipment_id,
+            equipment_name: eq.equipment_name,
           });
         }
       }
     }
-    
-    // 4. 通知データを返す
+
     return NextResponse.json({
-      date: yesterdayStr,
-      missing_records: missingRecords,
-      total_missing: missingRecords.length
+      date: yesterday,
+      missing_records: missing,
+      total_missing: missing.length,
     });
-    
-  } catch (error) {
-    console.error('通知生成エラー:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : '通知の生成に失敗しました' },
-      { status: 500 }
-    );
+  } catch (e: any) {
+    console.error('[notifications][GET] error:', e);
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
 
-// 通知送信用のPOSTエンドポイント（例：Slackやメールに通知を送信）
-export async function POST(request: NextRequest) {
+/* ============================  POST ============================== */
+/* Slack へ通知して notification_logs に記録 */
+export async function POST(req: NextRequest) {
   try {
-    console.log('API: 通知送信リクエスト開始');
-    const body = await request.json();
-    
-    // Slackのwebhook URLを取得
-    const cookieStore = cookies();
-    const supabase = await createClient(cookieStore);
-    
-    const { data: configData, error: configError } = await supabase.from('system_configurations').select('*').eq('key', 'slack_webhook_url').single();
-    
-    if (configError || !configData) {
-      console.error('API: Slack Webhook URL取得エラー:', configError);
-      return NextResponse.json({ error: 'Slack Webhook URLが設定されていません' }, { status: 500 });
+    const { facility_id, notifications, notification_type = 'missing_records' } =
+      await req.json();
+
+    if (
+      !facility_id ||
+      !Array.isArray(notifications) ||
+      !notifications.every((n: any) => n?.department_name && n?.equipment_name)
+    ) {
+      return NextResponse.json(
+        { error: 'invalid payload' },
+        { status: 400 },
+      );
     }
-    
-    const webhookUrl = configData.value;
-    
-    const { notifications, notification_type } = body;
-    
-    // ここで実際の通知送信処理を実装
-    // 例: Slack通知、メール送信など
-    
-    // この例では、通知が送信されたことを記録するだけ
-    const { data, error } = await supabase
+
+    const supa = await createServerClient();
+
+    /* 認証 */
+    const {
+      data: { user },
+    } = await supa.auth.getUser();
+    if (!user) return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
+
+    /* Slack 設定取得 */
+    const { data: cfg } = await supa
+      .from('facility_notifications')
+      .select('config')
+      .eq('facility_id', facility_id)
+      .eq('notification_channel', 'slack')
+      .single();
+    const webhookUrl = (cfg?.config as Partial<SlackConfig>)?.webhook_url;
+    if (!webhookUrl)
+      return NextResponse.json(
+        { error: 'Slack Webhook 未設定です' },
+        { status: 404 },
+      );
+
+    /* Slack 投稿 */
+    let status: 'sent' | 'failed' = 'sent';
+    let error_message: string | null = null;
+
+    try {
+      const resp = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text:
+            `*${notification_type}* (${format(new Date(), 'yyyy-MM-dd')})\n` +
+            notifications
+              .map((r: any) => `• ${r.department_name} / ${r.equipment_name}`)
+              .join('\n'),
+        }),
+      });
+      if (!resp.ok) throw new Error(`Slack API ${resp.statusText}`);
+    } catch (err: any) {
+      status = 'failed';
+      error_message = err.message;
+      console.error('[notifications][POST] Slack error:', err);
+    }
+
+    /* ログ保存 */
+    const { data: log } = await supa
       .from('notification_logs')
       .insert({
-        notification_type: notification_type || 'missing_records',
-        content: JSON.stringify(notifications),
-        sent_at: new Date().toISOString()
+        facility_id,
+        user_notification_id: null,
+        notification_type,
+        payload: { notifications },
+        status,
+        error_message,
+        sent_at: new Date().toISOString(),
       })
-      .select();
-    
-    if (error) {
-      throw new Error(`通知ログの保存に失敗しました: ${error.message}`);
-    }
-    
+      .select('id')
+      .single();
+
     return NextResponse.json({
-      success: true,
-      message: '通知が送信されました',
-      log_id: data[0].id
+      success: status === 'sent',
+      status,
+      log_id: log?.id ?? null,
+      error: error_message,
     });
-    
-  } catch (error) {
-    console.error('通知送信エラー:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : '通知の送信に失敗しました' },
-      { status: 500 }
-    );
+  } catch (e: any) {
+    console.error('[notifications][POST] error:', e);
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
-} 
+}

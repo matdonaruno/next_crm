@@ -1,4 +1,4 @@
-'use client';
+// src/app/admin/users/invite/page.tsx
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import UserInvite from '@/components/UserInvite';

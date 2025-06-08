@@ -1,73 +1,36 @@
-export interface MeetingType {
-  id: string;
-  name: string;
-  description?: string;
-  facility_id: string;
-  created_at: string;
-  updated_at: string;
-}
+// src/types/meeting-minutes.ts
+// ───────────────────────────────────────────────────────────
+// Meeting-minutes ドメインに関する共通型を “１か所” に集約
+// ───────────────────────────────────────────────────────────
+import type { Database } from './supabase';
 
-export interface MeetingMinute {
-  id: string;
-  meeting_type_id: string;
-  title: string;
-  meeting_date: string;
-  recorded_by: string;
-  recorded_by_name?: string;
-  recorded_by_email?: string;
-  creator_info?: string;  // JSON文字列
-  facility_id: string;
-  department_id?: string;
-  attendees: string[];
-  content?: string;
-  summary?: string;
-  audio_file_path?: string;
-  is_transcribed: boolean;
-  transcription_status?: 'waiting' | 'processing' | 'completed' | 'failed';  // 文字起こし状態
-  keywords: string[];
-  created_at: string;
-  updated_at: string;
-  segments?: string | any;  // JSON文字列またはオブジェクト
-  speakers?: string | any;  // JSON文字列またはオブジェクト
-  meeting_types?: {
-    id: string;
-    name: string;
-  };
-  transcription?: string;
-  audio_url?: string;
-}
+/* ---------- Supabase 自動生成 Row 型 ---------- */
+export type Profile          = Database['public']['Tables']['profiles']['Row'];
+export type MeetingTypeRow   = Database['public']['Tables']['meeting_types']['Row'];
+export type MeetingMinuteRow = Database['public']['Tables']['meeting_minutes']['Row'];
 
+/* ---------- フォーム入力用 型 ---------- */
 export interface MeetingMinuteFormData {
-  meeting_type_id: string;
+  /** 議事録タイトル（空なら自動生成） */
   title: string;
+  /** 会議タイプ ID（任意） */
+  meeting_type_id: string | null;
+  /** 日時 ISO-8601（例: 2025-05-20T14:00） */
   meeting_date: string;
-  department_id?: string;
-  attendees: string[];
-  content?: string;
+  /** 参加者カンマ区切り文字列 */
+  attendees: string;
 }
 
-export interface AudioRecordingData {
-  audioBlob: Blob;
-  duration: number;
-  filename: string;
-}
-
-export interface TranscriptionResult {
-  text: string;
-  summary?: string;
-  keywords?: string[];
-}
-
-export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
-
+/**
+ * 会議録検索結果用の型
+ */
 export interface SearchResult {
-  id: string;
-  title: string;
-  meeting_date: string;
-  meeting_type: string;
-  relevance: number;
+  /** 議事録ID */
+  id: MeetingMinuteRow['id'];
+  /** 議事録タイトル */
+  title: MeetingMinuteRow['title'];
+  /** 会議日時 */
+  meeting_date: MeetingMinuteRow['meeting_date'];
+  /** 検索結果のスニペット */
   snippet: string;
-} 
+}

@@ -1,7 +1,8 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+// src/app/api/meeting-minutes/search/route.ts
+import { createServerClient } from '@supabase/ssr';
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import OpenAI from 'openai';
+import type { Database } from '@/types/supabase';
 
 // OpenAI クライアントの初期化
 const openai = new OpenAI({
@@ -24,12 +25,9 @@ async function createEmbedding(text: string): Promise<number[]> {
 
 export async function POST(request: NextRequest) {
   try {
-    // 認証チェック
+    // 認証チェック（クッキーベースの認証を使用するため、Authorizationヘッダーは任意）
     const authHeader = request.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.error('API: 認証ヘッダーがありません');
-      return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
-    }
+    console.log('API: Authorization header:', authHeader ? 'present' : 'missing');
 
     // リクエストボディを取得
     const body = await request.json();
@@ -44,18 +42,42 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '施設IDが必要です' }, { status: 400 });
     }
 
-    // クエリのベクトル埋め込みを生成
-    console.log('クエリからベクトル埋め込みを生成:', query);
-    const embedding = await createEmbedding(query);
+    // OpenAI APIキーの確認
+    const hasOpenAIKey = !!process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'dummy';
+
+    let embedding: number[] | null = null;
+    if (hasOpenAIKey) {
+      try {
+        // クエリのベクトル埋め込みを生成
+        embedding = await createEmbedding(query);
+      } catch (error) {
+        console.error('埋め込み生成に失敗しました:', error);
+        // フォールバックとしてテキスト検索を使用
+      }
+    }
 
     // Supabaseクライアントの初期化
-    const cookieStore = cookies();
-    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+    const supabase = createServerClient<Database>(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll().map(c => ({
+              name: c.name,
+              value: c.value,
+              options: {},
+            }))
+          },
+          setAll() {},
+        },
+      },
+    );
     
     // 認証情報の確認
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError || !session) {
-      console.error('API: セッション取得エラー:', sessionError);
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      console.error('API: 認証エラー:', authError);
       return NextResponse.json({ error: '認証セッションが無効です' }, { status: 401 });
     }
     
@@ -63,7 +85,7 @@ export async function POST(request: NextRequest) {
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
       .select('facility_id')
-      .eq('id', session.user.id)
+      .eq('id', user.id)
       .single();
       
     if (profileError || !profileData?.facility_id) {
@@ -81,11 +103,6 @@ export async function POST(request: NextRequest) {
     }
 
     // 会議議事録データを取得
-    // 注意: 実際のSemantic Searchを行うためには、以下のいずれかが必要:
-    // 1. Supabaseのpgvectorエクステンションを有効にし、テーブルにベクトル列を追加
-    // 2. または、代替としてすべての議事録を取得し、JavaScriptでコサイン類似度を計算
-    
-    console.log('会議議事録データを取得 - 施設ID:', facilityId);
     const { data: meetingMinutes, error: dataError } = await supabase
       .from('meeting_minutes')
       .select(`
@@ -110,48 +127,112 @@ export async function POST(request: NextRequest) {
     if (!meetingMinutes || meetingMinutes.length === 0) {
       return NextResponse.json({ results: [] });
     }
-
-    // 各議事録の関連スコアを計算（実際のベクトル検索をシミュレート）
-    console.log(`${meetingMinutes.length}件の議事録から関連性を計算`);
     
-    // 各議事録について、コンテンツのベクトル埋め込みを作成して類似度を計算
-    // 注: 実際の実装では大量のAPIコールを避けるため、ベクトルは事前に保存すべき
-    const resultPromises = meetingMinutes.map(async (minute) => {
-      // 検索対象テキストを作成（タイトル、内容、要約を結合）
-      const searchText = `タイトル: ${minute.title}
-内容: ${minute.content || ''}
-要約: ${minute.summary || ''}
-キーワード: ${minute.keywords ? minute.keywords.join(', ') : ''}`;
-
+    let results;
+    
+    if (embedding && meetingMinutes.length > 0) {
+      // ベクトル検索を使用
       try {
-        // テキストの埋め込みを作成
-        const contentEmbedding = await createEmbedding(searchText);
-        
-        // コサイン類似度を計算
-        const similarity = calculateCosineSimilarity(embedding, contentEmbedding);
-        
-        // スニペットを作成（最大150文字）
-        const snippet = createSnippet(searchText, query, 150);
-        
-        return {
-          id: minute.id,
-          title: minute.title,
-          meeting_date: minute.meeting_date,
-          meeting_type: minute.meeting_types?.[0]?.name || '',
-          relevance: similarity,
-          snippet
-        };
-      } catch (error) {
-        console.error(`ID: ${minute.id}の議事録の埋め込み作成エラー:`, error);
-        return null;
-      }
-    });
+        const resultPromises = meetingMinutes.map(async (minute) => {
+          // 検索対象テキストを作成（タイトル、内容、要約を結合）
+          const searchText = `${minute.title} ${minute.content || ''} ${minute.summary || ''}`.trim();
+          
+          if (!searchText) {
+            return null;
+          }
 
-    // 並行処理の結果を待機
-    const results = (await Promise.all(resultPromises))
-      .filter(Boolean) // nullを除外
-      .sort((a, b) => b!.relevance - a!.relevance) // 類似度でソート
-      .slice(0, 5); // 上位5件のみ返す
+          try {
+            // テキストの埋め込みを作成
+            const contentEmbedding = await createEmbedding(searchText);
+            
+            // コサイン類似度を計算
+            const similarity = calculateCosineSimilarity(embedding, contentEmbedding);
+            
+            // 類似度が低すぎる場合は除外
+            if (similarity < 0.1) {
+              return null;
+            }
+            
+            // スニペットを作成（最大150文字）
+            const snippet = createSnippet(searchText, query, 150);
+            
+            return {
+              id: minute.id,
+              title: minute.title,
+              meeting_date: minute.meeting_date,
+              meeting_type: minute.meeting_types?.name || '',
+              relevance: similarity,
+              snippet
+            };
+          } catch (error) {
+            console.error(`ID: ${minute.id}の議事録の埋め込み作成エラー:`, error);
+            return null;
+          }
+        });
+        
+        // 並行処理の結果を待機
+        const vectorResults = (await Promise.all(resultPromises))
+          .filter(Boolean) // nullを除外
+          .sort((a, b) => b!.relevance - a!.relevance) // 類似度でソート
+          .slice(0, 5); // 上位5件のみ返す
+          
+        if (vectorResults.length > 0) {
+          results = vectorResults;
+        }
+      } catch (error) {
+        console.error('ベクトル検索でエラーが発生:', error);
+      }
+    }
+    
+    // ベクトル検索で結果が得られなかった場合、テキスト検索にフォールバック
+    if (!results || results.length === 0) {
+      // シンプルなテキスト検索を使用
+      const searchTerms = query.toLowerCase().split(/\s+/).filter(term => term.length > 0);
+      
+      results = meetingMinutes
+        .map((minute) => {
+          const searchText = `${minute.title} ${minute.content || ''} ${minute.summary || ''} ${minute.keywords?.join(' ') || ''}`.toLowerCase();
+          
+          let relevance = 0;
+          let matchCount = 0;
+          
+          for (const term of searchTerms) {
+            if (searchText.includes(term)) {
+              matchCount++;
+              // タイトルにマッチした場合は高いスコア
+              if (minute.title?.toLowerCase().includes(term)) {
+                relevance += 0.5;
+              }
+              // 内容やサマリーにマッチした場合は通常のスコア
+              if ((minute.content || '').toLowerCase().includes(term) || 
+                  (minute.summary || '').toLowerCase().includes(term)) {
+                relevance += 0.3;
+              }
+            }
+          }
+          
+          // マッチした検索語の割合も考慮
+          relevance = relevance * (matchCount / searchTerms.length);
+          
+          const snippet = createSnippet(
+            `タイトル: ${minute.title}\n内容: ${minute.content || ''}\n要約: ${minute.summary || ''}`,
+            query,
+            150
+          );
+          
+          return {
+            id: minute.id,
+            title: minute.title,
+            meeting_date: minute.meeting_date,
+            meeting_type: minute.meeting_types?.[0]?.name || '',
+            relevance,
+            snippet
+          };
+        })
+        .filter(result => result.relevance > 0)
+        .sort((a, b) => b.relevance - a.relevance)
+        .slice(0, 5);
+    }
 
     return NextResponse.json({ results });
   } catch (error) {
@@ -225,4 +306,4 @@ function createSnippet(text: string, query: string, maxLength: number = 150): st
   }
   
   return snippet;
-} 
+}

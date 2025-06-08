@@ -1,3 +1,4 @@
+// src/app/admin/cache-management/page.tsx
 'use client';
 
 import React, { useState } from 'react';
@@ -17,19 +18,20 @@ export default function CacheManagementPage() {
   const [clearingAll, setClearingAll] = useState(false);
 
   // 施設キャッシュをクリア
-  const handleClearFacilityCache = () => {
+  const handleClearFacilityCache = async () => {
     setClearingFacility(true);
     try {
-      clearFacilityCache();
+      await clearFacilityCache();
       toast({
         title: '施設キャッシュをクリアしました',
         description: '次回のページ読み込み時に最新の施設情報が取得されます',
         variant: 'default',
       });
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'エラー',
-        description: '施設キャッシュのクリアに失敗しました',
+        description: `施設キャッシュのクリアに失敗しました: ${err.message ?? 'Unknown error'}`,
         variant: 'destructive',
       });
     } finally {
@@ -38,19 +40,20 @@ export default function CacheManagementPage() {
   };
 
   // ユーザープロファイルキャッシュをクリア
-  const handleClearUserCache = () => {
+  const handleClearUserCache = async () => {
     setClearingUser(true);
     try {
-      clearUserProfileCache();
+      await clearUserProfileCache();
       toast({
         title: 'ユーザーキャッシュをクリアしました',
         description: '次回のページ読み込み時に最新のユーザー情報が取得されます',
         variant: 'default',
       });
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'エラー',
-        description: 'ユーザーキャッシュのクリアに失敗しました',
+        description: `ユーザーキャッシュのクリアに失敗しました: ${err.message ?? 'Unknown error'}`,
         variant: 'destructive',
       });
     } finally {
@@ -59,24 +62,26 @@ export default function CacheManagementPage() {
   };
 
   // すべてのキャッシュをクリア
-  const handleClearAllCache = () => {
+  const handleClearAllCache = async () => {
     setClearingAll(true);
     try {
-      clearFacilityCache();
-      clearUserProfileCache();
-      
-      // その他のキャッシュもクリア（必要に応じて追加）
+      await Promise.all([
+        clearFacilityCache(),
+        clearUserProfileCache(),
+      ]);
+      // その他のローカルキャッシュキーがあればここに追加
       localStorage.removeItem('facilityCache');
-      
+
       toast({
         title: 'すべてのキャッシュをクリアしました',
         description: '次回のページ読み込み時に最新の情報が取得されます',
         variant: 'default',
       });
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as Error;
       toast({
         title: 'エラー',
-        description: 'キャッシュのクリアに失敗しました',
+        description: `キャッシュのクリアに失敗しました: ${err.message ?? 'Unknown error'}`,
         variant: 'destructive',
       });
     } finally {
@@ -86,7 +91,7 @@ export default function CacheManagementPage() {
 
   // ページをリロード
   const handleReloadPage = () => {
-    window.location.reload();
+    router.refresh(); // Next.js App Router でのクライアントリフレッシュ
   };
 
   return (
@@ -247,4 +252,4 @@ export default function CacheManagementPage() {
       </div>
     </div>
   );
-} 
+}

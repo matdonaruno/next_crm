@@ -1,42 +1,45 @@
+// src/app/api/minutesaudio/[fileName]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
-import { Database } from '@/types/supabase';
+import { createServerClient } from '@/lib/supabase/server';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(
-  request: NextRequest,
-  { params }: { params: { fileName: string } }
+  _req: NextRequest,
+  { params }: { params: { fileName: string } },
 ) {
-  console.log('音声ファイル取得APIを実行 (minutesaudio):', params.fileName);
-  
   try {
-    const supabase = createRouteHandlerClient<Database>({ cookies });
-    
-    const fileName = decodeURIComponent(params.fileName);
-    console.log(`音声ファイル取得リクエスト: ${fileName}`);
-    
-    // 音声ファイルのダウンロード
+    const supabase = await createServerClient();
+    const { fileName } = await params;
+    const decoded = decodeURIComponent(fileName);
+    // basic path traversal prevention
+    if (!decoded || decoded.includes('..') || decoded.startsWith('/')) {
+      return new NextResponse('Invalid file name', { status: 400 });
+    }
+    // simple MIME detection
+    const mime =
+      decoded.endsWith('.wav')
+        ? 'audio/wav'
+        : decoded.endsWith('.ogg')
+        ? 'audio/ogg'
+        : 'audio/mpeg';
+
     const { data, error } = await supabase.storage
       .from('minutesaudio')
-      .download(fileName);
-    
+      .download(decoded);
+
     if (error || !data) {
-      console.error('音声ファイル取得エラー:', error);
-      return new NextResponse('ファイルが見つかりませんでした', { status: 404 });
+      console.error('[minutesaudio][download] not found:', decoded, error);
+      return new NextResponse('File not found', { status: 404 });
     }
-    
-    // レスポンスヘッダーの設定
+
     const headers = new Headers();
-    headers.set('Content-Type', 'audio/mpeg');
+    headers.set('Content-Type', mime);
     headers.set('Cache-Control', 'public, max-age=3600');
-    
-    // ストリームとしてファイルを返す
-    return new NextResponse(data, {
-      headers,
-      status: 200,
-    });
-  } catch (error) {
-    console.error('音声ファイル取得処理エラー:', error);
-    return new NextResponse('サーバーエラーが発生しました', { status: 500 });
+
+    return new NextResponse(data, { headers, status: 200 });
+  } catch (e: any) {
+    console.error('[minutesaudio][download] error:', e);
+    return new NextResponse('Server error', { status: 500 });
   }
-} 
+}

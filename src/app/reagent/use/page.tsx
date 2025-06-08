@@ -2,13 +2,13 @@
 
 import React, { useState } from "react";
 import { useForm } from "react-hook-form";
-import supabase from "@/lib/supabaseClient";
+import { useSupabase } from '@/app/_providers/supabase-provider';
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { useAuth } from "@/contexts/AuthContext";
+import { useUserProfile } from '@/hooks/use-user-profile';
 import { AppHeader } from "@/components/ui/app-header";
 import { getJstTimestamp } from "@/lib/utils";
 
@@ -17,7 +17,9 @@ type FormValues = {
 };
 
 export default function ReagentUse() {
-  const { user, profile } = useAuth();
+  const { supabase, session } = useSupabase();
+  const { profile } = useUserProfile();
+  const user = session?.user;
   const { register, handleSubmit } = useForm<FormValues>();
   const router = useRouter();
   const [message, setMessage] = useState("");
@@ -38,8 +40,8 @@ export default function ReagentUse() {
       const { data: reagentData, error: reagentError } = await supabase
         .from("reagents")
         .select("id, facility_id")
-        .eq("id", data.reagent_id)
-        .eq("facility_id", profile.facility_id)
+        .eq("id", Number(data.reagent_id))
+        .eq("facility_id", profile.facility_id as string)
         .single();
 
       if (reagentError || !reagentData) {
@@ -55,8 +57,8 @@ export default function ReagentUse() {
           used_at: getJstTimestamp(),
           used_by: user?.id
         })
-        .eq("id", data.reagent_id)
-        .eq("facility_id", profile.facility_id);
+        .eq("id", Number(data.reagent_id))
+        .eq("facility_id", profile.facility_id as string);
 
       if (updateError) {
         setError(updateError.message);
@@ -66,11 +68,11 @@ export default function ReagentUse() {
       // 使用履歴を記録
       if (user?.id) {
         const { error: historyError } = await supabase
-          .from("usage_history")
+          .from("usage_history" as any)
           .insert([
             {
               reagent_id: data.reagent_id,
-              user_id: user.id,
+              user_id: user!.id,
               used_at: getJstTimestamp(),
               facility_id: profile.facility_id
             },

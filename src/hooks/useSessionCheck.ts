@@ -1,22 +1,17 @@
 import { useEffect } from 'react';
-import { setSessionCheckEnabled } from '@/contexts/AuthContext';
 
 /**
- * 特定のコンポーネントでセッション確認を有効化/無効化するためのフック
+ * セッション確認機能のダミーフック
  * 
- * @param enabled セッション確認を有効にするかどうか
- * @param dependencies 依存配列（変更時にセッション確認の状態が再評価される）
+ * 注: この機能は完全に廃止されました。
+ * 互換性のためだけに残されていますが、実際には何も処理を行いません。
+ * 新しいコードではこのフックを使用しないでください。
  */
-export function useSessionCheck(enabled: boolean = true, dependencies: any[] = []) {
+export function useSessionCheck(): void {
   useEffect(() => {
-    // コンポーネントマウント時にセッション確認の状態を設定
-    console.log(`セッション確認を${enabled ? '有効化' : '無効化'}します`);
-    setSessionCheckEnabled(enabled);
-    
-    // クリーンアップ時に無効化
+    // ログ出力も削除（不要なコンソール出力を減らすため）
     return () => {
-      console.log('セッション確認を無効化します（クリーンアップ）');
-      setSessionCheckEnabled(false); // コンポーネントがアンマウントされた時点で無効化
+      // 何も処理しない
     };
-  }, dependencies);
+  }, []);
 } 

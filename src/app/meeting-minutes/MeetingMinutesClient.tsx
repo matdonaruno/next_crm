@@ -1,33 +1,78 @@
 'use client';
 
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useState, useEffect, useCallback } from 'react';
-import { Mic, Plus, Search, FileText, Calendar, ChevronRight, MessageSquare, Clock, Filter, UserCircle, CheckCircle, XCircle } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  MouseEvent,
+} from 'react';
+import {
+  Mic,
+  Plus,
+  Search,
+  FileText,
+  Calendar,
+  ChevronRight,
+  MessageSquare,
+  Clock,
+  Filter,
+  UserCircle,
+  Users,
+  CheckCircle,
+  Trash2,
+  AlertTriangle,
+  Lock,
+  Shield,
+} from 'lucide-react';
 import { format } from 'date-fns';
 import { ja } from 'date-fns/locale';
+import { motion } from 'framer-motion';
+import { useAuthContext } from '@/contexts/AuthContext';
+import dynamic from 'next/dynamic';
+
 import { AppHeader } from '@/components/ui/app-header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { LoadingSpinner, CompactLoadingSpinner, ButtonSpinner } from '@/components/common/LoadingSpinner';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { motion, AnimatePresence } from 'framer-motion';
-import { cn } from '@/lib/utils';
-import { useAuth } from '@/hooks/use-auth';
-import { MeetingMinute, MeetingType } from '@/types/meeting-minutes';
-import supabaseClient from '@/lib/supabaseClient';
-import dynamic from 'next/dynamic';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { useSupabase } from '@/app/_providers/supabase-provider';
+import type { MeetingMinuteRow } from '@/types/meeting-minutes';
 
-// よりモダンでスムーズなアニメーション
+/**
+ * Supabase から取得した `meeting_minutes` テーブルの行に
+ * JOIN などで付加された “便利カラム” をマージした型。
+ * - `recorded_by_name` : profiles との結合で取得する記録者名
+ * - `creator_info`     : JSON 文字列で持っている作成者メタ
+ * - `meeting_types`    : meeting_types テーブルとの結合結果（name だけ使う）
+ */
+type MeetingMinute = MeetingMinuteRow & {
+  recorded_by_name?: string | null;
+  creator_info?: string | null;
+  meeting_types?: { name: string } | null;
+};
+
+/* UI helpers */
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: {
-      staggerChildren: 0.07,
-    },
+    transition: { staggerChildren: 0.07 },
   },
 };
 
@@ -36,426 +81,411 @@ const itemVariants = {
   visible: {
     y: 0,
     opacity: 1,
-    transition: {
-      type: 'spring',
-      stiffness: 350,
-      damping: 25,
-    },
+    transition: { type: 'spring', stiffness: 350, damping: 25 },
   },
 };
 
-// 洗練された背景エフェクト
-const BackgroundElements = () => {
-  return (
-    <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
-      {/* グラデーションブロブ - より洗練された配色 */}
-      <div className="absolute top-0 left-0 w-[600px] h-[600px] rounded-full bg-gradient-to-r from-indigo-200/20 to-purple-200/20 blur-3xl -translate-x-1/3 -translate-y-1/3" />
-      <div className="absolute bottom-0 right-0 w-[700px] h-[700px] rounded-full bg-gradient-to-l from-sky-200/15 to-blue-200/15 blur-3xl translate-x-1/4 translate-y-1/4" />
-      <div className="absolute bottom-1/2 left-1/2 w-[500px] h-[500px] rounded-full bg-gradient-to-tl from-violet-200/10 to-fuchsia-200/10 blur-3xl -translate-x-1/2 translate-y-1/2" />
+const BackgroundElements = () => (
+  <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+    {/* gradient blobs */}
+    <div className="absolute top-0 left-0 w-[600px] h-[600px] rounded-full bg-gradient-to-r from-indigo-200/20 to-purple-200/20 blur-3xl -translate-x-1/3 -translate-y-1/3" />
+    <div className="absolute bottom-0 right-0 w-[700px] h-[700px] rounded-full bg-gradient-to-l from-sky-200/15 to-blue-200/15 blur-3xl translate-x-1/4 translate-y-1/4" />
+    <div className="absolute bottom-1/2 left-1/2 w-[500px] h-[500px] rounded-full bg-gradient-to-tl from-violet-200/10 to-fuchsia-200/10 blur-3xl -translate-x-1/2 translate-y-1/2" />
 
-      {/* 浮遊パーティクル - より洗練された外観 */}
-      {Array.from({ length: 25 }).map((_, i) => (
+    {/* floating particles */}
+    {Array.from({ length: 25 }).map((_, i) => (
+      <div
+        key={`p-${i}`}
+        className="absolute rounded-full bg-white"
+        style={{
+          width: `${Math.random() * 4 + 1}px`,
+          height: `${Math.random() * 4 + 1}px`,
+          top: `${Math.random() * 100}%`,
+          left: `${Math.random() * 100}%`,
+          opacity: Math.random() * 0.25 + 0.05,
+          boxShadow: '0 0 4px rgba(255,255,255,0.6)',
+          animation: `float ${Math.random() * 20 + 15}s linear infinite`,
+          animationDelay: `${Math.random() * 5}s`,
+        }}
+      />
+    ))}
+
+    {/* light lines */}
+    <div className="absolute top-0 left-0 w-full h-full opacity-10">
+      {[10, 35, 65, 85].map((t) => (
         <div
-          key={i}
-          className="absolute rounded-full bg-white"
+          key={`l-${t}`}
+          className="absolute left-0 w-full h-[1px]"
           style={{
-            width: `${Math.random() * 4 + 1}px`,
-            height: `${Math.random() * 4 + 1}px`,
-            top: `${Math.random() * 100}%`,
-            left: `${Math.random() * 100}%`,
-            opacity: Math.random() * 0.25 + 0.05,
-            boxShadow: "0 0 4px rgba(255, 255, 255, 0.6)",
-            animation: `float ${Math.random() * 20 + 15}s linear infinite`,
-            animationDelay: `${Math.random() * 5}s`,
+            top: `${t}%`,
+            backgroundImage:
+              'linear-gradient(to right, transparent, rgba(124, 58, 237, 0.4), transparent)',
           }}
         />
       ))}
-
-      {/* 光の線エフェクト - 追加の視覚的魅力 */}
-      <div className="absolute top-0 left-0 w-full h-full opacity-10">
-        <div className="absolute top-[10%] left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-indigo-300 to-transparent" />
-        <div className="absolute top-[35%] left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-violet-300 to-transparent" />
-        <div className="absolute top-[65%] left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-purple-300 to-transparent" />
-        <div className="absolute top-[85%] left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-fuchsia-300 to-transparent" />
-      </div>
     </div>
-  );
-};
+  </div>
+);
 
-// チャットボットを動的にインポート
-const MeetingSearchChatbot = dynamic(() => import('@/components/MeetingSearchChatbot'), {
-  ssr: false,
-  loading: () => null,
-});
+const DynamicBackgroundElements = dynamic(
+  () => Promise.resolve(BackgroundElements),
+  { loading: () => <CompactLoadingSpinner message="背景要素を読み込み中..." /> },
+);
+
+const MeetingSearchChatbot = dynamic(
+  () => import('@/components/MeetingSearchChatbot'),
+  { loading: () => <CompactLoadingSpinner message="チャットボットを読み込み中..." /> },
+);
+
+type TabValue = 'all' | 'recent' | 'recorded';
 
 export default function MeetingMinutesClient() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { supabase } = useSupabase();
 
-  // 状態管理
+  /* auth */
+  const { user, profile } = useAuthContext();
+  const currentFacilityIdFromProfile = profile?.facility_id ?? null;
+
+  /* state */
   const [isChatbotOpen, setIsChatbotOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [meetingMinutes, setMeetingMinutes] = useState<MeetingMinute[]>([]);
-  const [filteredMeetingMinutes, setFilteredMeetingMinutes] = useState<MeetingMinute[]>([]);
-  const [activeTab, setActiveTab] = useState('all');
-  const [meetingTypes, setMeetingTypes] = useState<MeetingType[]>([]);
+  const [filteredMeetingMinutes, setFilteredMeetingMinutes] = useState<
+    MeetingMinute[]
+  >([]);
+  const [activeTab, setActiveTab] = useState<TabValue>('all');
   const [needsFacilityIdFix, setNeedsFacilityIdFix] = useState(false);
   const [isFixingFacilityId, setIsFixingFacilityId] = useState(false);
-  const [currentFacilityId, setCurrentFacilityId] = useState<string | null>(null);
+  const [currentFacilityId, setCurrentFacilityId] = useState<string | null>(
+    currentFacilityIdFromProfile,
+  );
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deletingMinuteId, setDeletingMinuteId] = useState<string | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
 
-  // ユーザーの施設IDをSupabaseから取得
-  const fetchCurrentFacilityId = useCallback(async () => {
-    if (!user?.id) return null;
+  /* cache refs */
+  const cachedData = useRef<Record<string, MeetingMinute[]>>({});
+  const lastFetchTime = useRef<Record<string, number>>({});
+  const isFetchingRef = useRef(false);
 
-    try {
-      const { data, error } = await supabaseClient.from('profiles').select('facility_id').eq('id', user.id).single();
-
-      if (error) {
-        console.error('施設ID取得エラー:', error);
-        return null;
-      }
-
-      console.log('現在の施設ID:', data.facility_id);
-      setCurrentFacilityId(data.facility_id);
-      return data.facility_id;
-    } catch (error) {
-      console.error('施設ID取得中に例外が発生:', error);
-      return null;
-    }
-  }, [user?.id]);
-
-  // ユーザー変更時に施設IDを更新
-  useEffect(() => {
-    if (user?.id) {
-      fetchCurrentFacilityId();
-    } else {
-      setCurrentFacilityId(null);
-    }
-  }, [user?.id, fetchCurrentFacilityId]);
-
-  // 議事録データの取得
-  const fetchMeetingMinutes = useCallback(async () => {
-    if (!currentFacilityId || !user?.id) {
-      console.log('施設IDまたはユーザーIDがありません:', { facilityId: currentFacilityId, userId: user?.id });
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-    console.log('議事録データの取得を開始します:', { facilityId: currentFacilityId });
-
-    try {
-      // 方法1: API経由でデータ取得
-      const response = await fetch(`/api/meeting-minutes?facilityId=${currentFacilityId}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${user.id}`,
-        }
-      });
-
-      const responseText = await response.text();
-
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error('JSONパースエラー:', parseError);
-        console.log('受信したレスポンス:', responseText);
-        throw new Error('レスポンスのパースに失敗しました');
-      }
-
-      if (!response.ok) {
-        console.error('APIエラー:', data);
-        throw new Error(data.error || '議事録の取得に失敗しました');
-      }
-
-      if (data && Array.isArray(data)) {
-        console.log('議事録データの取得に成功:', { count: data.length });
-
-        // データが取得できた場合
-        if (data.length > 0) {
-          setMeetingMinutes(data);
-          setFilteredMeetingMinutes(data);
-          return;
-        }
-
-        // データがない場合はフォールバック処理を試行
-        console.log('API経由で取得したデータが0件のため、直接クエリを試みます');
-      }
-
-      // 方法2: 直接Supabaseクライアントを使用
-      console.log('直接Supabaseクエリを実行します');
-      const { data: directData, error: directError } = await supabaseClient
-        .from('meeting_minutes')
-        .select('*')
-        .eq('facility_id', currentFacilityId) // 現在の施設IDを使用
-        .order('meeting_date', { ascending: false });
-
-      if (directError) {
-        console.error('直接クエリエラー:', directError);
-        throw new Error('直接クエリでのデータ取得に失敗しました');
-      }
-
-      // 総レコード数を確認して詳細表示
-      const { count, error: countError } = await supabaseClient
-        .from('meeting_minutes')
-        .select('*', { count: 'exact', head: true });
-
-      console.log('データベースの総レコード数:', { count, error: countError });
-      console.log('取得したレコードの施設ID:');
-      if (directData && directData.length > 0) {
-        directData.forEach((record, index) => {
-          console.log(`レコード ${index + 1}: facility_id = ${record.facility_id}, 自分の施設ID = ${currentFacilityId}`);
-        });
-
-        // 施設IDに関係なくすべてのデータを表示（テスト用）
-        console.log('直接クエリで議事録データの取得に成功:', { count: directData.length });
-        setMeetingMinutes(directData);
-        setFilteredMeetingMinutes(directData);
-      } else {
-        console.log('直接クエリでもデータが取得できませんでした');
-
-        // データがないか、アクセスできない
-        setMeetingMinutes([]);
-        setFilteredMeetingMinutes([]);
-      }
-    } catch (error: any) {
-      console.error('議事録取得エラー:', error);
-      const errorMessage = error.message || '議事録の取得に失敗しました';
-
-      toast({
-        title: 'データ取得エラー',
-        description: errorMessage,
-        variant: 'destructive',
-        duration: 5000,
-      });
-
-      // エラー時は空の配列を設定
-      setMeetingMinutes([]);
-      setFilteredMeetingMinutes([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [currentFacilityId, user?.id, toast]);
-
-  // 会議種類データの取得
-  const fetchMeetingTypes = useCallback(async () => {
+  /* helper callbacks */
+  const invalidateCache = useCallback(() => {
     if (!currentFacilityId) return;
+    delete cachedData.current[currentFacilityId];
+    delete lastFetchTime.current[currentFacilityId];
+  }, [currentFacilityId]);
 
-    try {
-      // 会議種類データをAPIから取得
-      const response = await fetch(`/api/meeting-minutes/types`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${user?.id || ''}`,
-        }
-      });
 
-      if (!response.ok) throw new Error('会議種類データの取得に失敗しました');
+  const fetchMeetingMinutes = useCallback(
+    async (force = false) => {
+      if (!currentFacilityId || isFetchingRef.current) return;
 
-      const data = await response.json();
-      setMeetingTypes(data || []);
+      const cache = cachedData.current[currentFacilityId];
+      const cachedAt = lastFetchTime.current[currentFacilityId] ?? 0;
+      const valid = cache && Date.now() - cachedAt < 5 * 60_000 && !force;
 
-      console.log('会議種類データを取得しました:', data);
-    } catch (error) {
-      console.error('会議種類データの取得エラー:', error);
-      toast({
-        title: 'エラー',
-        description: '会議種類データの取得に失敗しました',
-        variant: 'destructive',
-      });
-    }
-  }, [currentFacilityId, user?.id, toast]);
-
-  // 初期データ取得
-  useEffect(() => {
-    if (currentFacilityId) {
-      fetchMeetingMinutes();
-      fetchMeetingTypes();
-    }
-  }, [currentFacilityId, fetchMeetingMinutes, fetchMeetingTypes]);
-
-  // 検索フィルタ処理
-  useEffect(() => {
-    if (meetingMinutes.length === 0) return;
-
-    const filtered = meetingMinutes.filter(minute => {
-      const matchesSearch = searchTerm === '' || 
-        minute.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (minute.content && minute.content.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (minute.summary && minute.summary.toLowerCase().includes(searchTerm.toLowerCase()));
-
-      if (activeTab === 'all') return matchesSearch;
-      if (activeTab === 'recent') {
-        const dateLimit = new Date();
-        dateLimit.setDate(dateLimit.getDate() - 7);
-        return matchesSearch && new Date(minute.meeting_date) >= dateLimit;
-      }
-      if (activeTab === 'recorded') {
-        return matchesSearch && minute.is_transcribed;
-      }
-
-      return matchesSearch;
-    });
-
-    setFilteredMeetingMinutes(filtered);
-  }, [searchTerm, meetingMinutes, activeTab]);
-
-  // 施設IDが不一致のレコードを修正する関数
-  const fixFacilityIds = async () => {
-    if (!currentFacilityId || !user?.id) return;
-
-    setIsFixingFacilityId(true);
-
-    try {
-      // 不一致のレコードを取得
-      const { data: wrongRecords, error: findError } = await supabaseClient
-        .from('meeting_minutes')
-        .select('id, facility_id')
-        .neq('facility_id', currentFacilityId);
-
-      if (findError) {
-        throw new Error('不一致のレコードの取得に失敗しました');
-      }
-
-      if (!wrongRecords || wrongRecords.length === 0) {
-        toast({
-          title: '修正不要',
-          description: '施設IDが一致していないレコードはありません',
-          duration: 3000,
-        });
-        setNeedsFacilityIdFix(false);
+      if (valid) {
+        setMeetingMinutes(cache);
+        setFilteredMeetingMinutes(cache);
+        setTimeout(() => fetchMeetingMinutes(true), 100);
         return;
       }
 
-      console.log(`修正対象レコード: ${wrongRecords.length}件`, wrongRecords);
+      if (!cache) setIsLoading(true);
+      isFetchingRef.current = true;
 
-      // 修正処理
-      const updates = wrongRecords.map(record => ({
-        id: record.id,
-        facility_id: currentFacilityId
-      }));
-
-      const { error: updateError } = await supabaseClient
-        .from('meeting_minutes')
-        .upsert(updates);
-
-      if (updateError) {
-        throw new Error('レコードの更新に失敗しました');
+      try {
+        const res = await fetch(
+          `/api/meeting-minutes?facilityId=${currentFacilityId}`,
+        );
+        if (!res.ok) throw new Error(await res.text());
+        const data: MeetingMinute[] = await res.json();
+        cachedData.current[currentFacilityId] = data;
+        lastFetchTime.current[currentFacilityId] = Date.now();
+        setMeetingMinutes(data);
+        setFilteredMeetingMinutes(data);
+      } catch (e) {
+        toast({
+          title: 'データ取得エラー',
+          description: e instanceof Error ? e.message : '取得に失敗しました',
+          variant: 'destructive',
+        });
+        setMeetingMinutes([]);
+        setFilteredMeetingMinutes([]);
+      } finally {
+        setIsLoading(false);
+        isFetchingRef.current = false;
       }
+    },
+    [currentFacilityId, toast],
+  );
+
+  const fixFacilityIds = useCallback(async () => {
+    if (!currentFacilityId) return;
+
+    setIsFixingFacilityId(true);
+    try {
+      const { data, error } = await supabase
+        .from('meeting_minutes')
+        .select('id')
+        .neq('facility_id', currentFacilityId);
+      if (error) throw error;
+
+      if (!data?.length) {
+        toast({ title: '修正不要', description: '不一致はありません' });
+        setNeedsFacilityIdFix(false);
+        return;
+      }
+      
+      const { error: upErr } = await supabase
+        .from('meeting_minutes')
+        .update({ facility_id: currentFacilityId })
+        .in(
+          'id',
+          data.map((d: { id: string }) => d.id),
+        );
+      if (upErr) throw upErr;
 
       toast({
         title: '修正完了',
-        description: `${wrongRecords.length}件のレコードの施設IDを修正しました`,
-        duration: 3000,
+        description: `${data.length} 件の施設IDを修正しました`,
       });
-
-      // データを再取得
-      await fetchMeetingMinutes();
+      invalidateCache();
+      fetchMeetingMinutes(true);
       setNeedsFacilityIdFix(false);
-    } catch (error: any) {
-      console.error('施設ID修正エラー:', error);
+    } catch (e) {
       toast({
         title: 'エラー',
-        description: error.message || '施設IDの修正に失敗しました',
+        description: e instanceof Error ? e.message : '修正に失敗しました',
         variant: 'destructive',
-        duration: 5000,
       });
     } finally {
       setIsFixingFacilityId(false);
     }
-  };
+  }, [currentFacilityId, fetchMeetingMinutes, invalidateCache, supabase, toast]);
 
-  // 施設IDの一致をチェックする処理を追加
-  useEffect(() => {
-    if (meetingMinutes.length > 0 && currentFacilityId) {
-      // 不一致のレコードがあるかチェック
-      const hasWrongFacilityId = meetingMinutes.some(minute => minute.facility_id !== currentFacilityId);
-
-      if (hasWrongFacilityId) {
-        console.log('施設IDが一致していないレコードがあります');
-        setNeedsFacilityIdFix(true);
-      } else {
-        setNeedsFacilityIdFix(false);
+  const fixCreators = useCallback(async () => {
+    try {
+      const res = await fetch('/api/meeting-minutes/fix-creators', {
+        method: 'POST',
+      });
+      
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'APIエラー');
       }
+      
+      const result = await res.json();
+      
+      toast({ 
+        title: '作成者修正完了', 
+        description: result.message 
+      });
+      
+      // データを再取得
+      invalidateCache();
+      await fetchMeetingMinutes(true);
+      
+    } catch (e) {
+      toast({
+        title: '作成者修正エラー',
+        description: e instanceof Error ? e.message : '修正に失敗しました',
+        variant: 'destructive',
+      });
     }
-  }, [meetingMinutes, currentFacilityId]);
+  }, [toast, invalidateCache, fetchMeetingMinutes]);
 
-  // 新規作成ページへ移動
-  const handleCreateNew = () => {
-    router.push('/meeting-minutes/create');
+  const createTestData = useCallback(async () => {
+    try {
+      const res = await fetch('/api/meeting-minutes/test-data', {
+        method: 'POST',
+      });
+      
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'APIエラー');
+      }
+      
+      const result = await res.json();
+      
+      toast({ 
+        title: 'テストデータ作成完了', 
+        description: result.message 
+      });
+      
+      // データを再取得
+      invalidateCache();
+      await fetchMeetingMinutes(true);
+      
+    } catch (e) {
+      toast({
+        title: 'テストデータ作成エラー',
+        description: e instanceof Error ? e.message : '作成に失敗しました',
+        variant: 'destructive',
+      });
+    }
+  }, [toast, invalidateCache, fetchMeetingMinutes]);
+
+  const deleteMeetingMinute = useCallback(async () => {
+    if (!deletingMinuteId) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/meeting-minutes/${deletingMinuteId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+
+      setMeetingMinutes((prev) => prev.filter((m) => m.id !== deletingMinuteId));
+      setFilteredMeetingMinutes((prev) =>
+        prev.filter((m) => m.id !== deletingMinuteId),
+      );
+      invalidateCache();
+      toast({ title: '削除完了', description: '議事録を削除しました' });
+    } catch (e) {
+      toast({
+        title: 'エラー',
+        description: e instanceof Error ? e.message : '削除に失敗しました',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+      setDeletingMinuteId(null);
+      setIsDeleteDialogOpen(false);
+    }
+  }, [deletingMinuteId, invalidateCache, toast]);
+
+  /* ----------------------------- side-effects ----------------------------- */
+
+  useEffect(() => {
+    // プロファイルが届いたら facility_id と role を反映
+    if (profile) {
+      setCurrentFacilityId(profile.facility_id ?? null);
+      setUserRole(profile.role ?? null);
+    } else {
+      setCurrentFacilityId(null);
+      setUserRole(null);
+    }
+  }, [profile]);
+
+  useEffect(() => {
+    if (currentFacilityId) fetchMeetingMinutes();
+  }, [currentFacilityId, fetchMeetingMinutes]);
+
+  // 処理中の議事録があるときは定期的にリフレッシュ
+  useEffect(() => {
+    const hasProcessingItems = meetingMinutes.some(m => m.processing_status === 'processing');
+    
+    if (!hasProcessingItems) return;
+
+    const interval = setInterval(() => {
+      console.log('[MeetingMinutes] 処理中項目あり、一覧をリフレッシュ');
+      fetchMeetingMinutes(true);
+    }, 10000); // 10秒ごと
+
+    return () => clearInterval(interval);
+  }, [meetingMinutes, fetchMeetingMinutes]);
+
+  useEffect(() => {
+    if (!meetingMinutes.length) return;
+    const filtered = meetingMinutes.filter((m) => {
+      const keyword = searchTerm.toLowerCase();
+      const matchText =
+        !keyword ||
+        m.title.toLowerCase().includes(keyword) ||
+        m.content?.toLowerCase().includes(keyword) ||
+        m.summary?.toLowerCase().includes(keyword);
+
+      if (activeTab === 'recent') {
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        return matchText && new Date(m.meeting_date) >= weekAgo;
+      }
+      if (activeTab === 'recorded') return matchText && m.is_transcribed;
+      return matchText;
+    });
+    setFilteredMeetingMinutes(filtered);
+  }, [searchTerm, meetingMinutes, activeTab]);
+
+  useEffect(() => {
+    if (currentFacilityId && meetingMinutes.length) {
+      setNeedsFacilityIdFix(
+        meetingMinutes.some((m) => m.facility_id !== currentFacilityId),
+      );
+    }
+  }, [currentFacilityId, meetingMinutes]);
+
+  /* -------------------------- permission helper --------------------------- */
+
+  const canDeleteMeetingMinute = (m: MeetingMinute) => {
+    if (!user) return false;
+    if (['admin', 'superuser'].includes(userRole ?? '')) return true;
+    if (m.recorded_by === user.id) return true;
+    try {
+      return JSON.parse(m.creator_info ?? '{}').id === user.id;
+    } catch {
+      return false;
+    }
   };
 
-  // 詳細ページへ移動
-  const handleViewDetail = (id: string) => {
-    router.push(`/meeting-minutes/${id}`);
-  };
+  /* --------------------------------  UI  --------------------------------- */
 
   return (
-    <div className="flex flex-col min-h-screen h-full bg-slate-50/50 overflow-hidden relative">
-      <BackgroundElements />
+    <div className="flex flex-col min-h-screen bg-white relative">
+      <DynamicBackgroundElements />
 
-      {/* ヘッダー - よりモダンなスタイル */}
       <AppHeader
         title="会議議事録"
         icon={<Mic className="h-5 w-5 text-indigo-600" />}
-        showBackButton={true}
+        showBackButton
         onBackClick={() => router.push('/depart')}
         className="bg-white/90 backdrop-blur-xl border-b border-slate-100/80 shadow-sm z-20"
       />
 
-      {/* メインコンテンツ - スペーシングと配色を改善 */}
-      <div className="w-full max-w-4xl mx-auto px-4 md:px-6 lg:px-8 flex-1 flex flex-col relative z-10 py-4">
-        {/* 検索とフィルターセクション - 洗練されたUI */}
-        <div className="mb-6 sticky top-[53px] bg-white/90 backdrop-blur-xl z-10 rounded-2xl border border-slate-100/80 shadow-sm p-4">
-          <div className="flex flex-col md:flex-row md:items-center gap-4">
-            {/* 検索バー - 改善されたスタイル */}
+      <div className="w-full max-w-4xl mx-auto flex-1 flex flex-col px-4 md:px-6 lg:px-8 py-4 relative z-10">
+        {/* search & filter */}
+        <div className="mb-6 sticky top-[53px] bg-white/90 backdrop-blur-xl rounded-2xl border border-slate-100/80 shadow-sm p-4 z-10">
+          <div className="flex flex-col md:flex-row gap-4">
             <div className="relative flex-1">
-              <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <Input
-                type="text"
-                placeholder="議事録を検索..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 bg-white/80 rounded-xl border-slate-200 focus-visible:ring-indigo-500 shadow-sm h-11"
+                placeholder="議事録を検索..."
+                className="pl-10 h-11 bg-white/80 rounded-xl border-slate-200 shadow-sm focus-visible:ring-indigo-500"
               />
             </div>
 
-            {/* 新規作成ボタン - より魅力的なデザイン */}
             <Button
-              onClick={handleCreateNew}
-              className="bg-gradient-to-r from-indigo-500 to-violet-500 text-white rounded-xl shadow-md hover:shadow-lg transition-all duration-300 hover:from-indigo-600 hover:to-violet-600 h-11 px-5"
+              onClick={() => router.push('/meeting-minutes/create')}
+              className="h-11 px-5 bg-gradient-to-r from-indigo-500 to-violet-500 text-white rounded-xl shadow-md hover:shadow-lg transition"
             >
               <Plus className="h-4 w-4 mr-2" />
               新規作成
             </Button>
           </div>
 
-          {/* タブ - より洗練されたデザイン */}
           <div className="mt-4">
-            <Tabs defaultValue="all" value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <Tabs
+              value={activeTab}
+              /* ★ 型キャストで一致させる */
+              onValueChange={(v) => setActiveTab(v as TabValue)}
+              className="w-full"
+            >
               <TabsList className="grid grid-cols-3 bg-slate-100/80 p-1 rounded-xl h-11">
-                <TabsTrigger
-                  value="all"
-                  className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-indigo-700 data-[state=active]:shadow-sm transition-all duration-200 h-9"
-                >
+                <TabsTrigger value="all" className="h-9 rounded-lg">
                   <FileText className="h-4 w-4 mr-2" />
                   すべて
                 </TabsTrigger>
-                <TabsTrigger
-                  value="recent"
-                  className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-indigo-700 data-[state=active]:shadow-sm transition-all duration-200 h-9"
-                >
+                <TabsTrigger value="recent" className="h-9 rounded-lg">
                   <Clock className="h-4 w-4 mr-2" />
                   最近
                 </TabsTrigger>
-                <TabsTrigger
-                  value="recorded"
-                  className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-indigo-700 data-[state=active]:shadow-sm transition-all duration-200 h-9"
-                >
+                <TabsTrigger value="recorded" className="h-9 rounded-lg">
                   <Mic className="h-4 w-4 mr-2" />
                   録音済
                 </TabsTrigger>
@@ -464,18 +494,18 @@ export default function MeetingMinutesClient() {
           </div>
         </div>
 
-        {/* 施設ID修正ボタン - より目立つデザイン */}
+        {/* facilityId fix */}
         {needsFacilityIdFix && (
           <div className="mb-5">
             <Button
-              onClick={fixFacilityIds}
-              disabled={isFixingFacilityId}
               variant="outline"
-              className="w-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 rounded-xl shadow-sm h-11"
+              disabled={isFixingFacilityId}
+              onClick={fixFacilityIds}
+              className="w-full h-11 bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 rounded-xl shadow-sm"
             >
               {isFixingFacilityId ? (
                 <>
-                  <div className="animate-spin h-4 w-4 mr-2 border-2 border-amber-700 border-t-transparent rounded-full" />
+                  <ButtonSpinner className="h-4 w-4 mr-2" />
                   施設ID修正中...
                 </>
               ) : (
@@ -488,53 +518,89 @@ export default function MeetingMinutesClient() {
           </div>
         )}
 
-        {/* 議事録リスト - より洗練されたリストデザイン */}
-        <ScrollArea className="flex-1 h-[calc(100vh-250px)] pb-20 relative z-10">
+        {/* creator fix for admin users */}
+        {['facility_admin', 'superuser'].includes(userRole ?? '') && (
+          <>
+            <div className="mb-5">
+              <Button
+                variant="outline"
+                onClick={fixCreators}
+                className="w-full h-11 bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 rounded-xl shadow-sm"
+              >
+                <UserCircle className="h-4 w-4 mr-2" />
+                作成者不明の議事録を修正
+              </Button>
+            </div>
+            <div className="mb-5">
+              <Button
+                variant="outline"
+                onClick={createTestData}
+                className="w-full h-11 bg-green-50 text-green-700 border-green-200 hover:bg-green-100 rounded-xl shadow-sm"
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                検索テスト用データを作成
+              </Button>
+            </div>
+          </>
+        )}
+
+        {/* list */}
+        <ScrollArea className="flex-1 h-[calc(100vh-250px)] pb-20">
           {isLoading ? (
-            <div className="flex flex-col items-center justify-center py-16">
-              <div className="animate-spin rounded-full h-12 w-12 border-3 border-indigo-500 border-t-transparent mb-5"></div>
-              <p className="text-slate-500 font-medium">データを読み込み中...</p>
+            <div className="py-16">
+              <CompactLoadingSpinner message="データを読み込み中..." />
             </div>
           ) : filteredMeetingMinutes.length === 0 ? (
-            <div className="text-center py-16 bg-white/90 backdrop-blur-sm rounded-2xl p-8 shadow-sm border border-slate-100">
+            <div className="text-center py-16 bg-white/90 rounded-2xl p-8 shadow-sm border border-slate-100">
               <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-slate-50 flex items-center justify-center shadow-inner">
                 <FileText className="h-10 w-10 text-slate-300" />
               </div>
-              <h3 className="text-2xl font-medium text-slate-800 mb-3">議事録がありません</h3>
+              <h3 className="text-2xl font-medium text-slate-800 mb-3">
+                議事録がありません
+              </h3>
               <p className="text-slate-500 mb-8 max-w-md mx-auto">
-                新しい議事録を作成して、会議の内容を記録しましょう。録音機能を使えば、自動で文字起こしも可能です。
+                新しい議事録を作成して、会議の内容を記録しましょう。
               </p>
               <Button
-                onClick={handleCreateNew}
-                className="bg-gradient-to-r from-indigo-500 to-violet-500 text-white rounded-xl shadow-md hover:shadow-lg transition-all duration-300 px-6 py-5 h-auto"
+                onClick={() => router.push('/meeting-minutes/create')}
+                className="px-6 py-5 bg-gradient-to-r from-indigo-500 to-violet-500 text-white rounded-xl shadow-md hover:shadow-lg"
               >
                 <Plus className="h-5 w-5 mr-2" />
                 新規会議議事録を作成
               </Button>
             </div>
           ) : (
-            <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-4 pb-6">
-              {filteredMeetingMinutes.map((minute) => (
+            <motion.div
+              variants={containerVariants}
+              initial="hidden"
+              animate="visible"
+              className="space-y-4 pb-6"
+            >
+              {filteredMeetingMinutes.map((m) => (
                 <motion.div
-                  key={minute.id}
+                  key={m.id}
                   variants={itemVariants}
-                  whileHover={{ y: -3, scale: 1.01, transition: { duration: 0.2 } }}
-                  onClick={() => handleViewDetail(minute.id)}
+                  whileHover={{
+                    y: -3,
+                    scale: 1.01,
+                    transition: { duration: 0.2 },
+                  }}
+                  onClick={() => router.push(`/meeting-minutes/${m.id}`)}
                 >
-                  <Card className="overflow-hidden border-slate-100/80 bg-white/90 shadow-sm hover:shadow-md transition-all duration-300 cursor-pointer rounded-xl p-0.5">
-                    <div className="p-5 relative overflow-hidden">
-                      {/* 左側の装飾ライン - 視覚的な魅力を追加 */}
+                  <Card className="overflow-hidden bg-white/90 border-slate-100/80 rounded-xl p-0.5 shadow-sm hover:shadow-md transition">
+                    <div className="p-5 relative">
                       <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-indigo-400 to-violet-400 rounded-full" />
-                      
+
                       <div className="pl-3">
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center text-sm text-slate-500">
                             <Calendar className="h-4 w-4 mr-2 text-indigo-500" />
-                            {format(new Date(minute.meeting_date), 'yyyy年MM月dd日', { locale: ja })}
+                            {format(new Date(m.meeting_date), 'yyyy年MM月dd日', {
+                              locale: ja,
+                            })}
                           </div>
-
                           <div className="flex gap-2">
-                            {minute.is_transcribed && (
+                            {m.is_transcribed && (
                               <Badge
                                 variant="secondary"
                                 className="text-xs bg-indigo-50 text-indigo-600 border-indigo-100 flex items-center px-2.5 py-1 rounded-lg"
@@ -543,74 +609,130 @@ export default function MeetingMinutesClient() {
                                 録音済
                               </Badge>
                             )}
-
-                            {minute.meeting_types && (
-                              <Badge 
-                                variant="outline" 
+                            {m.meeting_types && (
+                              <Badge
+                                variant="outline"
                                 className="text-xs bg-slate-50 text-slate-600 border-slate-200 px-2.5 py-1 rounded-lg"
                               >
-                                {minute.meeting_types.name}
+                                {m.meeting_types.name}
+                              </Badge>
+                            )}
+                            {(m as any).access_level && (m as any).access_level !== 'all' && (
+                              <Badge
+                                variant="outline"
+                                className={`text-xs flex items-center px-2.5 py-1 rounded-lg ${
+                                  (m as any).access_level === 'admin_only' 
+                                    ? 'bg-red-50 text-red-600 border-red-200'
+                                    : 'bg-blue-50 text-blue-600 border-blue-200'
+                                }`}
+                              >
+                                {(m as any).access_level === 'admin_only' ? (
+                                  <>
+                                    <Lock className="h-3 w-3 mr-1" />
+                                    管理者限定
+                                  </>
+                                ) : (
+                                  <>
+                                    <Shield className="h-3 w-3 mr-1" />
+                                    主任以上
+                                  </>
+                                )}
                               </Badge>
                             )}
                           </div>
                         </div>
 
                         <div className="flex justify-between items-start">
-                          <div>
-                            <h3 className="font-medium text-slate-800 pr-4 text-base">{minute.title}</h3>
-                            {(minute.recorded_by_name || minute.creator_info) && (
-                              <div className="flex items-center mt-1.5 text-xs text-slate-500">
+                          <div className="flex-1">
+                            <h3 className="text-base font-medium text-slate-800 pr-4">
+                              {m.title}
+                            </h3>
+                            <div className="flex items-center gap-3 mt-1.5">
+                              <div className="flex items-center text-xs text-slate-500">
                                 <UserCircle className="h-3.5 w-3.5 mr-1.5 text-indigo-400" />
-                                {minute.recorded_by_name || 
-                                  (minute.creator_info && JSON.parse(minute.creator_info).name) || 
-                                  '記録者不明'}
+                                <span className="font-medium">
+                                  {(m as any).recorded_by_profile?.name ||
+                                   m.recorded_by_name ||
+                                   (m.creator_info && JSON.parse(m.creator_info).name) ||
+                                   '記録者不明'}
+                                </span>
                               </div>
-                            )}
+                              {m.attendees && m.attendees.length > 0 && (
+                                <div className="flex items-center text-xs text-slate-500">
+                                  <Users className="h-3.5 w-3.5 mr-1.5 text-slate-400" />
+                                  <span>{m.attendees.length}名参加</span>
+                                </div>
+                              )}
+                            </div>
                           </div>
+
                           <div className="flex items-center">
-                            {minute.transcription_status && (
+                            {m.audio_file_path && (
                               <div className="mr-2">
-                                {minute.transcription_status === 'waiting' && (
-                                  <div className="flex items-center">
-                                    <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-100 flex items-center px-2 py-0.5 rounded-lg">
-                                      <Clock className="h-3 w-3 mr-1 text-blue-500" />
-                                      <span className="text-xs">待機中</span>
-                                    </Badge>
-                                  </div>
-                                )}
-                                {minute.transcription_status === 'processing' && (
-                                  <div className="flex items-center">
-                                    <Badge variant="outline" className="bg-amber-50 text-amber-600 border-amber-100 flex items-center px-2 py-0.5 rounded-lg">
-                                      <div className="h-3 w-3 mr-1 rounded-full border-2 border-amber-500 border-t-transparent animate-spin" />
-                                      <span className="text-xs">処理中</span>
-                                    </Badge>
-                                  </div>
-                                )}
-                                {minute.transcription_status === 'completed' && (
-                                  <div className="flex items-center">
-                                    <Badge variant="outline" className="bg-green-50 text-green-600 border-green-100 flex items-center px-2 py-0.5 rounded-lg">
-                                      <CheckCircle className="h-3 w-3 mr-1 text-green-500" />
-                                      <span className="text-xs">完了</span>
-                                    </Badge>
-                                  </div>
-                                )}
-                                {minute.transcription_status === 'failed' && (
-                                  <div className="flex items-center">
-                                    <Badge variant="outline" className="bg-red-50 text-red-600 border-red-100 flex items-center px-2 py-0.5 rounded-lg">
-                                      <XCircle className="h-3 w-3 mr-1 text-red-500" />
-                                      <span className="text-xs">失敗</span>
-                                    </Badge>
-                                  </div>
+                                {m.is_transcribed ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-green-50 text-green-600 border-green-100 flex items-center px-2 py-0.5 rounded-lg"
+                                  >
+                                    <CheckCircle className="h-3 w-3 mr-1" />
+                                    <span className="text-xs">完了</span>
+                                  </Badge>
+                                ) : (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-amber-50 text-amber-600 border-amber-100 flex items-center px-2 py-0.5 rounded-lg"
+                                  >
+                                    <ButtonSpinner className="h-3 w-3 mr-1" />
+                                    <span className="text-xs">処理中</span>
+                                  </Badge>
                                 )}
                               </div>
                             )}
-                            <ChevronRight className="h-5 w-5 text-indigo-400 flex-shrink-0 transition-transform group-hover:translate-x-1" />
+
+                            {canDeleteMeetingMinute(m) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e: MouseEvent) => {
+                                  e.stopPropagation();
+                                  setDeletingMinuteId(m.id);
+                                  setIsDeleteDialogOpen(true);
+                                }}
+                                className="h-8 w-8 rounded-full mr-2 text-slate-400 hover:text-red-500 hover:bg-red-50"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+
+                            <ChevronRight className="h-5 w-5 text-indigo-400" />
                           </div>
                         </div>
 
-                        {minute.summary && (
+                        {/* 処理状況表示 */}
+                        {m.processing_status === 'processing' && (
+                          <div className="mt-2.5 flex items-center space-x-2">
+                            <div className="h-2 w-2 bg-blue-400 rounded-full animate-pulse"></div>
+                            <span className="text-sm text-blue-600">文字起こし・要約を処理中...</span>
+                          </div>
+                        )}
+
+                        {/* 要約表示 */}
+                        {m.summary && (
                           <div className="mt-2.5">
-                            <p className="text-sm text-slate-500 line-clamp-2">{minute.summary}</p>
+                            <div className="text-xs text-blue-600 font-medium mb-1">📝 要約</div>
+                            <p className="text-sm text-slate-600 line-clamp-2">
+                              {m.summary}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* 文字起こしのみ（要約なし）の場合はsegmentsを表示 */}
+                        {!m.summary && m.is_transcribed && m.segments && Array.isArray(m.segments) && (
+                          <div className="mt-2.5">
+                            <div className="text-xs text-gray-600 font-medium mb-1">💬 文字起こし</div>
+                            <p className="text-sm text-slate-500 line-clamp-2">
+                              {m.segments.map((seg: any) => seg.text).filter(Boolean).join(' ').substring(0, 100)}...
+                            </p>
                           </div>
                         )}
                       </div>
@@ -623,27 +745,68 @@ export default function MeetingMinutesClient() {
         </ScrollArea>
       </div>
 
-      {/* チャットボットボタン - より洗練されたデザイン */}
-      <Button
-        onClick={() => setIsChatbotOpen(true)}
-        className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-xl z-40 bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 transition-all duration-300 flex items-center justify-center"
-        aria-label="チャットボットを開く"
+      {/* delete dialog */}
+      <AlertDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
       >
-        <div className="absolute inset-0 rounded-full bg-white/20 animate-ping opacity-75"></div>
-        <MessageSquare className="h-6 w-6 text-white" />
+        <AlertDialogContent className="bg-white rounded-xl border border-slate-200 shadow-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center text-lg font-semibold text-slate-800">
+              <AlertTriangle className="h-5 w-5 text-amber-500 mr-2" />
+              議事録の削除
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-600">
+              この議事録を削除します。この操作は取り消せません。
+              <br />
+              本当に削除しますか？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4">
+            <AlertDialogCancel className="bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200">
+              キャンセル
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={deleteMeetingMinute}
+              disabled={isDeleting}
+              className="bg-red-500 text-white hover:bg-red-600"
+            >
+              {isDeleting ? (
+                <>
+                  <ButtonSpinner className="h-4 w-4 mr-2" />
+                  削除中...
+                </>
+              ) : (
+                '削除する'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* chatbot button */}
+      <Button
+        aria-label="チャットボットを開く"
+        onClick={() => setIsChatbotOpen(true)}
+        className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-xl bg-gradient-to-r from-indigo-500 to-violet-500 hover:from-indigo-600 hover:to-violet-600 transition flex items-center justify-center z-40 group"
+      >
+        <div className="absolute inset-0 rounded-full bg-gradient-to-r from-pink-400/30 to-purple-500/30 animate-pulse" />
+        <div className="absolute -inset-2 rounded-full bg-gradient-to-r from-pink-400 to-purple-500 opacity-25 blur-md group-hover:opacity-35 animate-pulse" />
+        <div className="absolute -inset-4 rounded-full bg-gradient-to-r from-pink-300 to-purple-400 opacity-20 blur-xl group-hover:opacity-30 animate-pulse" />
+        <MessageSquare className="h-6 w-6 text-white relative z-10" />
       </Button>
 
-      {/* チャットボットコンポーネント */}
       <MeetingSearchChatbot
-        facilityId={currentFacilityId || ""}
+        facilityId={currentFacilityId ?? ''}
         isOpen={isChatbotOpen}
         onClose={() => setIsChatbotOpen(false)}
       />
 
-      {/* カスタムCSSアニメーション */}
+      {/* chatbot global css */}
       <style jsx global>{`
         @keyframes float {
-          0%, 100% {
+          0%,
+          100% {
             transform: translateY(0);
           }
           50% {
@@ -653,4 +816,4 @@ export default function MeetingMinutesClient() {
       `}</style>
     </div>
   );
-} 
+}

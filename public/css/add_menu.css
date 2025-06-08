@@ -13,17 +13,6 @@
     align-items: center;
   }
   
-  .nav__content {
-    position: relative;
-    width: 50%;
-    height: 100%;
-    overflow-y: auto;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    background-color: rgba(31, 31, 31, 0.9);
-  }
-  
   .nav__list {
     position: relative;
     padding: 0;

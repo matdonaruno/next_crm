@@ -1,22 +1,19 @@
+// src/app/equipment_dash/page.tsx
 'use client';
 
-import { Suspense } from "react";
-import dynamic from "next/dynamic";
+import { Suspense } from 'react';
+import dynamic from 'next/dynamic';
+import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 
-// クライアントコンポーネントを動的インポート
-const EquipmentDashboardClient = dynamic(() => import("./EquipmentDashboardClient"));
+const EquipmentDashboardClient = dynamic(
+  () => import('@/app/equipment_dash/EquipmentDashboardClient'),
+  { loading: () => <LoadingSpinner message="機器ダッシュボードを読み込み中..." fullScreen /> }
+);
 
 export default function EquipmentDashboardPage() {
   return (
-    <Suspense fallback={
-      <div className="w-full min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-2xl font-bold mb-4">機器メンテナンスダッシュボード</div>
-          <div className="text-gray-600">読み込み中...</div>
-        </div>
-      </div>
-    }>
+    <Suspense fallback={<LoadingSpinner message="コンポーネントを読み込み中..." fullScreen />}>
       <EquipmentDashboardClient />
     </Suspense>
   );
-} 
+}

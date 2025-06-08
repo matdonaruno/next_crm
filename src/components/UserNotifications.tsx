@@ -1,232 +1,256 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import supabaseClient from '@/lib/supabaseClient';
 import { Bell } from 'lucide-react';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import Link from 'next/link';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { useAuth } from '@/contexts/AuthContext';
+import { useSupabase } from '@/components/SupabaseProvider';
+import { formatDistanceToNow } from 'date-fns';
+import { ja } from 'date-fns/locale';
+import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 
 interface Notification {
   id: string;
+  user_id: string;
   title: string;
-  message: string;
-  is_read: boolean;
-  notification_type: string;
-  related_data?: any;
+  content?: string;
+  message?: string; // 互換性のため
+  is_read?: boolean; // 互換性のため
+  read?: boolean;
   created_at: string;
+  metadata?: any;
+  notification_type?: string; // 互換性のため
+  related_data?: any; // 互換性のため
 }
 
+
+// テーブル名を定数化（DB構造に合わせて変更可能）
+const NOTIFICATIONS_TABLE = 'user_notifications';
+
 export default function UserNotifications() {
+  const { user } = useAuth();
+  const supabase = useSupabase();
+
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [isOpen, setIsOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // 通知を取得
-  useEffect(() => {
-    let mounted = true;
+  // 未読通知の数を計算
+  const unreadCount = notifications.filter(n => !(n.read ?? !n.is_read)).length;
 
-    async function fetchNotifications() {
-      const { data, error } = await supabaseClient
-        .from('user_notifications')
+  // 通知読み込み処理
+  const fetchNotifications = async () => {
+    if (!user) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const { data, error } = await supabase
+        .from(NOTIFICATIONS_TABLE)
         .select('*')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false })
-        .limit(5);
+        .limit(10);
 
+      if (error) throw error;
+
+      const normalized = (data || []).map(item => ({
+        ...item,
+        content: item.content ?? item.message,
+        read: item.read ?? !item.is_read,
+      }));
+
+      setNotifications(normalized);
+    } catch (err) {
+      console.error('通知取得エラー:', err);
+      setError('通知の取得中にエラーが発生しました');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 最初のロード時と認証状態変更時に通知取得
+  useEffect(() => {
+    fetchNotifications();
+    
+    // 通知をリアルタイム購読
+    if (user) {
+      try {
+        const channel = supabase
+          .channel('notifications')
+          .on('postgres_changes', {
+            event: 'INSERT',
+            schema: 'public',
+            table: NOTIFICATIONS_TABLE,
+            filter: `user_id=eq.${user.id}`,
+          }, (payload) => {
+            // 新しい通知が来たら先頭に追加
+            const newItem = payload.new as Notification;
+            setNotifications(prev => [
+              {
+                ...newItem,
+                content: newItem.content ?? newItem.message,
+                read: newItem.read ?? !newItem.is_read
+              }, 
+              ...prev
+            ]);
+          })
+          .subscribe();
+          
+        return () => {
+          channel.unsubscribe();
+        };
+      } catch (err) {
+        console.error('通知購読エラー:', err);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, supabase]);
+
+  // 通知をすべて既読にするハンドラー
+  const handleMarkAllAsRead = async () => {
+    if (!user || notifications.length === 0) return;
+    
+    try {
+      // データベースのカラム名に合わせて更新
+      const updateField = 'is_read'; // または 'read' (DBスキーマに合わせて調整)
+      
+      const { error } = await supabase
+        .from(NOTIFICATIONS_TABLE)
+        .update({ [updateField]: true })
+        .eq('user_id', user.id)
+        .eq(updateField, false);
+        
       if (error) {
-        console.error('通知取得エラー:', error);
+        console.error('通知既読化エラー:', error);
         return;
       }
+      
+      // UI上で更新
+      setNotifications(notifications.map(n => ({ ...n, read: true, is_read: true })));
+    } catch (err) {
+      console.error('通知処理エラー:', err);
+    }
+  };
 
-      if (mounted) {
-        setNotifications(data || []);
-        setUnreadCount(data?.filter(n => !n.is_read).length || 0);
-        setLoading(false);
+  // 通知をクリックしたときのハンドラー
+  const handleClick = async (n: Notification) => {
+    if (n.read || n.is_read) return;
+    
+    try {
+      // データベースのカラム名に合わせて更新
+      const updateField = 'is_read'; // または 'read' (DBスキーマに合わせて調整)
+      
+      const { error } = await supabase
+        .from(NOTIFICATIONS_TABLE)
+        .update({ [updateField]: true })
+        .eq('id', n.id);
+        
+      if (error) {
+        console.error('通知既読化エラー:', error);
+        return;
       }
-    }
-
-    fetchNotifications();
-
-    // リアルタイム更新をリッスン
-    const channel = supabaseClient
-      .channel('user_notifications_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'user_notifications',
-        },
-        () => {
-          if (mounted) {
-            fetchNotifications();
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      mounted = false;
-      supabaseClient.removeChannel(channel);
-    };
-  }, []); // 依存配列は空のまま
-
-  // 通知を既読にする
-  const markAsRead = async (notificationId: string) => {
-    const { error } = await supabaseClient
-      .from('user_notifications')
-      .update({ is_read: true })
-      .eq('id', notificationId);
-
-    if (error) {
-      console.error('通知既読エラー:', error);
-      return;
-    }
-
-    // 通知リストを更新
-    setNotifications(
-      notifications.map(notification =>
-        notification.id === notificationId
-          ? { ...notification, is_read: true }
-          : notification
-      )
-    );
-
-    // 未読カウントを更新
-    setUnreadCount(prev => Math.max(0, prev - 1));
-  };
-
-  // すべての通知を既読にする
-  const markAllAsRead = async () => {
-    const { error } = await supabaseClient
-      .from('user_notifications')
-      .update({ is_read: true })
-      .in(
-        'id',
-        notifications.filter(n => !n.is_read).map(n => n.id)
+      
+      // UI上で更新 
+      setNotifications(
+        notifications.map(x => 
+          x.id === n.id ? { ...x, read: true, is_read: true } : x
+        )
       );
-
-    if (error) {
-      console.error('全通知既読エラー:', error);
-      return;
-    }
-
-    // 通知リストを更新
-    setNotifications(
-      notifications.map(notification => ({ ...notification, is_read: true }))
-    );
-
-    // 未読カウントをリセット
-    setUnreadCount(0);
-  };
-
-  // 日付フォーマット
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleString('ja-JP', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
-  // 通知タイプに応じたアイコン/カラーを取得
-  const getNotificationStyles = (type: string) => {
-    switch (type) {
-      case 'user_registration':
-        return { color: 'text-green-500', bgColor: 'bg-green-50' };
-      case 'error':
-        return { color: 'text-red-500', bgColor: 'bg-red-50' };
-      case 'warning':
-        return { color: 'text-orange-500', bgColor: 'bg-orange-50' };
-      default:
-        return { color: 'text-blue-500', bgColor: 'bg-blue-50' };
+    } catch (err) {
+      console.error('通知処理エラー:', err);
     }
   };
+
+  // 未ログイン時は表示しない
+  if (!user) {
+    return null;
+  }
 
   return (
-    <div className="relative">
-      {/* 通知アイコン */}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="relative p-2"
-        onClick={() => setIsOpen(!isOpen)}
-      >
-        <Bell className="h-5 w-5" />
-        {unreadCount > 0 && (
-          <span className="absolute top-0 right-0 w-4 h-4 bg-red-500 text-white rounded-full text-xs flex items-center justify-center">
-            {unreadCount}
-          </span>
-        )}
-      </Button>
+    <TooltipProvider>
+      <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="icon" className="relative">
+                <Bell className="h-6 w-6" />
+                {unreadCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center">{unreadCount > 9 ? '9+' : unreadCount}</span>}
+              </Button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent
+            side="bottom"
+            align="center"
+            className="bg-primary border-primary px-2 py-1 rounded-md text-sm shadow-md whitespace-nowrap tooltip-content"
+            style={{ backgroundColor: '#8167a9', color: 'white', border: '1px solid #8167a9' }}
+          >
+            <p style={{ color: 'white' }}>通知</p>
+          </TooltipContent>
+        </Tooltip>
 
-      {/* 通知パネル */}
-      {isOpen && (
-        <Card className="absolute right-0 mt-2 w-80 shadow-lg z-50">
-          <CardContent className="p-3">
-            <div className="flex justify-between items-center mb-2">
-              <h3 className="font-semibold">通知</h3>
-              {unreadCount > 0 && (
-                <Button variant="ghost" size="sm" onClick={markAllAsRead}>
-                  すべて既読
-                </Button>
-              )}
-            </div>
-
-            {loading ? (
-              <p className="text-center py-4 text-sm text-gray-500">読み込み中...</p>
-            ) : notifications.length === 0 ? (
-              <p className="text-center py-4 text-sm text-gray-500">
-                通知はありません
-              </p>
-            ) : (
-              <div className="space-y-2 max-h-72 overflow-y-auto">
-                {notifications.map(notification => {
-                  const styles = getNotificationStyles(notification.notification_type);
-                  return (
-                    <div
-                      key={notification.id}
-                      className={`p-2 rounded-md border ${
-                        notification.is_read ? 'border-gray-200' : 'border-blue-300'
-                      } ${!notification.is_read ? styles.bgColor : ''}`}
-                    >
-                      <div className="flex justify-between">
-                        <h4 className={`font-medium ${styles.color}`}>
-                          {notification.title}
-                        </h4>
-                        {!notification.is_read && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-5 w-5 p-0"
-                            onClick={() => markAsRead(notification.id)}
-                          >
-                            ✓
-                          </Button>
-                        )}
-                      </div>
-                      <p className="text-sm">{notification.message}</p>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {formatDate(notification.created_at)}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
+        <PopoverContent align="end" className="w-80 p-0 max-h-96 overflow-auto">
+          <div className="p-3 border-b flex justify-between items-center">
+            <h3 className="font-medium">通知</h3>
+            {unreadCount > 0 && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={handleMarkAllAsRead}
+                className="text-xs h-7 px-2"
+              >
+                すべて既読にする
+              </Button>
             )}
+          </div>
 
-            <div className="mt-2 text-center">
-              <Link href="/notifications" className="text-blue-500 text-sm hover:underline">
-                すべての通知を見る
-              </Link>
+          {isLoading ? (
+            <div className="p-6 text-center">
+              <LoadingSpinner message="読み込み中..." />
             </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+          ) : error ? (
+            <div className="p-6 text-center text-red-500">
+              <p>{error}</p>
+            </div>
+          ) : notifications.length === 0 ? (
+            <div className="p-6 text-center text-gray-500">
+              通知はありません
+            </div>
+          ) : (
+            <div>
+              {notifications.map((n) => (
+                <div 
+                  key={n.id} 
+                  className={`p-3 border-b cursor-pointer ${n.read || n.is_read ? 'bg-white' : 'bg-blue-50'}`} 
+                  onClick={() => handleClick(n)}
+                >
+                  <div className="flex justify-between items-start mb-1">
+                    <h4 className="font-medium">{n.title}</h4>
+                    <span className="text-xs text-gray-500">
+                      {formatDistanceToNow(new Date(n.created_at), { 
+                        addSuffix: true,
+                        locale: ja 
+                      })}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-700">{n.content}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+    </TooltipProvider>
   );
 } 

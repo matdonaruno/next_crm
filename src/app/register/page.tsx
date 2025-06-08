@@ -4,10 +4,11 @@ import React, { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 // createClientのインポートを削除し、共通のsupabaseクライアントをインポート
-import supabase from '@/lib/supabaseClient';
+import { useSupabase } from '@/app/_providers/supabase-provider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Mail, Lock, ArrowRight, Cross, Sparkles, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -16,6 +17,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 function RegisterContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { supabase } = useSupabase();
   // URLからトークンを取得し、フラグメント識別子を削除
   const rawToken = searchParams?.get('token');
   // より強固なトークン処理 - クエリパラメータと#以降を適切に処理
@@ -38,6 +40,7 @@ function RegisterContent() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [tosAgreed, setTosAgreed] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   
@@ -115,18 +118,24 @@ function RegisterContent() {
   // ユーザー登録の処理
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    // 利用規約同意の検証
+    if (!tosAgreed) {
+      setError('利用規約に同意してください。');
+      return;
+    }
+
     // 入力検証
     if (!password || !confirmPassword) {
       setError('パスワードは必須です。');
       return;
     }
-    
+
     if (password !== confirmPassword) {
       setError('パスワードが一致しません。');
       return;
     }
-    
+
     // パスワードの強度検証
     const passwordCheck = validatePassword(password);
     if (!passwordCheck.isValid) {
@@ -135,20 +144,20 @@ function RegisterContent() {
       if (!passwordCheck.hasLowerCase) errorMsg += '\n- 小文字(a-z)を含む';
       if (!passwordCheck.hasUpperCase) errorMsg += '\n- 大文字(A-Z)を含む';
       if (!passwordCheck.hasNumber) errorMsg += '\n- 数字(0-9)を含む';
-      
+
       setError(errorMsg);
       return;
     }
-    
+
     // 姓名の検証
     if (!lastName && !firstName) {
       setError('姓または名を入力してください。');
       return;
     }
-    
+
     setError(null);
     setRegistering(true);
-    
+
     try {
       console.log('アカウント登録APIを呼び出し:', {
         hasToken: !!token,
@@ -156,7 +165,7 @@ function RegisterContent() {
         hasPassword: !!password,
         hasFullName: !!getFullName()
       });
-      
+
       const response = await fetch('/api/invitations/verify', {
         method: 'POST',
         headers: {
@@ -166,23 +175,24 @@ function RegisterContent() {
           token,
           password,
           fullName: getFullName(),
+          policyAgreed: true,
         }),
       });
-      
+
       const data = await response.json();
       console.log('登録API応答:', data);
-      
+
       if (!response.ok) {
         throw new Error(data.error || 'アカウント作成中にエラーが発生しました。');
       }
-      
+
       setSuccess(data.message || 'アカウントが正常に作成されました。ログインしてアプリを利用できます。');
-      
+
       // 3秒後にログインページにリダイレクト
       setTimeout(() => {
         router.push('/login');
       }, 3000);
-      
+
     } catch (error: any) {
       console.error('登録エラーの詳細:', error);
       setError(error.message);
@@ -385,6 +395,7 @@ function RegisterContent() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="pl-10 border-stone-200 focus:border-slate-400 focus:ring-slate-300 rounded-xl"
+                    autoComplete="new-password"
                     required
                   />
                 </div>
@@ -412,10 +423,38 @@ function RegisterContent() {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     className="pl-10 border-stone-200 focus:border-slate-400 focus:ring-slate-300 rounded-xl"
+                    autoComplete="new-password"
                     required
                   />
                 </div>
               </div>
+            {/* 利用規約チェック */}
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="tos"
+                checked={tosAgreed}
+                onCheckedChange={() => setTosAgreed(!tosAgreed)}
+                className="border-stone-300"
+              />
+              <Label htmlFor="tos" className="text-xs text-gray-700 select-none">
+                <span
+                  className="underline cursor-pointer"
+                  onClick={() => router.push('/terms')}
+                >
+                  利用規約
+                </span>
+                および&nbsp;
+                <a
+                  href="/legal/privacy.md"
+                  target="_blank"
+                  rel="noopener"
+                  className="underline"
+                >
+                  プライバシーポリシー
+                </a>
+                に同意します
+              </Label>
+            </div>
             </CardContent>
 
             <CardFooter className="flex flex-col space-y-4 pt-2">
@@ -426,7 +465,7 @@ function RegisterContent() {
                 <Button 
                   type="submit"
                   className="w-full bg-gradient-to-r from-slate-500 to-stone-600 hover:from-slate-600 hover:to-stone-700 text-white font-medium text-lg py-3 rounded-xl transition-all duration-300"
-                  disabled={registering || !password || !confirmPassword || (!lastName && !firstName)}
+                  disabled={registering || !password || !confirmPassword || (!lastName && !firstName) || !tosAgreed}
                 >
                   {registering ? "処理中..." : "アカウント作成"}
                   {!registering && <ArrowRight className="ml-2 h-5 w-5" />}

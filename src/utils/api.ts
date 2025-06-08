@@ -1,4 +1,4 @@
-import supabase from '@/lib/supabaseClient';
+import supabase from '@/lib/supabaseBrowser';
 
 interface ApiOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';
@@ -25,9 +25,16 @@ export async function fetchApi<T = any>(url: string, options: ApiOptions = {}): 
     // 認証トークンを取得（skipAuthがfalseの場合のみ）
     let authHeaders = {};
     if (!skipAuth) {
-      const { data: { session } } = await supabase.auth.getSession();
+      // ① 本人確認 ← このコメントも実態に合わせて修正または削除を検討
+      // const { data: userCheck, error: userErr } = await supabase.auth.getUser(); // この行を削除
+
+      // ② JWTを取得
+  const { data: sessData } = await supabase.auth.getSession();
+  if (!sessData.session) throw new Error("JWT が取得できません");
+
+  authHeaders = { Authorization: `Bearer ${sessData.session.access_token}` };
       
-      if (!session) {
+      if (!sessData.session) {
         if (redirectOnAuthError && typeof window !== 'undefined') {
           console.error('API呼び出しエラー: 認証セッションがありません');
           
@@ -39,7 +46,7 @@ export async function fetchApi<T = any>(url: string, options: ApiOptions = {}): 
       }
       
       authHeaders = {
-        'Authorization': `Bearer ${session.access_token}`,
+        Authorization: `Bearer ${sessData.session.access_token}`,
       };
     }
 
@@ -130,4 +137,4 @@ export function del<T = any>(url: string, options: Omit<ApiOptions, 'method'> = 
  */
 export function patch<T = any>(url: string, body: any, options: Omit<ApiOptions, 'method' | 'body'> = {}) {
   return fetchApi<T>(url, { ...options, method: 'PATCH', body });
-} 
+}

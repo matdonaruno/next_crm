@@ -1,20 +1,20 @@
-import { createClient } from '@supabase/supabase-js';
+import { createServerClient } from '@/lib/supabase/server';
+import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createClient as createServerClient } from '@/utils/supabase/server'; // サーバーサイドの認証チェック用
 
-export async function GET(request: NextRequest) {
+// Auth client for route handlers
+export async function GET(req: NextRequest) { // request を _request に変更して未使用であることを明示
   console.log('[API /api/admin/users] GETリクエスト受信');
   try {
     // --- 1. 認証と権限チェック ---
     console.log('[API /api/admin/users] 認証と権限チェック開始');
-    const cookieStore = cookies();
-    const supabaseAuth = createServerClient(cookieStore);
+    // cookieStore の宣言を削除
+    const supabaseAuth = await createServerClient();
     const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
 
     if (authError) {
       console.error('[API /api/admin/users] 認証エラー:', authError);
-      return NextResponse.json({ error: '認証エラー', details: authError.message }, { status: 500 });
+      return NextResponse.json({ error: '認証エラー' }, { status: 401 });
     }
     if (!user) {
       console.warn('[API /api/admin/users] ユーザー未認証');
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'サーバー設定エラー (サービスキー不正)' }, { status: 500 });
     }
 
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+    const supabaseAdmin = createAdminClient(supabaseUrl, serviceRoleKey);
     console.log('[API /api/admin/users] サービスロールクライアント初期化完了');
 
     // --- 3. ユーザーリスト取得 ---
@@ -97,4 +97,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-} 
+}

@@ -108,7 +108,7 @@ const pwaConfig = {
 };
 
 const nextConfig = {
-  reactStrictMode: true,
+  reactStrictMode: false,
   typescript: {
     // TypeScriptエラーを無視して本番ビルドを許可
     ignoreBuildErrors: true,

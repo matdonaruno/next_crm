@@ -1,3 +1,4 @@
+// src/app/direct-login/page.tsx
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -291,6 +292,7 @@ const DirectLoginPage = () => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="pl-10"
+                  autoComplete="current-password"
                   required
                 />
               </div>

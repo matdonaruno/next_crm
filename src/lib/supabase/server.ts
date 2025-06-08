@@ -1,38 +1,36 @@
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+// src/lib/supabase/server.ts
+import { createServerClient as _createServerClient } from '@supabase/ssr'
+import type { CookieOptions } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+import type { Database } from '@/types/supabase'
 
 /**
- * サーバーサイドでSupabaseクライアントを作成するユーティリティ関数
- * Next.js App Routerのサーバーコンポーネントやルートハンドラーで使用します
+ * Next-15 / @supabase/ssr 共通の「サーバーサイド-Supabase クライアント」生成関数。
+ * どこからでも `await createServerClient()` で呼び出せます。
  */
-export async function createServerSupabaseClient() {
-  const cookieStore = await cookies();
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseKey) {
-    console.error('Supabase環境変数が設定されていません');
-    throw new Error('Supabase環境変数が設定されていません');
-  }
-
-  console.log('Supabase設定:', {
-    url: supabaseUrl ? '設定あり' : '未設定',
-    key: supabaseKey ? '設定あり' : '未設定',
-    storageKey: 'sb-bsgvaomswzkywbiubtjg-auth-token'
-  });
+export const createServerClient = async () => {
+  const store = await cookies();
   
-  // クライアントの初期化
-  const supabase = createServerComponentClient({
-    cookies,
-  });
-  
-  console.log('Supabaseクライアントを初期化しました', {
-    storageKey: 'sb-bsgvaomswzkywbiubtjg-auth-token',
-    timeout: '8秒',
-    flowType: 'pkce',
-    storage: 'cookie-based'
-  });
-
-  return supabase;
-} 
+  return _createServerClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return store.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              store.set(name, value, options)
+            );
+          } catch {
+            // The `setAll` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing
+            // user sessions.
+          }
+        },
+      },
+    }
+  );
+}

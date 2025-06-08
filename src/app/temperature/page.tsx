@@ -1,13 +1,16 @@
-import { Suspense } from "react";
-import dynamic from "next/dynamic";
+"use client";
+// src/app/temperature/page.tsx
 
-// dynamic import のオプションから `suspense` を削除
-const TemperatureManagementClient = dynamic(() => import("./TemperatureManagementClient"));
+import dynamic from "next/dynamic";
+import { LoadingSpinner } from '@/components/common/LoadingSpinner';
+
+const TemperatureManagementClient = dynamic(
+  () => import("./TemperatureManagementClient"),
+  {
+    loading: () => <LoadingSpinner message="温度管理ページを読み込み中..." fullScreen />,
+  }
+);
 
 export default function TemperaturePage() {
-  return (
-    <Suspense fallback={<div>Loading Temperature Management...</div>}>
-      <TemperatureManagementClient />
-    </Suspense>
-  );
+  return <TemperatureManagementClient />;
 }

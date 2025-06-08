@@ -1,44 +1,64 @@
+// src/hooks/use-facility.ts
 import { useState, useEffect } from 'react';
-import supabase from '@/lib/supabaseClient';
+import { useSupabase } from '@/app/_providers/supabase-provider';
+import type { Database } from '@/types/supabase';
 
-interface Facility {
-  id: string;
-  name: string;
-  address?: string;
-  phone?: string;
-  // 必要に応じて他のフィールドを追加
-}
+type FacilityRow = Database['public']['Tables']['facilities']['Row'];
 
-export function useFacility() {
-  const [facility, setFacility] = useState<Facility | null>(null);
-  const [loading, setLoading] = useState(true);
+export function useFacilityName(facilityId?: string) {
+  const { supabase } = useSupabase();
+
+  const [name, setName] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
-    async function getFacility() {
+    let isMounted = true;
+
+    // facilityId が有効な文字列でない場合は処理をスキップ
+    if (typeof facilityId !== 'string' || facilityId.trim() === '') {
+      if (isMounted) {
+        setName('');
+        setLoading(false);
+      }
+      return;
+    }
+
+    async function getFacilityName() {
+      setLoading(true);
       try {
-        setLoading(true);
-        
-        // シンプルに施設一覧を取得
+        const id = facilityId as string; // after earlier guard, this is safe
+        // 型を明示的に指定してクエリを構築
         const { data, error } = await supabase
           .from('facilities')
-          .select('*')
-          .limit(1);
-          
+          .select('name')
+          .eq('id', id)
+          .maybeSingle();
+
         if (error) throw error;
         
-        // 最初の施設を使用
-        setFacility(data && data.length > 0 ? data[0] : null);
+        if (isMounted) {
+          // data が null の場合は空文字をセット
+          setName(data?.name ?? '');
+        }
       } catch (err) {
         console.error('施設情報の取得エラー:', err);
-        setError(err instanceof Error ? err : new Error(String(err)));
+        if (isMounted) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     }
 
-    getFacility();
-  }, []);
+    getFacilityName();
 
-  return { facility, loading, error };
-} 
+    return () => {
+      isMounted = false;
+    };
+  }, [supabase, facilityId]);
+
+  return { name, loading, error };
+}

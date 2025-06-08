@@ -1,55 +1,65 @@
-import { createClient } from '@/utils/supabase/server';
-import { cookies } from 'next/headers';
+// src/app/temperature/monthly-verification/page.tsx
+
 import { redirect } from 'next/navigation';
 import { MonthlyVerificationClient } from '@/components/temperature/monthly-verification-client';
+import { newSupabase } from '@/lib/supabaseRoute';
+
+export const dynamic = 'force-dynamic';
+
+type Query = {
+  department?: string;
+  departmentId?: string;
+  facilityId?: string;
+  yearMonth?: string; // YYYY-MM
+};
 
 export default async function MonthlyVerificationPage({
   searchParams,
 }: {
-  searchParams: { 
-    department?: string; 
-    departmentId?: string;
-    facilityId?: string;
-    yearMonth?: string; // YYYY-MM形式で年月を指定
-  };
+  searchParams: Query;
 }) {
-  const supabase = createClient(cookies());
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
+  // ───────────── 認証 ─────────────
+  const supabase = newSupabase();
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+  if (userErr || !user) {
     redirect('/login');
   }
 
-  // ユーザーの権限確認
-  const { data: profile, error: profileError } = await supabase
+  // ───────────── 管理権限チェック ─────────────
+  const { data: profileData, error: profErr } = await supabase
     .from('profiles')
     .select('role')
     .eq('id', user.id)
     .single();
-
-  if (profileError || !profile) {
-    console.error('プロフィール取得エラー:', profileError);
+  if (profErr || !profileData) {
     redirect('/login');
   }
 
-  // 管理者権限チェック（管理者のみアクセス可能）
-  const isAdmin = profile.role === 'admin' || profile.role === 'facility_admin' || profile.role === 'superuser';
+  // Supabase の user_role enum は "superuser" | "facility_admin" | "approver" | "regular_user"
+  const role = profileData.role;
+  const isAdmin = role === 'superuser' || role === 'facility_admin';
   if (!isAdmin) {
-    redirect('/temperature'); // 権限がない場合は温度管理画面にリダイレクト
+    redirect('/temperature');
   }
 
-  const departmentId = searchParams.departmentId || '';
-  const facilityId = searchParams.facilityId || '';
-  const departmentName = searchParams.department || '部署';
-  const yearMonth = searchParams.yearMonth || '';
+  // ───────────── パラメータ整理 ─────────────
+  const departmentId   = searchParams.departmentId ?? '';
+  const facilityId     = searchParams.facilityId   ?? '';
+  const departmentName = searchParams.department ?? '';
+  const yearMonth      = searchParams.yearMonth    ?? '';
 
   if (!departmentId || !facilityId) {
     redirect('/temperature');
   }
 
-  // 戻り先のURLを設定
-  const backHref = `/temperature?departmentId=${departmentId}&departmentName=${encodeURIComponent(departmentName)}`;
+  const backHref = `/temperature?department=${encodeURIComponent(
+    departmentName ?? ''
+  )}&departmentId=${departmentId ?? ''}`;
 
+  // ───────────── 画面 ─────────────
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-6xl mx-auto p-4">
@@ -65,4 +75,4 @@ export default async function MonthlyVerificationPage({
       </div>
     </div>
   );
-} 
+}

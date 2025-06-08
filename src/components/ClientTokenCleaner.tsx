@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from "react";
-import supabaseClient from "@/lib/supabaseClient";
+import supabaseClient from '@/lib/supabaseBrowser';
 import Cookies from 'js-cookie';
 import { usePathname, useRouter } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSession } from '@supabase/auth-helpers-react';
 
 // グローバル変数の型宣言を追加
 declare global {
@@ -20,16 +20,41 @@ if (typeof window !== 'undefined') {
 }
 
 export function ClientTokenCleaner() {
-  const pathname = usePathname();
+  const pathname = usePathname() || '';
   const router = useRouter();
-  const { user, loading } = useAuth();
-  const isLoginPage = pathname === '/login' || pathname === '/direct-login';
-  const isRegisterPage = pathname === '/register' || pathname?.startsWith('/register?') || false;
+  const session = useSession();
+  const user = session?.user;
+  const loading = session === undefined;
+  // リファクタリング: 配列で判定
+  const isLoginPage = ['/login', '/direct-login'].includes(pathname);
+  const isRegisterPage = pathname === '/register' || pathname.startsWith('/register?');
   const isRootPage = pathname === '/';
-  const isPublicPage = isLoginPage || isRootPage || isRegisterPage; // 公開ページ（認証不要）
+  // 会議議事録関連のパスを追加
+  const isMeetingMinutesPage = pathname === '/meeting-minutes' || 
+    pathname.startsWith('/meeting-minutes/') || 
+    pathname === '/meeting-minutes';
+  const isPublicPage = isLoginPage || isRootPage || isRegisterPage || isMeetingMinutesPage; // 公開ページ（認証不要）
   const redirectedRef = useRef(false);
   const lastPathRef = useRef(pathname);
   const [redirecting, setRedirecting] = useState(false);
+
+  // router.pushとnavigation完了後にリダイレクトフラグをリセット
+  useEffect(() => {
+    const handleRouteChangeComplete = () => {
+      console.log("ClientTokenCleaner: ルート変更完了でリダイレクトフラグをリセット");
+      redirectedRef.current = false;
+      setRedirecting(false);
+    };
+
+    // Next.jsルーターのイベントにリスナーを追加
+    // @ts-expect-error - Next.jsの型定義の問題を無視
+    router.events?.on?.('routeChangeComplete', handleRouteChangeComplete);
+    
+    return () => {
+      // @ts-expect-error - Next.jsの型定義の問題を無視
+      router.events?.off?.('routeChangeComplete', handleRouteChangeComplete);
+    };
+  }, [router]);
   
   // セッション管理の改善
   useEffect(() => {
@@ -88,7 +113,8 @@ export function ClientTokenCleaner() {
       }
       
       // 未ログインなら保護ページからログインページへリダイレクト（公開ページは除外）
-      if (!user && !isPublicPage && !redirectedRef.current) {
+      // 認証チェックが終わってから判定、未初期化(undefined)と区別するためにnull厳密チェック
+      if (!loading && user === null && !isPublicPage && !redirectedRef.current) {
         console.log("ClientTokenCleaner: 未ログインユーザーをログインページへリダイレクト");
         redirectedRef.current = true;
         setRedirecting(true);
@@ -102,10 +128,17 @@ export function ClientTokenCleaner() {
       
       // Supabase URLからプロジェクトIDを抽出
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-      const projectId = supabaseUrl.match(/https:\/\/(.*?)\.supabase\.co/)?.[1] || 'bsgvaomswzkywbiubtjg';
+      const projectId = supabaseUrl.match(/https:\/\/(.*?)\.supabase\.co/)?.[1];
+      
+      // プロジェクトIDが取得できない場合は処理をスキップ
+      if (!projectId) {
+        console.log("ClientTokenCleaner: プロジェクトIDが取得できないため処理をスキップします");
+        return;
+      }
+      
       const storageKey = `sb-${projectId}-auth-token`;
       
-      // 現在のセッションを確認
+      // 現在のセッションを確認（初回のみ実行、auth.onAuthStateChangeが変更を監視）
       const checkSession = async () => {
         try {
           const { data, error } = await supabaseClient.auth.getSession();
@@ -162,12 +195,12 @@ export function ClientTokenCleaner() {
         }
       };
       
-      // 初期化時にセッションを確認
+      // 初期化時にセッションを確認（初回のみ）
       checkSession();
     }
   }, [isLoginPage, isRootPage, isRegisterPage, isPublicPage, loading, user, router, redirecting, pathname]);
   
-  // パスが変わったらリダイレクトフラグをリセット
+  // パスが変わったらリダイレクトフラグをリセット（既存コードは維持、routeChangeCompleteでも保険的にリセット）
   useEffect(() => {
     if (pathname !== lastPathRef.current) {
       console.log("ClientTokenCleaner: パスが変更されたためリダイレクトフラグをリセット", {

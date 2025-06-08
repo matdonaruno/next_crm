@@ -214,4 +214,4 @@ export default function PrecisionManagementPage() {
       <PrecisionManagementContent />
     </Suspense>
   );
-} 
+}

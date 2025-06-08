@@ -1,242 +1,124 @@
+// src/app/api/precision-management/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
-import { cookies } from 'next/headers';
-import { PrecisionManagementRecord, PrecisionManagementRecordWithDetails } from '@/types/precision-management';
+import { createServerClient } from '@/lib/supabase/server';
+import type {
+  PrecisionManagementRecord,
+  PrecisionManagementRecordWithDetails,
+} from '@/types/precision-management';
 
-export async function GET(request: NextRequest) {
-  try {
-    console.log('API: precision_management - リクエスト開始');
-    const searchParams = request.nextUrl.searchParams;
-    const departmentId = searchParams.get('department_id');
-    const equipmentId = searchParams.get('equipment_id');
-    const startDate = searchParams.get('start_date');
-    const endDate = searchParams.get('end_date');
-    
-    console.log(`API: パラメータ - department_id=${departmentId}, start_date=${startDate}, end_date=${endDate}`);
+export async function GET(req: NextRequest) {
+  const sp = req.nextUrl.searchParams;
+  const supa = await createServerClient();
 
-    const cookieStore = cookies();
-    const supabase = await createClient(cookieStore);
-    
-    console.log('API: Supabaseクライアント作成完了');
+  /* ────────────── 基本クエリ ────────────── */
+  let q = supa
+    .from('precision_management_records')
+    .select('*')
+    .order('implementation_date', { ascending: false });
 
-    // テーブル構造を確認
-    try {
-      const { data: sampleData, error: sampleError } = await supabase
-        .from('precision_management_records')
-        .select('*')
-        .limit(1);
+  /* string | null → string へ絞り込み & number へ変換 */
+  const deptId = sp.get('department_id');
+  if (deptId) q = q.eq('department_id', deptId);
 
-      if (sampleError) {
-        console.error('API: precision_management_records テーブル構造確認エラー:', sampleError);
-      } else {
-        console.log('API: precision_management_records テーブル構造:', sampleData && sampleData.length > 0 ? Object.keys(sampleData[0]) : []);
-      }
-    } catch (e) {
-      console.error('API: テーブル構造確認中の予期せぬエラー:', e);
+  const equipIdStr = sp.get('equipment_id');
+  if (equipIdStr) {
+    const equipId = parseInt(equipIdStr, 10);
+    if (!Number.isNaN(equipId)) {
+      q = q.eq('pm_equipment_id', equipId as any);
     }
-
-    // まず基本クエリを作成（結合なし）
-    let query = supabase
-      .from('precision_management_records')
-      .select('*')
-      .order('implementation_date', { ascending: false });
-
-    // 検索条件の適用
-    if (departmentId) {
-      query = query.eq('department_id', departmentId);
-    }
-
-    if (equipmentId) {
-      query = query.eq('pm_equipment_id', equipmentId);
-    }
-
-    if (startDate) {
-      query = query.gte('implementation_date', startDate);
-    }
-
-    if (endDate) {
-      query = query.lte('implementation_date', endDate);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error('API: 記録データ取得エラー:', error);
-      return NextResponse.json({ 
-        error: error.message,
-        details: error.details,
-        code: error.code
-      }, { status: 500 });
-    }
-
-    console.log('API: 基本記録データ取得完了', data?.length || 0, '件');
-
-    // 空の配列の場合はそのまま返す
-    if (!data || data.length === 0) {
-      return NextResponse.json([]);
-    }
-
-    // 関連データを取得（部署情報）
-    const departmentIds = [...new Set(data.map(record => record.department_id))];
-    const { data: departments, error: deptError } = await supabase
-      .from('departments')
-      .select('id, name')
-      .in('id', departmentIds);
-    
-    if (deptError) {
-      console.error('API: 部署データ取得エラー:', deptError);
-    }
-    
-    // 関連データを取得（機器情報）
-    const equipmentIds = [...new Set(data.map(record => record.pm_equipment_id))];
-    const { data: equipments, error: equipError } = await supabase
-      .from('precision_management_equipments')
-      .select('pm_equipment_id, equipment_name')
-      .in('pm_equipment_id', equipmentIds);
-    
-    if (equipError) {
-      console.error('API: 機器データ取得エラー:', equipError);
-    }
-
-    // 関連データを取得（実施タイミング情報）
-    const timingIds = [...new Set(data.map(record => record.timing_id))];
-    const { data: timings, error: timingError } = await supabase
-      .from('implementation_timings')
-      .select('timing_id, timing_name')
-      .in('timing_id', timingIds);
-    
-    if (timingError) {
-      console.error('API: タイミングデータ取得エラー:', timingError);
-    }
-
-    // 部署、機器、タイミングの情報をマップに変換して検索しやすくする
-    const departmentMap: Record<string, string> = {};
-    (departments || []).forEach(dept => {
-      departmentMap[dept.id] = dept.name;
-    });
-    
-    const equipmentMap: Record<number, string> = {};
-    (equipments || []).forEach(equip => {
-      equipmentMap[equip.pm_equipment_id] = equip.equipment_name;
-    });
-    
-    const timingMap: Record<number, string> = {};
-    (timings || []).forEach(timing => {
-      timingMap[timing.timing_id] = timing.timing_name;
-    });
-
-    // レスポンス形式の整形（マップを使って関連データを取得）
-    const formattedData = data.map((record) => ({
-      record_id: record.record_id,
-      department_id: record.department_id,
-      pm_equipment_id: record.pm_equipment_id,
-      implementation_date: record.implementation_date,
-      implementation_time: record.implementation_time || '00:00',
-      implementer: record.implementer,
-      timing_id: record.timing_id,
-      implementation_count: record.implementation_count,
-      error_count: record.error_count,
-      shift_trend: record.shift_trend,
-      remarks: record.remarks,
-      created_at: record.created_at,
-      updated_at: record.updated_at,
-      department_name: departmentMap[record.department_id] || '不明な部署',
-      equipment_name: equipmentMap[record.pm_equipment_id] || '不明な機器',
-      timing_name: timingMap[record.timing_id] || '不明なタイミング'
-    })) as PrecisionManagementRecordWithDetails[];
-
-    console.log('API: フォーマット済みデータの件数:', formattedData.length);
-    return NextResponse.json(formattedData);
-  } catch (error) {
-    console.error('API: 予期せぬエラー:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : '不明なエラーが発生しました' }, 
-      { status: 500 }
-    );
   }
+
+  const start = sp.get('start_date');
+  if (start) q = q.gte('implementation_date', start);
+
+  const end = sp.get('end_date');
+  if (end) q = q.lte('implementation_date', end);
+
+  const { data, error } = await q;
+  if (error)
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!data?.length) return NextResponse.json([]);
+
+  /* ────────────── 関連マスタを一括取得 ────────────── */
+  const [departments, equipments, timings] = await Promise.all([
+    supa
+      .from('departments')
+      .select('id,name')
+      .in('id', [...new Set(data.map(r => r.department_id))] as string[]),
+    supa
+      .from('precision_management_equipments')
+      .select('pm_equipment_id,equipment_name')
+      .in(
+        'pm_equipment_id',
+        [...new Set(data.map(r => r.pm_equipment_id))] as number[],
+      ),
+    supa
+      .from('implementation_timings')
+      .select('timing_id,timing_name')
+      .in('timing_id', [...new Set(data.map(r => r.timing_id))] as number[]),
+  ]);
+
+  const deptMap = Object.fromEntries(departments.data?.map(d => [d.id, d.name]) || []);
+  const equipMap = Object.fromEntries(equipments.data?.map(e => [e.pm_equipment_id, e.equipment_name]) || []);
+  const timingMap = Object.fromEntries(timings.data?.map(t => [t.timing_id, t.timing_name]) || []);
+
+  /* ────────────── 整形（created_at / updated_at は undef 可） ────────────── */
+  const formatted: PrecisionManagementRecordWithDetails[] = data.map(r => ({
+    ...r,
+    implementation_time: r.implementation_time || '00:00',
+    created_at: r.created_at ?? undefined,
+    updated_at: r.updated_at ?? undefined,
+    department_name: deptMap[r.department_id] || '不明な部署',
+    equipment_name: equipMap[r.pm_equipment_id] || '不明な機器',
+    timing_name: timingMap[r.timing_id] || '不明なタイミング',
+  }));
+
+  return NextResponse.json(formatted);
 }
 
-// 時間を15分単位に丸める関数
-const roundTimeToNearest15Minutes = (timeStr: string): string => {
-  const [hours, minutes] = timeStr.split(':').map(Number);
-  const roundedMinutes = Math.round(minutes / 15) * 15;
-  
-  // 分が60になった場合は時間を1つ進める
-  const adjustedHours = roundedMinutes === 60 ? hours + 1 : hours;
-  const adjustedMinutes = roundedMinutes === 60 ? 0 : roundedMinutes;
-  
-  return `${String(adjustedHours).padStart(2, '0')}:${String(adjustedMinutes).padStart(2, '0')}`;
+/* 15 分丸めユーティリティ */
+const roundTo15 = (hhmm: string) => {
+  const [h, m] = hhmm.split(':').map(Number);
+  const rm = Math.round(m / 15) * 15;
+  return `${String(rm === 60 ? h + 1 : h).padStart(2, '0')}:${String(
+    rm === 60 ? 0 : rm,
+  ).padStart(2, '0')}`;
 };
 
-export async function POST(request: NextRequest) {
-  try {
-    // 認証チェック
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.error('API: 認証ヘッダーがありません');
-      return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
-    }
+export async function POST(req: NextRequest) {
+  const supa = await createServerClient();
+  const { data: { user } } = await supa.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // ユーザー認証情報の取得
-    const cookieStore = cookies();
-    const supabase = await createClient(cookieStore);
-    
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError || !session) {
-      console.error('API: セッション取得エラー:', sessionError);
-      return NextResponse.json({ error: '認証セッションが無効です' }, { status: 401 });
-    }
+  const body = await req.json();
+  const rounded = roundTo15(
+    body.implementation_time ||
+      body.implementation_date.split('T')[1]?.slice(0, 5) ||
+      '00:00',
+  );
 
-    console.log('API: POST リクエスト処理 - 認証済みユーザー:', session.user.email);
-    
-    const body = await request.json();
-    const timeToUse = body.implementation_time || body.implementation_date.split('T')[1]?.substring(0, 5) || '00:00';
-    // 時間を15分単位に丸める
-    const roundedTime = roundTimeToNearest15Minutes(timeToUse);
+  const newRec: Omit<
+    PrecisionManagementRecord,
+    'record_id' | 'created_at' | 'updated_at'
+  > = {
+    department_id: body.department_id,
+    pm_equipment_id: body.pm_equipment_id,
+    implementation_date: body.implementation_date.split('T')[0],
+    implementation_time: rounded,
+    implementer: body.implementer,
+    timing_id: body.timing_id,
+    implementation_count: body.implementation_count,
+    error_count: body.error_count,
+    shift_trend: body.shift_trend,
+    remarks: body.remarks,
+  };
 
-    const newRecord: Omit<PrecisionManagementRecord, 'record_id' | 'created_at' | 'updated_at'> = {
-      department_id: body.department_id,
-      pm_equipment_id: body.pm_equipment_id,
-      implementation_date: body.implementation_date.split('T')[0], // 日付部分のみ抽出
-      implementation_time: roundedTime, // 丸めた時間を使用
-      implementer: body.implementer,
-      timing_id: body.timing_id,
-      implementation_count: body.implementation_count,
-      error_count: body.error_count,
-      shift_trend: body.shift_trend,
-      remarks: body.remarks
-    };
+  const { data, error } = await supa
+    .from('precision_management_records')
+    .insert(newRec)
+    .select();
 
-    // 実装時間をログに記録して確認
-    console.log('API: 受け取った日付:', body.implementation_date);
-    console.log('API: 保存する日付:', newRecord.implementation_date);
-    console.log('API: 保存する時間:', newRecord.implementation_time);
-
-    // バリデーション
-    if (!newRecord.department_id || !newRecord.pm_equipment_id || !newRecord.implementer || !newRecord.timing_id) {
-      return NextResponse.json({ error: '必須フィールドが不足しています' }, { status: 400 });
-    }
-
-    const { data, error } = await supabase
-      .from('precision_management_records')
-      .insert(newRecord)
-      .select();
-
-    if (error) {
-      console.error('API: 記録追加エラー:', error);
-      return NextResponse.json({ 
-        error: error.message, 
-        details: error.details,
-        code: error.code
-      }, { status: 500 });
-    }
-
-    console.log('API: 精度管理記録が追加されました:', data?.[0]?.record_id);
-    return NextResponse.json(data[0], { status: 201 });
-  } catch (error) {
-    console.error('API: リクエスト処理エラー:', error);
-    return NextResponse.json({ 
-      error: error instanceof Error ? error.message : 'リクエスト処理エラー' 
-    }, { status: 400 });
-  }
-} 
+  if (error)
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(data[0], { status: 201 });
+}

@@ -116,9 +116,10 @@ export default function BarcodeScanner({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const initializingRef = useRef<boolean>(false); // 初期化状態を追跡
   
   // 状態管理
-  const [isInitializing, setIsInitializing] = useState(true);
+  const [isInitializing, setIsInitializing] = useState(false); // falseに変更
   const [error, setError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
@@ -129,6 +130,9 @@ export default function BarcodeScanner({
   const [detectedBarcode, setDetectedBarcode] = useState<{value: string, format: string} | null>(null);
   const [showCamera, setShowCamera] = useState(true);
   const [barcodeMode, setBarcodeMode] = useState<'cross' | 'horizontal' | 'vertical' | 'auto'>('horizontal');
+  
+  // スクロール防止用のref
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // バーコードモードに基づいてバーコードタイプを設定
   useEffect(() => {
@@ -161,6 +165,39 @@ export default function BarcodeScanner({
         return BARCODE_FORMATS;
     }
   }, [barcodeType]);
+
+  /**
+   * スクロールによる再レンダリング防止
+   */
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleScroll = (e: Event) => {
+      // スクロール中は不要な再初期化を防ぐだけ
+      if (isScanning && streamRef.current?.active) {
+        console.log('📹 スクロール中だがカメラは動作継続');
+        // preventDefaultは削除 - バーコード読み取りを妨げる可能性
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      // タッチムーブ中も軽度の制御のみ
+      if (isScanning && streamRef.current?.active) {
+        console.log('📱 タッチ中だがカメラは動作継続');
+        // stopPropagationは削除 - バーコード読み取りを妨げる可能性
+      }
+    };
+
+    // パッシブリスナーを使用してパフォーマンスを向上
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    container.addEventListener('touchmove', handleTouchMove, { passive: true });
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      container.removeEventListener('touchmove', handleTouchMove);
+    };
+  }, [isScanning]);
 
   /**
    * Barcode Detector APIのサポートチェック
@@ -200,9 +237,31 @@ export default function BarcodeScanner({
   const initCamera = useCallback(async () => {
     if (!videoRef.current) return;
     
+    // 既にスキャン中かつアクティブなストリームがある場合のみスキップ
+    if (isScanning && streamRef.current?.active) {
+      console.log('🔄 カメラは既に動作中です');
+      return;
+    }
+    
+    console.log('🎬 カメラ初期化開始:', {
+      isScanning,
+      hasStream: !!streamRef.current,
+      streamActive: streamRef.current?.active,
+      initializingRef: initializingRef.current
+    });
+    
     try {
+      initializingRef.current = true; // ref状態を設定
       setIsInitializing(true);
       setError(null);
+      
+      // タイムアウト保護を追加（10秒で強制的に初期化状態を解除）
+      const initTimeout = setTimeout(() => {
+        console.log('⚠️ カメラ初期化タイムアウト');
+        initializingRef.current = false;
+        setIsInitializing(false);
+        setError('カメラの初期化がタイムアウトしました。再試行してください。');
+      }, 10000);
       
       // 既存のストリームがあれば停止
       if (streamRef.current) {
@@ -243,10 +302,23 @@ export default function BarcodeScanner({
       videoRef.current.srcObject = stream;
       streamRef.current = stream;
       
-      // ビデオが読み込まれたら解像度をログに出力
-      videoRef.current.onloadedmetadata = () => {
+      // ビデオが読み込まれたら解像度をログに出力（開発環境のみ）
+      videoRef.current.onloadedmetadata = async () => {
         if (videoRef.current) {
-          console.log(`カメラ解像度: ${videoRef.current.videoWidth}x${videoRef.current.videoHeight}`);
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`📹 カメラ解像度: ${videoRef.current.videoWidth}x${videoRef.current.videoHeight}`);
+          }
+          
+          try {
+            // onloadedmetadataでも再生を確実に開始
+            await videoRef.current.play();
+            console.log('📹 onloadedmetadata内で再生開始成功');
+          } catch (err) {
+            console.log('📹 onloadedmetadata内での再生はスキップ（既に再生中の可能性）');
+          }
+          
+          clearTimeout(initTimeout); // タイムアウトをクリア
+          initializingRef.current = false; // ref状態をリセット
           setIsInitializing(false);
           setIsScanning(true);
         }
@@ -256,6 +328,8 @@ export default function BarcodeScanner({
       videoRef.current.onerror = (e) => {
         console.error('ビデオ要素エラー:', e);
         const errorMsg = 'ビデオの初期化中にエラーが発生しました';
+        clearTimeout(initTimeout); // タイムアウトをクリア
+        initializingRef.current = false; // ref状態をリセット
         setError(errorMsg);
         setIsInitializing(false);
         if (onError) onError(errorMsg);
@@ -265,7 +339,14 @@ export default function BarcodeScanner({
         // 再生前に少し待機
         await new Promise(resolve => setTimeout(resolve, 100));
         await videoRef.current.play();
-        console.log('カメラ初期化成功');
+        if (process.env.NODE_ENV === 'development') {
+          console.log('✅ カメラ初期化成功');
+        }
+        
+        // 正常に再生開始した場合はref状態をリセット
+        clearTimeout(initTimeout); // タイムアウトをクリア
+        initializingRef.current = false;
+        console.log('📹 カメラ初期化完了（直接再生成功）');
       } catch (playErr: any) {
         console.error('ビデオ再生エラー:', playErr);
         
@@ -299,11 +380,15 @@ export default function BarcodeScanner({
                 // 再生を試行
                 await videoRef.current.play();
                 console.log('再試行成功');
+                clearTimeout(initTimeout); // タイムアウトをクリア
+                initializingRef.current = false; // ref状態をリセット
                 setIsInitializing(false);
                 setIsScanning(true);
               } catch (retryErr) {
                 console.error('再試行エラー:', retryErr);
                 const errorMsg = 'カメラの起動に失敗しました。ページを再読み込みしてください。';
+                clearTimeout(initTimeout); // タイムアウトをクリア
+                initializingRef.current = false; // ref状態をリセット
                 setError(errorMsg);
                 setIsInitializing(false);
                 if (onError) onError('カメラの起動に失敗しました');
@@ -323,6 +408,8 @@ export default function BarcodeScanner({
     } catch (err) {
       console.error('カメラ初期化エラー:', err);
       const errorMsg = 'カメラの起動に失敗しました。カメラへのアクセス許可を確認してください。';
+      clearTimeout(initTimeout); // タイムアウトをクリア
+      initializingRef.current = false; // ref状態をリセット
       setError(errorMsg);
       setIsInitializing(false);
       if (onError) onError('カメラの起動に失敗しました');
@@ -333,7 +420,7 @@ export default function BarcodeScanner({
         streamRef.current = null;
       }
     }
-  }, [onError]);
+  }, []); // onError依存関係を削除し、必要な場合のみ呼び出し
 
   /**
    * カメラの停止
@@ -348,6 +435,7 @@ export default function BarcodeScanner({
       videoRef.current.srcObject = null;
     }
     
+    initializingRef.current = false; // ref状態をリセット
     setIsScanning(false);
   }, []);
 
@@ -358,13 +446,32 @@ export default function BarcodeScanner({
     let mounted = true;
     let initTimeoutId: NodeJS.Timeout | null = null;
     
-    if (isCameraMode) {
-      // コンポーネントがマウントされている場合のみ初期化
+    // カメラモードで初期化が必要な場合のみ実行
+    if (isCameraMode && showCamera && !isScanning && !isInitializing) {
+      console.log('🎬 カメラ初期化条件チェック:', {
+        isCameraMode,
+        isScanning,
+        isInitializing,
+        showCamera,
+        initializingRef: initializingRef.current,
+        streamExists: !!streamRef.current,
+        streamActive: streamRef.current?.active
+      });
+      
+      // カメラ初期化を遅延実行
       const startCamera = async () => {
-        // 少し遅延を入れてからカメラを初期化
         initTimeoutId = setTimeout(() => {
-          if (mounted) {
+          // マウント状態と基本条件のみチェック
+          if (mounted && isCameraMode && showCamera && !isScanning) {
+            console.log('🎬 カメラ初期化を開始');
             initCamera();
+          } else {
+            console.log('🔄 カメラ初期化条件が変更されたためスキップ', {
+              mounted,
+              isCameraMode,
+              showCamera,
+              isScanning
+            });
           }
         }, CAMERA_INIT_DELAY);
       };
@@ -379,11 +486,8 @@ export default function BarcodeScanner({
       if (initTimeoutId) {
         clearTimeout(initTimeoutId);
       }
-      
-      // カメラを確実に停止
-      stopCamera();
     };
-  }, [initCamera, stopCamera, isCameraMode]);
+  }, [isCameraMode, showCamera, isScanning, isInitializing]); // 必要な依存関係を復元
 
   /**
    * バーコードスキャンのループ処理
@@ -393,6 +497,7 @@ export default function BarcodeScanner({
     
     let animationFrameId: number | null = null;
     let lastDetectionTime = 0;
+    let lastLogTime = 0; // ログ出力の頻度制限用
     let isActive = true; // このエフェクトがアクティブかどうかを追跡
     
     /**
@@ -425,7 +530,14 @@ export default function BarcodeScanner({
           
           // バーコード検出（選択されたフォーマットのみ）
           const selectedFormats = getSelectedFormats();
-          console.log(`スキャン中のバーコードタイプ: ${barcodeType}、フォーマット:`, selectedFormats);
+          
+          // デバッグログの頻度制限（1秒に1回まで）
+          const now = Date.now();
+          if (process.env.NODE_ENV === 'development' && (!lastLogTime || now - lastLogTime > 1000)) {
+            console.log(`スキャン中のバーコードタイプ: ${barcodeType}、フォーマット:`, selectedFormats);
+            lastLogTime = now;
+          }
+          
           const barcodeDetector = new window.BarcodeDetector({ formats: selectedFormats });
           const barcodes = await barcodeDetector.detect(canvas);
           
@@ -435,7 +547,13 @@ export default function BarcodeScanner({
           if (barcodes.length > 0) {
             // 最初に検出されたバーコードを使用
             const barcode = barcodes[0];
-            console.log('バーコード検出:', barcode);
+            
+            // 検出成功時のログ（常に出力）
+            console.log('🎯 バーコード検出成功:', {
+              value: barcode.rawValue,
+              format: barcode.format,
+              length: barcode.rawValue.length
+            });
             
             // 検出結果を保存
             setDetectedBarcode({
@@ -454,7 +572,10 @@ export default function BarcodeScanner({
             return;
           }
         } catch (err) {
-          console.error('バーコードスキャンエラー:', err);
+          // エラーログは開発環境でのみ出力（本番環境での不要なログを削減）
+          if (process.env.NODE_ENV === 'development') {
+            console.error('バーコードスキャンエラー:', err);
+          }
         }
       }
       
@@ -476,7 +597,7 @@ export default function BarcodeScanner({
         animationFrameId = null;
       }
     };
-  }, [isBarcodeAPISupported, isScanning, onBarcodeDetected, stopCamera, barcodeType, getSelectedFormats, showCamera]);
+  }, [isBarcodeAPISupported, isScanning, onBarcodeDetected, stopCamera, barcodeType, getSelectedFormats, showCamera]); // 必要な依存関係を復元
 
   /**
    * 画像ファイルからバーコードをスキャン
@@ -683,7 +804,7 @@ export default function BarcodeScanner({
   };
 
   return (
-    <Card className={styles.scannerContainer}>
+    <Card className={styles.scannerContainer} ref={containerRef}>
       <CardContent className={styles.scannerContent}>
         {error && (
           <Alert variant="destructive" className={styles.alert}>
