@@ -141,27 +141,42 @@ export async function POST(request: Request) {
         );
       }
 
-      const { data: newDev } = await supabase
-        .from('sensor_devices')
-        .insert({
-          device_id: effectiveDeviceId,
-          device_name:
-            device_name || `新規センサー ${effectiveDeviceId.slice(0, 8)}`,
-          mac_address,
-          ip_address: ip !== 'unknown' ? ip : null,
-          facility_id: defFac.id,
-          is_active: true,
-          last_seen: getJstTimestamp(),
-          location: '未設定',
-          auth_token: token || null, // 新規デバイスのトークンを保存
-        })
-        .select('id,device_name,facility_id,department_id,location,auth_token')
-        .single();
+      try {
+        const { data: newDev, error: insertError } = await supabase
+          .from('sensor_devices')
+          .insert({
+            device_id: effectiveDeviceId,
+            device_name:
+              device_name || `新規センサー ${effectiveDeviceId.slice(0, 8)}`,
+            mac_address,
+            ip_address: ip !== 'unknown' ? ip : null,
+            facility_id: defFac.id,
+            is_active: true,
+            last_seen: getJstTimestamp(),
+            location: '未設定',
+            auth_token: token || null, // 新規デバイスのトークンを保存
+          })
+          .select('id,device_name,facility_id,department_id,location,auth_token')
+          .single();
 
-      device = newDev;
-      isNewDevice = true;
-      
-      console.log('[sensor] New device registered:', effectiveDeviceId);
+        if (insertError) {
+          console.error('[sensor] New device registration failed:', insertError);
+          throw new Error(`Device registration failed: ${insertError.message}`);
+        }
+
+        if (!newDev) {
+          console.error('[sensor] New device registration returned null');
+          throw new Error('Device registration returned null');
+        }
+
+        device = newDev;
+        isNewDevice = true;
+        
+        console.log('[sensor] New device registered successfully:', effectiveDeviceId, 'ID:', newDev.id);
+      } catch (regError) {
+        console.error('[sensor] Error during device registration:', regError);
+        throw regError;
+      }
     }
 
     /* ───────────────────────── 6) 生ログ保存 */
@@ -244,7 +259,16 @@ export async function POST(request: Request) {
     }
 
     /* ───────────────────────── 9) 部署未割当なら終了 */
+    console.log('[sensor] Device check:', {
+      device_exists: !!device,
+      device_id: device?.id,
+      facility_id: device?.facility_id,
+      department_id: device?.department_id,
+      is_new_device: isNewDevice
+    });
+    
     if (!device || !device.department_id || !device.facility_id) {
+      console.log('[sensor] Device assignment incomplete, returning log_only');
       return NextResponse.json(
         {
           status: 'log_only',
@@ -260,6 +284,8 @@ export async function POST(request: Request) {
         { status: 200 },
       );
     }
+    
+    console.log('[sensor] Device fully assigned, proceeding with temperature record processing');
 
     /* ───────────────────────── 10) last_seen 更新 */
     const update: Partial<SensorDeviceRow> = { 
@@ -293,12 +319,21 @@ export async function POST(request: Request) {
     }
 
     /* ───────────────────────── 11) マッピング → 温度記録 */
-    const { data: mappings } = await supabase
+    console.log('[sensor] Looking for sensor mappings for device:', device.id);
+    
+    const { data: mappings, error: mappingError } = await supabase
       .from('sensor_mappings')
       .select('sensor_type,temperature_item_id,offset_value')
       .eq('sensor_device_id', device.id);
 
+    if (mappingError) {
+      console.error('[sensor] Mapping query error:', mappingError);
+    }
+    
+    console.log('[sensor] Found mappings:', mappings?.length || 0, mappings);
+
     if (!mappings?.length) {
+      console.log('[sensor] No mappings found, returning log_only_no_mapping');
       return NextResponse.json(
         {
           status: 'log_only_no_mapping',
@@ -313,12 +348,21 @@ export async function POST(request: Request) {
 
     // 診断モードの場合は温度記録をスキップ
     if (!diagnostic) {
-      await processTemperatureRecord(
-        supabase,
-        device as NonNullable<typeof device>, // facility_id/department_id 非 null を保証
-        sensorData,
-        mappings,
-      );
+      console.log('[sensor] Processing temperature record with', mappings.length, 'mappings');
+      try {
+        await processTemperatureRecord(
+          supabase,
+          device as NonNullable<typeof device>, // facility_id/department_id 非 null を保証
+          sensorData,
+          mappings,
+        );
+        console.log('[sensor] Temperature record processing completed successfully');
+      } catch (tempRecordError) {
+        console.error('[sensor] Temperature record processing failed:', tempRecordError);
+        throw tempRecordError;
+      }
+    } else {
+      console.log('[sensor] Skipping temperature record processing (diagnostic mode)');
     }
 
     return NextResponse.json(
@@ -378,7 +422,7 @@ async function processTemperatureRecord(
   let recordId = header?.id as string | undefined;
 
   if (!recordId) {
-    const { data: inserted } = await supabase
+    const { data: inserted, error: insertError } = await supabase
       .from('temperature_records')
       .insert({
         facility_id: device.facility_id,
@@ -391,7 +435,15 @@ async function processTemperatureRecord(
       .select('id')
       .single();
 
-    if (!inserted) throw new Error('temperature_records insert failed');
+    if (insertError) {
+      console.error('[sensor] temperature_records insert error:', insertError);
+      throw new Error(`temperature_records insert failed: ${insertError.message}`);
+    }
+    
+    if (!inserted) {
+      console.error('[sensor] temperature_records insert returned null');
+      throw new Error('temperature_records insert failed: returned null');
+    }
     recordId = inserted.id;
   }
 
