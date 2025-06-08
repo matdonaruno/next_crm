@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
     // サービスロールキーでクライアント作成
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      process.env.SUPABASE_SERVICE_ROLE!,
       {
         auth: {
           autoRefreshToken: false,
@@ -77,6 +77,7 @@ export async function POST(req: NextRequest) {
         // とりあえず成功として扱い、後でテスト
         const error = null;
           
+        if (error) {
           // RPC失敗の場合、別の方法で実行を試行
           if (migration.name.includes('カラム追加')) {
             // テストクエリでカラムの存在を確認
@@ -105,7 +106,7 @@ export async function POST(req: NextRequest) {
             results.push({
               migration: migration.name,
               status: 'failed',
-              error: error.message
+              error: error?.message || 'Unknown error'
             });
           }
         } else {
