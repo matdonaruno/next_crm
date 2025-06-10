@@ -10,6 +10,16 @@ type SensorDeviceRow =
 type MappingRow =
   Database['public']['Tables']['sensor_mappings']['Row'];
 
+// IPv6アドレスの正規化関数
+function normalizeIpAddress(ip: string | null): string | null {
+  if (!ip || ip === 'unknown') return null;
+  // ::ffff: prefixを削除してIPv4アドレスのみを返す
+  if (ip.startsWith('::ffff:')) {
+    return ip.substring(7);
+  }
+  return ip;
+}
+
 export async function POST(request: Request) {
   const start = Date.now();
 
@@ -109,13 +119,16 @@ export async function POST(request: Request) {
 
     // IPアドレスでの検索（デバイスIDがない場合のフォールバック）
     if (!device && ip !== 'unknown') {
-      const { data: deviceByIp } = await supabase
-        .from('sensor_devices')
-        .select('id,device_name,facility_id,department_id,location,auth_token')
-        .eq('ip_address', ip)
-        .single();
-      
-      if (deviceByIp) device = deviceByIp;
+      const normalizedSearchIp = normalizeIpAddress(ip);
+      if (normalizedSearchIp) {
+        const { data: deviceByIp } = await supabase
+          .from('sensor_devices')
+          .select('id,device_name,facility_id,department_id,location,auth_token')
+          .eq('ip_address', normalizedSearchIp)
+          .single();
+        
+        if (deviceByIp) device = deviceByIp;
+      }
     }
 
     let isNewDevice = false;
@@ -149,7 +162,7 @@ export async function POST(request: Request) {
             device_name:
               device_name || `新規センサー ${effectiveDeviceId.slice(0, 8)}`,
             mac_address,
-            ip_address: ip !== 'unknown' ? ip : null,
+            ip_address: normalizeIpAddress(ip),
             facility_id: defFac.id,
             is_active: true,
             last_seen: getJstTimestamp(),
@@ -183,14 +196,20 @@ export async function POST(request: Request) {
     console.log('[sensor] Saving sensor log...');
     
     try {
+      // センサーの実測時刻を取得（Unix timestampからISO文字列へ変換）
+      const measurementTimestamp = timestamp 
+        ? new Date(timestamp * 1000).toISOString()
+        : getJstTimestamp();
+      
       const { data: sensorLog, error: logError } = await supabase
         .from('sensor_logs')
         .insert({
           sensor_device_id: device?.id ?? null,
           raw_data: sensorData,
-          ip_address: ip,
+          ip_address: normalizeIpAddress(ip) || ip,
           device_id: effectiveDeviceId,
-          recorded_at: getJstTimestamp(),
+          recorded_at: getJstTimestamp(), // サーバー受信時刻
+          measurement_timestamp: measurementTimestamp, // センサーの実測時刻
           is_processed: Boolean(device?.department_id),
         })
         .select('id')
@@ -258,7 +277,44 @@ export async function POST(request: Request) {
       }
     }
 
-    /* ───────────────────────── 9) 部署未割当なら終了 */
+    /* ───────────────────────── 9) last_seen 更新（常に実行） */
+    if (device) {
+      // センサーのタイムスタンプがある場合はそれを使用、なければ現在時刻
+      const sensorTimestamp = timestamp ? new Date(timestamp * 1000).toISOString() : getJstTimestamp();
+      
+      const update: Partial<SensorDeviceRow> = { 
+        last_seen: sensorTimestamp, // センサーの実測時刻を使用
+        last_connection: getJstTimestamp(), // 最終接続時刻は現在時刻
+      };
+      const normalizedIp = normalizeIpAddress(ip);
+      if (normalizedIp) update.ip_address = normalizedIp;
+      
+      // トークンが送信されていて、まだ保存されていない場合は保存
+      if (token && !device.auth_token) {
+        update.auth_token = token;
+      }
+      
+      console.log('[sensor] Updating device with:', update);
+      
+      try {
+        const { error: updateError } = await supabase
+          .from('sensor_devices')
+          .update(update)
+          .eq('id', device.id);
+        
+        if (updateError) {
+          console.error('[sensor] Device update error:', updateError);
+          throw new Error(`Device update failed: ${updateError.message}`);
+        }
+        
+        console.log('[sensor] Device updated successfully');
+      } catch (updateErr) {
+        console.error('[sensor] Error updating device:', updateErr);
+        throw updateErr;
+      }
+    }
+
+    /* ───────────────────────── 10) 部署未割当なら終了 */
     console.log('[sensor] Device check:', {
       device_exists: !!device,
       device_id: device?.id,
@@ -287,43 +343,17 @@ export async function POST(request: Request) {
     
     console.log('[sensor] Device fully assigned, proceeding with temperature record processing');
 
-    /* ───────────────────────── 10) last_seen 更新 */
-    const update: Partial<SensorDeviceRow> = { 
-      last_seen: getJstTimestamp(),
-      last_connection: getJstTimestamp(), // 最終接続時刻も更新
-    };
-    if (ip !== 'unknown') update.ip_address = ip;
-    
-    // トークンが送信されていて、まだ保存されていない場合は保存
-    if (token && !device.auth_token) {
-      update.auth_token = token;
-    }
-    
-    console.log('[sensor] Updating device with:', update);
-    
-    try {
-      const { error: updateError } = await supabase
-        .from('sensor_devices')
-        .update(update)
-        .eq('id', device.id);
-      
-      if (updateError) {
-        console.error('[sensor] Device update error:', updateError);
-        throw new Error(`Device update failed: ${updateError.message}`);
-      }
-      
-      console.log('[sensor] Device updated successfully');
-    } catch (updateErr) {
-      console.error('[sensor] Error updating device:', updateErr);
-      throw updateErr;
-    }
-
     /* ───────────────────────── 11) マッピング → 温度記録 */
     console.log('[sensor] Looking for sensor mappings for device:', device.id);
+    console.log('[sensor] Device details:', { 
+      device_name: device.device_name, 
+      facility_id: device.facility_id, 
+      department_id: device.department_id 
+    });
     
     const { data: mappings, error: mappingError } = await supabase
       .from('sensor_mappings')
-      .select('sensor_type,temperature_item_id,offset_value')
+      .select('id,sensor_device_id,sensor_type,temperature_item_id,offset_value')
       .eq('sensor_device_id', device.id);
 
     if (mappingError) {
@@ -331,6 +361,12 @@ export async function POST(request: Request) {
     }
     
     console.log('[sensor] Found mappings:', mappings?.length || 0, mappings);
+    
+    // 全マッピングも確認
+    const { data: allMappings } = await supabase
+      .from('sensor_mappings')
+      .select('id,sensor_device_id,sensor_type');
+    console.log('[sensor] All mappings in database:', allMappings?.length || 0, allMappings);
 
     if (!mappings?.length) {
       console.log('[sensor] No mappings found, returning log_only_no_mapping');
@@ -379,10 +415,12 @@ export async function POST(request: Request) {
   } catch (e) {
     console.error('[sensor] API error:', e);
     console.error('[sensor] Error stack:', e instanceof Error ? e.stack : 'No stack trace');
+    
     return NextResponse.json({ 
       status: 'error',
       message: e instanceof Error ? e.message : 'Unknown error',
-      error_type: e instanceof Error ? e.constructor.name : 'Unknown'
+      error_type: e instanceof Error ? e.constructor.name : 'Unknown',
+      details: e instanceof Error ? e.stack : 'No details available'
     }, { status: 500 });
   }
 }
