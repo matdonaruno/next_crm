@@ -40,10 +40,10 @@ export async function GET(req: NextRequest) { // request を _request に変更�
     // --- 2. 環境変数とサービスロールクライアント初期化 ---
     console.log('[API /api/admin/users] 環境変数チェックとクライアント初期化開始');
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE;
 
     if (!supabaseUrl || !serviceRoleKey) {
-      console.error('[API /api/admin/users] 環境変数が設定されていません。NEXT_PUBLIC_SUPABASE_URL または SUPABASE_SERVICE_ROLE_KEY が必要です。');
+      console.error('[API /api/admin/users] 環境変数が設定されていません。NEXT_PUBLIC_SUPABASE_URL または SUPABASE_SERVICE_ROLE が必要です。');
       return NextResponse.json({ error: 'サーバー設定エラー (環境変数)' }, { status: 500 });
     }
     console.log('[API /api/admin/users] 環境変数OK (URLとキーの存在確認のみ)');

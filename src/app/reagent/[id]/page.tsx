@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useForm } from "react-hook-form";
 import { Home } from "lucide-react";
-import { getJstTimestamp } from "@/lib/utils";
+import { getJstTimestamp, formatJSTDateTime } from "@/lib/utils";
 
 type ReagentItemFormValues = {
   name: string;
@@ -307,7 +307,7 @@ export default function ReagentDetailPage() {
           </p>
           <p>
             <strong>登録日:</strong>{" "}
-            {reagent.registrationDate ? new Date(reagent.registrationDate).toLocaleString() : ""}
+            {reagent.registrationDate ? formatJSTDateTime(reagent.registrationDate) : ""}
           </p>
           <p>
             <strong>登録者:</strong> {reagent.registeredBy}
@@ -315,13 +315,13 @@ export default function ReagentDetailPage() {
           <p>
             <strong>使用開始日:</strong>{" "}
             {reagent.used_at
-              ? new Date(reagent.used_at).toLocaleString()
+              ? formatJSTDateTime(reagent.used_at)
               : "未開始"}
           </p>
           <p>
             <strong>使用終了日:</strong>{" "}
             {reagent.ended_at
-              ? new Date(reagent.ended_at).toLocaleString()
+              ? formatJSTDateTime(reagent.ended_at)
               : "未終了"}
           </p>
           {reagent.used && !reagent.ended_at && (
@@ -383,7 +383,7 @@ export default function ReagentDetailPage() {
                   <p>
                     <strong>使用開始日:</strong>{" "}
                     {item.usagestartdate
-                      ? new Date(item.usagestartdate).toLocaleString()
+                      ? formatJSTDateTime(item.usagestartdate)
                       : "未設定"}
                   </p>
                   <p>
@@ -391,7 +391,7 @@ export default function ReagentDetailPage() {
                   </p>
                   <p>
                     <strong>登録日時:</strong>{" "}
-                    {item.created_at ? new Date(item.created_at).toLocaleString() : ""}
+                    {item.created_at ? formatJSTDateTime(item.created_at) : ""}
                   </p>
                 </li>
               ))}

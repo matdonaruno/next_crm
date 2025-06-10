@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { User, Home, LogOut, ArrowLeft, Users } from 'lucide-react';
+import { User, Home, LogOut, ArrowLeft, Users, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { ReactNode, useEffect, useState } from 'react';
@@ -32,6 +32,7 @@ export function AppHeader({ showBackButton = true, title, onBackClick, icon, cla
   const router = useRouter();
   const { user, profile, loading, signOut } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuperuser, setIsSuperuser] = useState(false);
 
   // ユーザーの権限を確認
   useEffect(() => {
@@ -40,11 +41,17 @@ export function AppHeader({ showBackButton = true, title, onBackClick, icon, cla
       console.log('プロフィールのキー:', Object.keys(profile));
       console.log('ユーザーロール:', profile.role);
       
-      if (profile.role === 'superuser' || profile.role === 'facility_admin') {
+      if (profile.role === 'superuser') {
         setIsAdmin(true);
-        console.log('管理者権限を確認しました。isAdmin:', true);
+        setIsSuperuser(true);
+        console.log('スーパーユーザー権限を確認しました。');
+      } else if (profile.role === 'facility_admin') {
+        setIsAdmin(true);
+        setIsSuperuser(false);
+        console.log('施設管理者権限を確認しました。');
       } else {
         setIsAdmin(false);
+        setIsSuperuser(false);
         console.log('一般ユーザー権限を確認しました。isAdmin:', false, 'ロール値:', profile.role);
       }
     } else {
@@ -99,6 +106,22 @@ export function AppHeader({ showBackButton = true, title, onBackClick, icon, cla
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+          
+          {/* Admin管理画面アイコン（スーパーユーザーのみ表示） */}
+          {isSuperuser && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={() => router.push("/admin/sensors")}>
+                    <Settings className="h-6 w-6" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className={`${tooltipContentClass} tooltip-content`} style={tooltipStyle}>
+                  <p style={tooltipTextStyle}>管理画面</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           
           {/* ユーザー管理アイコン（管理者のみ表示） */}
           {isAdmin && (

@@ -1,6 +1,7 @@
 // src/app/api/slack-notification/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
+import { formatJSTDateTime } from '@/lib/utils';
 
 // Ensure Slack Webhook URL is set
 const webhookUrl = process.env.SLACK_WEBHOOK_URL;
@@ -82,9 +83,7 @@ export async function POST(req: NextRequest) {
         elements: [
           {
             type: 'mrkdwn',
-            text: `*タイプ:* ${type} | *時刻:* ${new Date().toLocaleString(
-              'ja-JP',
-            )}`,
+            text: `*タイプ:* ${type} | *時刻:* ${formatJSTDateTime(new Date())}`,
           },
           {
             type: 'mrkdwn',

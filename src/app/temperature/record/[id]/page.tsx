@@ -18,6 +18,7 @@ import { motion } from 'framer-motion';
 import supabase from '@/lib/supabaseBrowser';
 import { useSimpleAuth } from '@/hooks/useSimpleAuth';
 import { useSessionCheck } from '@/hooks/useSessionCheck';
+import { formatJSTDate } from '@/lib/utils';
 
 /* ───────── 型定義 ───────── */
 interface TemperatureRecordDetail {
@@ -296,7 +297,7 @@ export default function TemperatureRecordDetailPage() {
           <div className="bg-white p-6 rounded-lg border">
             <h2 className="text-lg font-medium mb-4">
               記録日:{' '}
-              {new Date(record.record_date).toLocaleDateString('ja-JP')}{' '}
+              {formatJSTDate(record.record_date)}{' '}
               {record.is_auto_recorded && (
                 <span className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded">
                   自動

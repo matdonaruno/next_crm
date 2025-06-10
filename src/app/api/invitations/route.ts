@@ -20,7 +20,7 @@ async function sendInvitationEmail(email: string, token: string, inviterName: st
     
     // Supabaseのservice_roleを使用してクライアントを作成
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseServiceRole = process.env.SUPABASE_SERVICE_ROLE;
     
     debugLog('環境変数チェック', { 
       hasSupabaseUrl: !!supabaseUrl,

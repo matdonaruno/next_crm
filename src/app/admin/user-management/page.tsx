@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Users } from 'lucide-react';
 import { User } from '@supabase/supabase-js';
+import AdminRoute from '@/components/auth/AdminRoute';
 
 import supabase from '@/lib/supabaseBrowser';
 import { Database } from '@/types/supabase';
@@ -24,6 +25,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import LoadingUI from '@/components/LoadingUI';
 import { useToast } from '@/hooks/use-toast';
+import { formatJSTDateTime } from '@/lib/utils';
 
 /* ------------------------------------------------------------------ */
 /* 1. 定数                                                             */
@@ -345,7 +347,8 @@ export default function UserManagement() {
 
   /* ---------- 実際の UI ---------- */
   return (
-    <div className="min-h-screen bg-gradient-to-b from-pink-50 to-purple-50">
+    <AdminRoute requiredRole="admin">
+      <div className="min-h-screen bg-gradient-to-b from-pink-50 to-purple-50">
       <AppHeader
         showBackButton
         title="ユーザー管理"
@@ -465,7 +468,7 @@ export default function UserManagement() {
                               </td>
                               <td className="p-2">{inv.facilities?.name}</td>
                               <td className="p-2">
-                                {new Date(inv.expires_at).toLocaleString('ja-JP')}
+                                {formatJSTDateTime(inv.expires_at)}
                               </td>
                               <td className="p-2">
                                 {inv.is_used ? (
@@ -604,5 +607,6 @@ export default function UserManagement() {
         </Tabs>
       </div>
     </div>
+    </AdminRoute>
   );
 }

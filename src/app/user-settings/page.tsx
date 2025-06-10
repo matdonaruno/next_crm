@@ -263,7 +263,7 @@ export default function UserSettings() {
 
   const handleBackToDashboard = () => {
     // プロファイル情報が完全に設定されている場合のみダッシュボードに戻れる
-    if (profile?.fullname && profile?.facility_id) {
+    if (authProfile?.fullname && authProfile?.facility_id) {
       router.push("/depart");
     } else {
       setError("プロファイル情報を完全に設定してからダッシュボードに戻ってください");
@@ -301,7 +301,7 @@ export default function UserSettings() {
                   <UserRound className="h-4 w-4 mr-2 text-pink-400 mt-0.5" />
                   <div>
                     <p className="text-gray-500">氏名</p>
-                    <p className="font-medium">{profile?.fullname || "未設定"}</p>
+                    <p className="font-medium">{authProfile?.fullname || "未設定"}</p>
                   </div>
                 </div>
 
@@ -449,7 +449,7 @@ export default function UserSettings() {
                 <Button 
                   variant="outline"
                   onClick={handleBackToDashboard}
-                  disabled={!profile?.fullname || !profile?.facility_id}
+                  disabled={!authProfile?.fullname || !authProfile?.facility_id}
                   className="w-full border-pink-200 text-pink-700 hover:bg-pink-50 rounded-xl"
                 >
                   ダッシュボードへ戻る

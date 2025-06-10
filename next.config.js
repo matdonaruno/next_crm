@@ -109,6 +109,8 @@ const pwaConfig = {
 
 const nextConfig = {
   reactStrictMode: false,
+  // App Routerではi18n設定は使用できないため削除
+  // 日本語設定は各コンポーネントで個別に指定
   typescript: {
     // TypeScriptエラーを無視して本番ビルドを許可
     ignoreBuildErrors: true,

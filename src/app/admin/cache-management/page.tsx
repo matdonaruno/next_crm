@@ -5,6 +5,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { clearFacilityCache } from '@/lib/facilityCache';
 import { clearUserProfileCache } from '@/lib/userCache';
+import AdminRoute from '@/components/auth/AdminRoute';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertCircle, RefreshCw, CheckCircle2, ArrowLeft, Trash2 } from 'lucide-react';
@@ -95,7 +96,8 @@ export default function CacheManagementPage() {
   };
 
   return (
-    <div className="container mx-auto py-10">
+    <AdminRoute requiredRole="superuser">
+      <div className="container mx-auto py-10">
       <div className="mb-6 flex items-center">
         <Button 
           variant="ghost" 
@@ -251,5 +253,6 @@ export default function CacheManagementPage() {
         </div>
       </div>
     </div>
+    </AdminRoute>
   );
 }

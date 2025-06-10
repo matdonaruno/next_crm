@@ -461,8 +461,8 @@ export async function POST(req: NextRequest) {
 
             console.log('[transcribe] 要約API呼び出し詳細', {
               url: summarizeUrl,
-              hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-              serviceKeyLength: process.env.SUPABASE_SERVICE_ROLE_KEY?.length,
+              hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE,
+              serviceKeyLength: process.env.SUPABASE_SERVICE_ROLE?.length,
               meetingMinuteId
             });
 
@@ -471,7 +471,7 @@ export async function POST(req: NextRequest) {
               headers: {
                 'Content-Type': 'application/json',
                 // summarize エンドポイントはサービスロール鍵で認証
-                Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+                Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE}`,
               },
               body: JSON.stringify({ meetingMinuteId }),
             });

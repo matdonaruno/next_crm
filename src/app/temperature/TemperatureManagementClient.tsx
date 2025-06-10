@@ -21,6 +21,7 @@ import { useSessionCheck } from "@/hooks/useSessionCheck";
 import { AppHeader } from "@/components/ui/app-header";
 import { VerificationStatus } from "@/components/temperature/verification-status";
 import { IncidentList } from "@/components/temperature/incident-log/incident-list";
+import { formatJSTDateTime, formatJSTDate } from "@/lib/utils";
 
 /* ─── Supabase Row 型 ───────────────────────────────── */
 type TemperatureItem =
@@ -50,8 +51,7 @@ interface DeviceBatteryInfo {
 
 /* ---------- util ---------- */
 const formatDateForDisplay = (s: string) => {
-  const d = new Date(s);
-  return `${d.getUTCFullYear()}/${String(d.getUTCMonth()+1).padStart(2,"0")}/${String(d.getUTCDate()).padStart(2,"0")} ${String(d.getUTCHours()).padStart(2,"0")}:${String(d.getUTCMinutes()).padStart(2,"0")}`;
+  return formatJSTDateTime(s);
 };
 const getBatteryLevel = (v: number | null): BatteryLevel => {
   if (v === null) return BatteryLevel.UNKNOWN;
@@ -163,8 +163,10 @@ export default function TemperatureManagementClient() {
         /* --- カレンダーハイライト --- */
         const set = new Set<string>();
         (recs ?? []).forEach(r=>{
-          const d = new Date(r.created_at ?? r.record_date);
-          set.add(`${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`);
+          const dateStr = r.created_at ?? r.record_date;
+          const formattedDate = formatJSTDate(dateStr).replace(/\//g, '-').replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$1-$2-$3');
+          const [year, month, day] = formattedDate.split('-');
+          set.add(`${year}-${parseInt(month)}-${parseInt(day)}`);
         });
         setDatesWithData(set);
       }finally{ setLoading(false); }
@@ -818,23 +820,10 @@ export default function TemperatureManagementClient() {
                               )}
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600 text-center">
-                              {device.lastUpdated ? (
-                                (() => {
-                                  // より堅牢な方法でUTCのまま表示
-                                  const recordedAt = new Date(device.lastUpdated);
-                                  // UTCのままの日時を取得
-                                  const year = recordedAt.getUTCFullYear();
-                                  const month = String(recordedAt.getUTCMonth() + 1).padStart(2, '0');
-                                  const day = String(recordedAt.getUTCDate()).padStart(2, '0');
-                                  const hours = String(recordedAt.getUTCHours()).padStart(2, '0');
-                                  const minutes = String(recordedAt.getUTCMinutes()).padStart(2, '0');
-                                  
-                                  // yyyy/MM/dd HH:mm形式で返す（UTCのまま、秒を切り捨て）
-                                  return `${year}/${month}/${day} ${hours}:${minutes}`;
-                                })()
-                              ) : (
+                              {device.lastUpdated ? 
+                                formatJSTDateTime(device.lastUpdated) : 
                                 '未取得'
-                              )}
+                              }
                             </td>
                           </tr>
                         ))}

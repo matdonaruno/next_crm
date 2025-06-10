@@ -53,3 +53,86 @@ export function formatDateForDisplay(dateString: string): string {
     return dateString; // フォールバック
   }
 }
+
+/**
+ * 日時文字列をJST（日本標準時）で統一的にフォーマットする
+ * @param dateString ISO形式の日時文字列またはタイムスタンプ
+ * @param options フォーマットオプション
+ * @returns JST表示の日時文字列
+ */
+export function formatJSTDateTime(
+  dateString: string | number | Date | null | undefined,
+  options: {
+    showSeconds?: boolean;
+    dateOnly?: boolean;
+    timeOnly?: boolean;
+    format?: 'slash' | 'japanese' | 'iso';
+  } = {}
+): string {
+  if (!dateString) return '';
+  
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '';
+    
+    const {
+      showSeconds = false,
+      dateOnly = false,
+      timeOnly = false,
+      format = 'slash'
+    } = options;
+    
+    // JSTで表示（Asia/Tokyoタイムゾーンを明示的に指定）
+    const jstOptions: Intl.DateTimeFormatOptions = {
+      timeZone: 'Asia/Tokyo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: timeOnly || (!dateOnly) ? '2-digit' : undefined,
+      minute: timeOnly || (!dateOnly) ? '2-digit' : undefined,
+      second: (timeOnly || (!dateOnly)) && showSeconds ? '2-digit' : undefined,
+      hour12: false
+    };
+    
+    if (format === 'japanese') {
+      return date.toLocaleString('ja-JP', {
+        ...jstOptions,
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    }
+    
+    if (format === 'iso') {
+      return date.toLocaleString('sv-SE', jstOptions); // ISO-like format
+    }
+    
+    // デフォルト: slash format (yyyy/MM/dd HH:mm:ss)
+    return date.toLocaleString('ja-JP', jstOptions);
+    
+  } catch (e) {
+    console.error('JST Date formatting error:', e);
+    return String(dateString);
+  }
+}
+
+/**
+ * 短縮版：日時をJSTで表示 (yyyy/MM/dd HH:mm)
+ */
+export function formatJSTDateTimeShort(dateString: string | number | Date | null | undefined): string {
+  return formatJSTDateTime(dateString);
+}
+
+/**
+ * 短縮版：日付のみをJSTで表示 (yyyy/MM/dd)
+ */
+export function formatJSTDate(dateString: string | number | Date | null | undefined): string {
+  return formatJSTDateTime(dateString, { dateOnly: true });
+}
+
+/**
+ * 短縮版：時刻のみをJSTで表示 (HH:mm)
+ */
+export function formatJSTTime(dateString: string | number | Date | null | undefined): string {
+  return formatJSTDateTime(dateString, { timeOnly: true });
+}

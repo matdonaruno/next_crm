@@ -11,7 +11,7 @@ import {
 // 環境変数からSlack Webhook URLを取得
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE;
 
 interface Department {
   id: string;

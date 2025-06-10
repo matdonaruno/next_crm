@@ -9,11 +9,16 @@
     "start:standalone": "node startup.js",
     "lint": "next lint",
     "typecheck": "tsc --pretty --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "generate-pwa-icons": "node scripts/convert-svg-to-png.js",
     "setup-pwa": "bash scripts/generate-pwa-assets.sh",
     "vercel-build": "next build",
     "check-missing-records": "ts-node scripts/check_missing_records.ts",
-    "create-minutesaudio-bucket": "node create_minutesaudio_bucket.js"
+    "create-minutesaudio-bucket": "node create_minutesaudio_bucket.js",
+    "migrate:sensor-logs": "node sensor_migration_complete.js",
+    "migrate:sensor-logs:verify": "node sensor_migration_complete.js --verify"
   },
   "dependencies": {
     "@breezystack/lamejs": "1.2.7",
@@ -82,7 +87,11 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@testing-library/jest-dom": "^6.4.2",
+    "@testing-library/react": "^14.2.1",
+    "@testing-library/user-event": "^14.5.2",
     "@types/axios": "0.9.36",
+    "@types/jest": "^29.5.12",
     "@types/node": "^20.17.23",
     "@types/node-fetch": "2.6.12",
     "@types/papaparse": "^5.3.15",
@@ -90,6 +99,8 @@
     "@types/react-dom": "^18.2.18",
     "eslint": "^9",
     "eslint-config-next": "15.1.7",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
     "ts-node": "10.9.2",

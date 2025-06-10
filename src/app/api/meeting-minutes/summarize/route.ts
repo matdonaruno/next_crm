@@ -22,10 +22,10 @@ export async function POST(request: NextRequest) {
       hasAuthHeader: !!authHeader,
       authHeaderValue: authHeader,
       tokenLength: token.length,
-      hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-      serviceKeyLength: process.env.SUPABASE_SERVICE_ROLE_KEY?.length,
+      hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE,
+      serviceKeyLength: process.env.SUPABASE_SERVICE_ROLE?.length,
       tokenPrefix: token.substring(0, 10),
-      serviceKeyPrefix: process.env.SUPABASE_SERVICE_ROLE_KEY?.substring(0, 10)
+      serviceKeyPrefix: process.env.SUPABASE_SERVICE_ROLE?.substring(0, 10)
     });
 
     if (!token) {
@@ -34,12 +34,12 @@ export async function POST(request: NextRequest) {
     }
 
     // サービスロールキーかユーザートークンかを判定
-    const isServiceRole = token === process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const isServiceRole = token === process.env.SUPABASE_SERVICE_ROLE;
     console.log('[summarize] 認証タイプ判定', { isServiceRole });
     
     const supabase = createClient<Database>(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      isServiceRole ? process.env.SUPABASE_SERVICE_ROLE_KEY! : process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      isServiceRole ? process.env.SUPABASE_SERVICE_ROLE! : process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       isServiceRole ? {} : { global: { headers: { Authorization: `Bearer ${token}` } } }
     );
 

@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 言語設定
+
+**重要**: このプロジェクトでは**日本語**でコミュニケーションを行ってください。
+- すべての会話は日本語で行う
+- コメントやドキュメントも日本語で記述する
+- エラーメッセージや説明も日本語で提供する
+
 ## Essential Commands
 
 ### Development

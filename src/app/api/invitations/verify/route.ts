@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
   /* 2) service_role クライアント */
   const admin = createSupabaseClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    process.env.SUPABASE_SERVICE_ROLE!,
   );
 
   /* 3) 同施設+同メールの既存ユーザー */

@@ -23,6 +23,7 @@ import type { Session, User } from '@supabase/supabase-js';
 import { useUserProfile } from '@/hooks/use-user-profile';
 import { useFacilityName } from '@/hooks/use-facility';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
+import { formatJSTDateTime } from '@/lib/utils';
 
 // --- 型定義 ---
 interface Notification {
@@ -181,7 +182,7 @@ export default function TaskPickClient() {
                     <li key={n.id} className="text-sm text-yellow-700 mb-1">
                       {n.message}
                       <span className="text-xs text-muted-foreground ml-2">
-                        {n.timestamp.toLocaleString()}
+                        {formatJSTDateTime(n.timestamp)}
                       </span>
                     </li>
                   ))}

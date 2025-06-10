@@ -4,16 +4,11 @@
 import { format, addMonths } from 'date-fns';
 import { ja } from 'date-fns/locale';
 import holidays from '@holiday-jp/holiday_jp';
+import { formatJSTDateTime } from '@/lib/utils';
 
 export const formatDateTime = (timestamp: string | null): string => {
   if (!timestamp) return '未実施';
-  return new Date(timestamp).toLocaleString('ja-JP', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatJSTDateTime(timestamp);
 };
 
 export const frequencyToJapanese = (frequency: string): string => {

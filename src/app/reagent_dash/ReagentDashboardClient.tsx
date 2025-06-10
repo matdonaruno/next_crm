@@ -23,7 +23,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import Papa from 'papaparse';
 import { AppHeader } from "@/components/ui/app-header";
 import { motion } from "framer-motion";
-import { getJstTimestamp } from "@/lib/utils";
+import { getJstTimestamp, formatJSTDateTime } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LoadingSpinner, CompactLoadingSpinner } from '@/components/common/LoadingSpinner';
@@ -68,13 +68,7 @@ interface ReagentMaster {
 
 const formatDateTime = (timestamp: string | null) => {
   if (!timestamp) return "";
-  return new Date(timestamp).toLocaleString("ja-JP", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatJSTDateTime(timestamp);
 };
 
 export default function ReagentDashboardClient() {
@@ -657,7 +651,7 @@ export default function ReagentDashboardClient() {
                   <li key={`notification-${notification.id}`} className="text-sm text-foreground mb-1">
                     {notification.message}
                     <span className="text-xs text-muted-foreground ml-2">
-                      {notification.timestamp.toLocaleString()}
+                      {formatJSTDateTime(notification.timestamp)}
                     </span>
                   </li>
                 ))}
@@ -1033,7 +1027,7 @@ export default function ReagentDashboardClient() {
                 全 {filteredReagents.length} 件の試薬データ
               </span>
               <div className="text-sm">
-                <span>最終更新: {new Date().toLocaleString()}</span>
+                <span>最終更新: {formatJSTDateTime(new Date())}</span>
               </div>
             </div>
           )}

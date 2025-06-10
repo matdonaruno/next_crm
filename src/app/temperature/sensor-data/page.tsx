@@ -28,6 +28,7 @@ import {
 import type { ChartOptions } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { ja } from 'date-fns/locale';
+import { formatJSTDateTime } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useSimpleAuth } from '@/hooks/useSimpleAuth';
 import { useSessionCheck } from '@/hooks/useSessionCheck';
@@ -52,8 +53,10 @@ interface SensorLog {
     ahtHum: number;
     bmpPres: number;
     batteryVolt: number;
+    timestamp?: number; // センサーの実測時刻（Unix timestamp）
   };
   recorded_at: string;
+  measurement_timestamp: string | null; // センサーの実測時刻（ISO文字列）
 }
 
 interface SensorDevice {
@@ -171,7 +174,7 @@ function SensorDataContent() {
         const to = `${endDate}T23:59:59`;
         const { data: logs } = await supabase
           .from('sensor_logs')
-          .select('id, raw_data, recorded_at')
+          .select('id, raw_data, recorded_at, measurement_timestamp')
           .eq('sensor_device_id', sensorDevice.id)
           .gte('recorded_at', from)
           .lte('recorded_at', to)
@@ -182,12 +185,14 @@ function SensorDataContent() {
           return {
             id: r.id,
             recorded_at: r.recorded_at ?? '',
+            measurement_timestamp: (r as any).measurement_timestamp ?? null,
             raw_data: {
               ahtTemp: raw?.ahtTemp ?? 0,
               bmpTemp: raw?.bmpTemp ?? 0,
               ahtHum: raw?.ahtHum ?? 0,
               bmpPres: raw?.bmpPres ?? 0,
               batteryVolt: raw?.batteryVolt ?? 0,
+              timestamp: raw?.timestamp, // センサーの実測時刻（Unix timestamp）
             },
           };
         });
@@ -253,11 +258,17 @@ function SensorDataContent() {
 
   const downloadCSV = () => {
     if (!sensorLogs.length) return;
-    let csv = '日時,AHT20温度,BMP280温度,AHT20湿度,BMP280気圧,バッテリー電圧\n';
+    let csv = '測定時刻,受信時刻,AHT20温度,BMP280温度,AHT20湿度,BMP280気圧,バッテリー電圧\n';
     sensorLogs.forEach((r) => {
-      const dt = new Date(r.recorded_at).toLocaleString();
+      // measurement_timestampを優先し、ない場合はraw_data.timestampを使用
+      const measurementTime = r.measurement_timestamp 
+        ? formatJSTDateTime(r.measurement_timestamp)
+        : r.raw_data.timestamp 
+          ? formatJSTDateTime(new Date(r.raw_data.timestamp * 1000).toISOString())
+          : '未記録';
+      const receivedTime = formatJSTDateTime(r.recorded_at);
       const { ahtTemp, bmpTemp, ahtHum, bmpPres, batteryVolt } = r.raw_data;
-      csv += `${dt},${ahtTemp},${bmpTemp},${ahtHum},${bmpPres},${batteryVolt}\n`;
+      csv += `${measurementTime},${receivedTime},${ahtTemp},${bmpTemp},${ahtHum},${bmpPres},${batteryVolt}\n`;
     });
     const uri = encodeURI('data:text/csv;charset=utf-8,' + csv);
     const link = document.createElement('a');
@@ -389,7 +400,8 @@ function SensorDataContent() {
           <table className="min-w-full">
             <thead>
               <tr className="bg-gray-50">
-                <th className="px-4 py-2">日時</th>
+                <th className="px-4 py-2">測定時刻</th>
+                <th className="px-4 py-2">受信時刻</th>
                 <th className="px-4 py-2">AHT20温度</th>
                 <th className="px-4 py-2">BMP280温度</th>
                 <th className="px-4 py-2">AHT20湿度</th>
@@ -401,7 +413,15 @@ function SensorDataContent() {
               {sensorLogs.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-100">
                   <td className="px-4 py-2 text-sm">
-                    {new Date(r.recorded_at).toLocaleString()}
+                    {r.measurement_timestamp ? 
+                      <span className="text-gray-800">{formatJSTDateTime(r.measurement_timestamp)}</span> :
+                      r.raw_data.timestamp ? 
+                        <span className="text-gray-800">{formatJSTDateTime(new Date(r.raw_data.timestamp * 1000).toISOString())}</span> :
+                        <span className="text-gray-400">未記録</span>
+                    }
+                  </td>
+                  <td className="px-4 py-2 text-sm">
+                    <span className="text-gray-600">{formatJSTDateTime(r.recorded_at)}</span>
                   </td>
                   <td className="px-4 py-2 text-sm">{r.raw_data.ahtTemp.toFixed(1)}</td>
                   <td className="px-4 py-2 text-sm">{r.raw_data.bmpTemp.toFixed(1)}</td>

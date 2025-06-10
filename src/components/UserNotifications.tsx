@@ -200,7 +200,7 @@ export default function UserNotifications() {
           </TooltipContent>
         </Tooltip>
 
-        <PopoverContent align="end" className="w-80 p-0 max-h-96 overflow-auto">
+        <PopoverContent align="end" className="w-80 p-0 max-h-96 overflow-auto z-[99999]">
           <div className="p-3 border-b flex justify-between items-center">
             <h3 className="font-medium">通知</h3>
             {unreadCount > 0 && (

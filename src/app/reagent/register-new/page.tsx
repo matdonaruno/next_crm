@@ -30,7 +30,7 @@ import { AppHeader } from '@/components/ui/app-header';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import supabase from '@/lib/supabaseBrowser';
-import { getJstTimestamp } from '@/lib/utils';
+import { getJstTimestamp, formatJSTTime } from '@/lib/utils';
 import type { Database } from '@/types/supabase';
 
 /* ------------------------------------------------------------------ */
@@ -111,7 +111,7 @@ function ReagentRegistrationContent() {
     (msg: string) =>
       setDebugLogs((prev) => [
         ...prev,
-        `${new Date().toLocaleTimeString()}: ${msg}`,
+        `${formatJSTTime(new Date())}: ${msg}`,
       ]),
     []
   );

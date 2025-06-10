@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 
 // 環境変数から取得するか、直接設定してください（実際の環境に合わせて）
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''; // 管理者権限が必要です
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE || ''; // 管理者権限が必要です
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
